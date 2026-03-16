@@ -13,18 +13,30 @@ load_dotenv(os.path.join(BASE_DIR, '.env'))
 SECRET_KEY = os.environ.get('SECRET_KEY')
 
 # Application definition
-INSTALLED_APPS = [
+DJANGO_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+]
+
+EXTERNAL_APPS = [
     'corsheaders',
     'allauth',
     'allauth.account',
-    'users.apps.UsersConfig',
+    'mptt',
 ]
+
+LOCAL_APPS = [
+    'users.apps.UsersConfig',
+    'accounting',
+    'banking',
+    'categorization',
+]
+
+INSTALLED_APPS = DJANGO_APPS + EXTERNAL_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
