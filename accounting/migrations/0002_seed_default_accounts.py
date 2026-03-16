@@ -1,9 +1,11 @@
 from django.db import migrations
 
-def create_default_accounts(apps, schema_editor):
-    Account = apps.get_model('accounting', 'Account')
-    AccountType = apps.get_model('accounting', 'AccountType')
+# FIX: Import the actual model so MPTT logic executes, rather than the historical model.
+from accounting.models import Account
 
+def create_default_accounts(apps, schema_editor):
+    # We do not use apps.get_model('accounting', 'Account') here to preserve MPTT functionality.
+    
     # Create root nodes
     assets = Account.objects.create(name='Assets', account_type='ASSET', parent=None)
     liabilities = Account.objects.create(name='Liabilities', account_type='LIABILITY', parent=None)
@@ -33,6 +35,8 @@ def create_default_accounts(apps, schema_editor):
     recreation_education = Account.objects.create(name='Recreation & Education', account_type='EXPENSE', parent=expenses)
     Account.objects.create(name='Streaming Services', account_type='EXPENSE', parent=recreation_education)
 
+    # FIX: Ensure the left/right mathematical tree structure is perfectly balanced.
+    Account.objects.rebuild()
 
 class Migration(migrations.Migration):
 
