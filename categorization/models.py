@@ -3,8 +3,18 @@ from users.models import Family
 from accounting.models import Account
 
 class GlobalMerchant(models.Model):
-    canonical_name = models.CharField(max_length=255)
-    default_account = models.ForeignKey(Account, on_delete=models.PROTECT, related_name='global_merchants')
+    """
+    A shared canonical representation of a merchant (e.g., 'Super C', 'Costco').
+    """
+    canonical_name = models.CharField(max_length=255, unique=True)
+    default_statcan_account = models.ForeignKey(
+        Account, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='global_merchants',
+        help_text="Points to the global StatCan template account."
+    )
 
     def __str__(self):
         return self.canonical_name

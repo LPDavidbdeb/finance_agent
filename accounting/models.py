@@ -1,15 +1,17 @@
 from django.db import models
+from django.core.exceptions import ValidationError
 from mptt.models import MPTTModel, TreeForeignKey
 from users.models import Family
 
-class AccountType(models.TextChoices):
-    ASSET = 'ASSET', 'Asset'
-    LIABILITY = 'LIABILITY', 'Liability'
-    EQUITY = 'EQUITY', 'Equity'
-    REVENUE = 'REVENUE', 'Revenue'
-    EXPENSE = 'EXPENSE', 'Expense'
 
 class Account(MPTTModel):
+    class AccountType(models.TextChoices):
+        ASSET = 'ASSET', 'Asset'
+        LIABILITY = 'LIABILITY', 'Liability'
+        EQUITY = 'EQUITY', 'Equity'
+        REVENUE = 'REVENUE', 'Revenue'
+        EXPENSE = 'EXPENSE', 'Expense'
+
     name = models.CharField(max_length=255)
     account_type = models.CharField(
         max_length=20,
@@ -29,6 +31,14 @@ class Account(MPTTModel):
         blank=True,
         related_name='accounts',
         help_text="If null, this is a system-wide standard account."
+    )
+    global_reference = TreeForeignKey(
+        'self', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='cloned_accounts', 
+        help_text="Link to the global StatCan master template"
     )
 
     class MPTTMeta:

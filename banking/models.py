@@ -8,14 +8,15 @@ class FinancialInstitution(models.Model):
     def __str__(self):
         return self.name
 
-class ProductType(models.TextChoices):
-    CHECKING = 'CHECKING', 'Checking'
-    SAVINGS = 'SAVINGS', 'Savings'
-    CREDIT_CARD = 'CREDIT_CARD', 'Credit Card'
-    LOAN = 'LOAN', 'Loan'
-    INVESTMENT = 'INVESTMENT', 'Investment'
 
 class FinancialProduct(models.Model):
+    class ProductType(models.TextChoices):
+        CHECKING = 'CHECKING', 'Checking'
+        SAVINGS = 'SAVINGS', 'Savings'
+        CREDIT_CARD = 'CREDIT_CARD', 'Credit Card'
+        LOAN = 'LOAN', 'Loan'
+        INVESTMENT = 'INVESTMENT', 'Investment'
+
     institution = models.ForeignKey(FinancialInstitution, on_delete=models.CASCADE, related_name='products')
     family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='financial_products')
     account = models.OneToOneField(Account, on_delete=models.PROTECT, related_name='financial_product')
