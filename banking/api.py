@@ -55,12 +55,19 @@ def delete_institution(request, institution_id: int):
 def list_products(request, owner_id: Optional[int] = None):
     """Returns financial products, optionally filtered by owner."""
     user = request.auth
-    queryset = FinancialProduct.objects.filter(family=user.family)
+    queryset = FinancialProduct.objects.filter(family=user.family).select_related('institution', 'account', 'account__parent')
     
     if owner_id:
         queryset = queryset.filter(owner_id=owner_id)
         
     return queryset
+
+@router.get("/products/{product_id}", response=FinancialProductOut)
+def get_product(request, product_id: int):
+    """Returns a specific financial product."""
+    user = request.auth
+    product = get_object_or_404(FinancialProduct.objects.select_related('institution', 'account', 'account__parent'), id=product_id, family=user.family)
+    return product
 
 @router.post("/products", response=FinancialProductOut)
 def create_product(request, payload: FinancialProductIn):

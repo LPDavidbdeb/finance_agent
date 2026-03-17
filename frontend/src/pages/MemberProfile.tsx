@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { fetchFamilyMember, fetchMemberProducts } from '../api/client';
@@ -164,7 +164,11 @@ export const MemberProfile: React.FC = () => {
                                     {product.product_type}
                                   </span>
                                 </td>
-                                <td className="p-4 align-middle">{product.account_name}</td>
+                                <td className="p-4 align-middle">
+                                  <Link to={`/dashboard/product/${product.id}`} className="text-blue-600 hover:underline">
+                                    {product.account_name}
+                                  </Link>
+                                </td>
                                 <td className="p-4 align-middle font-mono text-slate-500">
                                   {product.account_number ? `...${product.account_number.slice(-4)}` : '-'}
                                 </td>

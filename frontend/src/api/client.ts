@@ -195,6 +195,17 @@ export async function fetchMemberProducts(memberId: number) {
   return res.json();
 }
 
+export async function fetchFinancialProduct(id: number) {
+  const res = await fetch(`${API_URL}/banking/products/${id}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to fetch financial product");
+  }
+  return res.json();
+}
+
 export async function createFinancialProduct(data: any) {
   const res = await fetch(`${API_URL}/banking/products`, {
     method: "POST",
