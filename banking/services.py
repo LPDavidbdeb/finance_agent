@@ -19,7 +19,7 @@ ACCOUNT_ROUTING_MAP = {
 }
 
 @transaction.atomic
-def provision_financial_product(family: Family, owner: FamilyMember, institution_id: int, product_type: str, product_name: str) -> FinancialProduct:
+def provision_financial_product(family: Family, owner: FamilyMember, institution_id: int, product_type: str, product_name: str, account_number: str = None) -> FinancialProduct:
     """
     Creates a FinancialProduct and its corresponding double-entry Account.
     """
@@ -58,7 +58,8 @@ def provision_financial_product(family: Family, owner: FamilyMember, institution
         family=family,
         owner=owner,
         account=account,
-        product_type=product_type
+        product_type=product_type,
+        account_number=account_number
     )
 
     return product

@@ -1,7 +1,12 @@
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from abc import ABC, abstractmethod
 from banking.models import BankStatementImport
 import json
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class BaseStatementExtractor(ABC):
     """
@@ -9,9 +14,10 @@ class BaseStatementExtractor(ABC):
     """
 
     def __init__(self):
-        # Configure the Gemini client (ensure API key is set in environment)
-        genai.configure()
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        # Configure the new Gemini client
+        api_key = os.environ.get("GEMINI_API_KEY", "")
+        self.client = genai.Client(api_key=api_key)
+        self.model_name = 'gemini-2.5-flash'
 
     @abstractmethod
     def get_system_prompt(self) -> str:
@@ -37,7 +43,7 @@ class BaseStatementExtractor(ABC):
 
         # 1. Upload the file to Google's servers
         print(f"Uploading file: {file_path}")
-        uploaded_file = genai.upload_file(path=file_path)
+        uploaded_file = self.client.files.upload(file=file_path)
 
         try:
             # 2. Call the model with the specific prompt and schema
@@ -45,9 +51,10 @@ class BaseStatementExtractor(ABC):
             schema = self.get_json_schema()
 
             print("Sending request to Gemini API...")
-            response = self.model.generate_content(
-                [prompt, uploaded_file],
-                generation_config=genai.types.GenerationConfig(
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[prompt, uploaded_file],
+                config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     response_schema=schema
                 )
@@ -70,5 +77,5 @@ class BaseStatementExtractor(ABC):
         finally:
             # 4. Clean up the uploaded file
             print(f"Deleting uploaded file: {uploaded_file.name}")
-            genai.delete_file(uploaded_file.name)
+            self.client.files.delete(name=uploaded_file.name)
             print("File cleanup complete.")

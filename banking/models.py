@@ -8,7 +8,6 @@ class FinancialInstitution(models.Model):
     def __str__(self):
         return self.name
 
-
 class FinancialProduct(models.Model):
     class ProductType(models.TextChoices):
         CHECKING = 'CHECKING', 'Checking'
@@ -23,6 +22,12 @@ class FinancialProduct(models.Model):
     owner = models.ForeignKey(FamilyMember, on_delete=models.SET_NULL, null=True, blank=True, related_name='financial_products')
     account = models.OneToOneField(Account, on_delete=models.PROTECT, related_name='financial_product')
     product_type = models.CharField(max_length=50, choices=ProductType.choices)
+    account_number = models.CharField(
+        max_length=100, 
+        blank=True, 
+        null=True, 
+        help_text="The exact account, contract, or card number used for statement reconciliation."
+    )
     
     def __str__(self):
         return f"{self.institution.name} - {self.get_product_type_display()} ({self.family.name})"

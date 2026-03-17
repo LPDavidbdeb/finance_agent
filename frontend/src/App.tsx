@@ -5,6 +5,8 @@ import { OnboardingForm } from './components/OnboardingForm';
 import { LoginForm } from './components/LoginForm';
 import { Dashboard } from './components/Dashboard';
 import { InstitutionManager } from './components/InstitutionManager';
+import { MemberProfile } from './pages/MemberProfile';
+import { AccountTree } from './components/AccountTree';
 import { AuthProvider } from './context/AuthContext';
 
 function App() {
@@ -19,7 +21,9 @@ function App() {
               <Route path="/register" element={<OnboardingForm />} />
               <Route path="/login" element={<LoginForm />} />
               <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/dashboard/member/:id" element={<MemberProfile />} />
               <Route path="/settings/banks" element={<InstitutionManager />} />
+              <Route path="/ledger" element={<AccountTree />} />
             </Routes>
           </main>
         </div>

@@ -10,7 +10,7 @@ import {
 import { FamilyMemberModal } from './FamilyMemberModal';
 import { AddProductModal } from './AddProductModal';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 
 export const Dashboard: React.FC = () => {
   const [members, setMembers] = useState<any[]>([]);
@@ -128,7 +128,11 @@ export const Dashboard: React.FC = () => {
                 <tbody className="[&_tr:last-child]:border-0">
                   {members.map((member) => (
                     <tr key={member.id} className="border-b transition-colors hover:bg-slate-100/50 data-[state=selected]:bg-slate-100">
-                      <td className="p-4 align-middle font-medium">{member.first_name} {member.last_name}</td>
+                      <td className="p-4 align-middle font-medium">
+                        <Link to={`/dashboard/member/${member.id}`} className="text-blue-600 hover:underline">
+                          {member.first_name} {member.last_name}
+                        </Link>
+                      </td>
                       <td className="p-4 align-middle">
                         <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
                           {member.role}

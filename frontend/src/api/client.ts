@@ -83,6 +83,17 @@ export async function fetchFamilyMembers() {
   return res.json();
 }
 
+export async function fetchFamilyMember(id: number) {
+  const res = await fetch(`${API_URL}/users/members/${id}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to fetch family member");
+  }
+  return res.json();
+}
+
 export async function createFamilyMember(data: any) {
   const res = await fetch(`${API_URL}/users/members`, {
     method: "POST",
@@ -169,6 +180,17 @@ export async function deleteInstitution(id: number) {
       throw new Error(errorData?.detail || "Cannot delete this institution because it is currently linked to one or more financial products.");
     }
     throw new Error("Failed to delete institution");
+  }
+  return res.json();
+}
+
+export async function fetchMemberProducts(memberId: number) {
+  const res = await fetch(`${API_URL}/banking/products?owner_id=${memberId}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to fetch member products");
   }
   return res.json();
 }

@@ -159,7 +159,7 @@ export function AccountTree() {
   const incomeStatementAccounts = accounts.filter(a => ['REVENUE', 'EXPENSE'].includes(a.account_type));
 
   return (
-    <div className="p-8 w-full max-w-4xl mx-auto space-y-8">
+    <div className="space-y-8 w-full max-w-4xl mx-auto">
       
       {/* Balance Sheet Group */}
       <Card className="shadow-md border-slate-200 dark:border-slate-800">

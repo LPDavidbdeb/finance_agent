@@ -18,6 +18,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
     institution_id: '',
     product_type: 'CHECKING',
     product_name: '',
+    account_number: '',
   });
   const [loading, setLoading] = useState(false);
   const [fetchingInstitutions, setFetchingInstitutions] = useState(false);
@@ -30,6 +31,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
         institution_id: '',
         product_type: 'CHECKING',
         product_name: '',
+        account_number: '',
       });
       setError(null);
     }
@@ -72,7 +74,8 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
         institution_id: Number(formData.institution_id),
         product_type: formData.product_type,
         product_name: formData.product_name,
-        owner_id: memberId
+        owner_id: memberId,
+        account_number: formData.account_number || undefined, // Make it optional
       };
       
       await createFinancialProduct(payload);
@@ -143,6 +146,17 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({ isOpen, onClos
                   value={formData.product_name} 
                   onChange={handleChange} 
                   required 
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="account_number">Account Number (Optional)</Label>
+                <Input 
+                  id="account_number" 
+                  name="account_number" 
+                  placeholder='e.g., "4500 **** **** 1234"' 
+                  value={formData.account_number} 
+                  onChange={handleChange}
                 />
               </div>
 
