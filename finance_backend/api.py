@@ -4,7 +4,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from decimal import Decimal
 from typing import List
 
-from .schemas import AccountSchema, StagedTransactionSchema, JournalEntryIn, JournalEntryOut
+from .schemas import AccountSchema, AccountMoveIn, StagedTransactionSchema, JournalEntryIn, JournalEntryOut
 from accounting.models import Account, JournalEntry, TransactionLine
 from banking.models import StagedTransaction
 
@@ -32,6 +32,20 @@ def get_account_tree(request):
     """
     roots = Account.objects.root_nodes().prefetch_related('children')
     return list(roots)
+
+@api.delete("/accounts/{account_id}")
+def delete_account(request, account_id: int):
+    account = Account.objects.get(id=account_id)
+    account.delete()
+    return {"message": "Account deleted successfully."}
+
+@api.patch("/accounts/{account_id}/move")
+def move_account(request, account_id: int, payload: AccountMoveIn):
+    account = Account.objects.get(id=account_id)
+    target_parent = Account.objects.get(id=payload.target_parent_id)
+    account.parent = target_parent
+    account.save()
+    return {"message": "Account moved successfully."}
 
 @api.get("/banking/staged", response=List[StagedTransactionSchema])
 def get_staged_transactions(request):

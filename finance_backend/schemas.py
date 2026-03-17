@@ -16,6 +16,9 @@ class AccountSchema(ModelSchema):
 
 AccountSchema.model_rebuild()
 
+class AccountMoveIn(Schema):
+    target_parent_id: int
+
 # ----- Staged Transaction Schemas -----
 
 class StagedTransactionSchema(ModelSchema):
