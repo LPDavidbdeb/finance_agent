@@ -8,6 +8,7 @@ import {
   deleteFamilyMember 
 } from '../api/client';
 import { FamilyMemberModal } from './FamilyMemberModal';
+import { AddProductModal } from './AddProductModal';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
@@ -16,9 +17,12 @@ export const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  // Modal State
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  // Modals State
+  const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<any | null>(null);
+  
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  const [selectedMemberIdForProduct, setSelectedMemberIdForProduct] = useState<number | null>(null);
 
   const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
@@ -47,17 +51,17 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const handleAddClick = () => {
+  const handleAddMemberClick = () => {
     setEditingMember(null);
-    setIsModalOpen(true);
+    setIsMemberModalOpen(true);
   };
 
-  const handleEditClick = (member: any) => {
+  const handleEditMemberClick = (member: any) => {
     setEditingMember(member);
-    setIsModalOpen(true);
+    setIsMemberModalOpen(true);
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDeleteMember = async (id: number) => {
     if (window.confirm("Are you sure you want to remove this family member?")) {
       try {
         await deleteFamilyMember(id);
@@ -68,13 +72,23 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const handleModalSubmit = async (formData: any) => {
+  const handleMemberModalSubmit = async (formData: any) => {
     if (editingMember) {
       await updateFamilyMember(editingMember.id, formData);
     } else {
       await createFamilyMember(formData);
     }
     await loadMembers(); // Refresh list after save
+  };
+
+  const handleAddProductClick = (memberId: number) => {
+    setSelectedMemberIdForProduct(memberId);
+    setIsProductModalOpen(true);
+  };
+
+  const handleProductAddedSuccess = () => {
+    // Optionally refresh members if we ever embed products in the member fetch
+    console.log("Product added successfully");
   };
 
   return (
@@ -89,7 +103,7 @@ export const Dashboard: React.FC = () => {
             <CardTitle>Household Roster</CardTitle>
             <CardDescription>Manage the people in your financial plan.</CardDescription>
           </div>
-          <Button onClick={handleAddClick} size="sm">
+          <Button onClick={handleAddMemberClick} size="sm">
             + Add Person
           </Button>
         </CardHeader>
@@ -121,11 +135,14 @@ export const Dashboard: React.FC = () => {
                         </span>
                       </td>
                       <td className="p-4 align-middle text-slate-500">{member.current_age} yrs</td>
-                      <td className="p-4 align-middle text-right">
-                        <Button variant="ghost" size="sm" className="mr-2 text-blue-600" onClick={() => handleEditClick(member)}>
+                      <td className="p-4 align-middle text-right space-x-2 flex justify-end">
+                        <Button variant="outline" size="sm" onClick={() => handleAddProductClick(member.id)}>
+                          + Add Product
+                        </Button>
+                        <Button variant="ghost" size="sm" className="text-blue-600" onClick={() => handleEditMemberClick(member)}>
                           Edit
                         </Button>
-                        <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleDelete(member.id)}>
+                        <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleDeleteMember(member.id)}>
                           Delete
                         </Button>
                       </td>
@@ -139,10 +156,17 @@ export const Dashboard: React.FC = () => {
       </Card>
 
       <FamilyMemberModal 
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onSubmit={handleModalSubmit}
+        isOpen={isMemberModalOpen}
+        onClose={() => setIsMemberModalOpen(false)}
+        onSubmit={handleMemberModalSubmit}
         initialData={editingMember}
+      />
+      
+      <AddProductModal 
+        isOpen={isProductModalOpen}
+        onClose={() => setIsProductModalOpen(false)}
+        memberId={selectedMemberIdForProduct}
+        onSuccess={handleProductAddedSuccess}
       />
     </div>
   );

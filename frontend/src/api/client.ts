@@ -117,3 +117,71 @@ export async function deleteFamilyMember(id: number) {
   if (!res.ok) throw new Error("Failed to delete family member");
   return res.json();
 }
+
+// --- Banking API ---
+
+export async function fetchInstitutions() {
+  const res = await fetch(`${API_URL}/banking/institutions`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to fetch institutions");
+  }
+  return res.json();
+}
+
+export async function createInstitution(data: any) {
+  const res = await fetch(`${API_URL}/banking/institutions`, {
+    method: "POST",
+    headers: getAuthHeader(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.detail || "Failed to create institution");
+  }
+  return res.json();
+}
+
+export async function updateInstitution(id: number, data: any) {
+  const res = await fetch(`${API_URL}/banking/institutions/${id}`, {
+    method: "PUT",
+    headers: getAuthHeader(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.detail || "Failed to update institution");
+  }
+  return res.json();
+}
+
+export async function deleteInstitution(id: number) {
+  const res = await fetch(`${API_URL}/banking/institutions/${id}`, {
+    method: "DELETE",
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    // Explicitly catch the 400 protected error from Django
+    if (res.status === 400) {
+      throw new Error(errorData?.detail || "Cannot delete this institution because it is currently linked to one or more financial products.");
+    }
+    throw new Error("Failed to delete institution");
+  }
+  return res.json();
+}
+
+export async function createFinancialProduct(data: any) {
+  const res = await fetch(`${API_URL}/banking/products`, {
+    method: "POST",
+    headers: getAuthHeader(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.detail || "Failed to create financial product");
+  }
+  return res.json();
+}

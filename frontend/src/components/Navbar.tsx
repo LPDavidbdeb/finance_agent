@@ -21,6 +21,7 @@ export const Navbar: React.FC = () => {
             // WHAT TO SHOW WHEN LOGGED IN
             <>
               <Link to="/dashboard" className="hover:text-slate-300 transition-colors">Dashboard</Link>
+              <Link to="/settings/banks" className="hover:text-slate-300 transition-colors">Manage Banks</Link>
               <button onClick={handleLogout} className="text-slate-300 hover:text-white transition-colors">
                 Logout
               </button>

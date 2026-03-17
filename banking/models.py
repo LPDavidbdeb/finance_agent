@@ -1,5 +1,5 @@
 from django.db import models
-from users.models import Family
+from users.models import Family, FamilyMember
 from accounting.models import Account, JournalEntry
 
 class FinancialInstitution(models.Model):
@@ -16,9 +16,11 @@ class FinancialProduct(models.Model):
         CREDIT_CARD = 'CREDIT_CARD', 'Credit Card'
         LOAN = 'LOAN', 'Loan'
         INVESTMENT = 'INVESTMENT', 'Investment'
+        REGISTERED = 'REGISTERED', 'Registered Account'
 
     institution = models.ForeignKey(FinancialInstitution, on_delete=models.CASCADE, related_name='products')
     family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='financial_products')
+    owner = models.ForeignKey(FamilyMember, on_delete=models.SET_NULL, null=True, blank=True, related_name='financial_products')
     account = models.OneToOneField(Account, on_delete=models.PROTECT, related_name='financial_product')
     product_type = models.CharField(max_length=50, choices=ProductType.choices)
     
