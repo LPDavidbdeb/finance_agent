@@ -1,5 +1,7 @@
 from ninja import Schema
 from typing import Optional
+from datetime import date, datetime
+from decimal import Decimal
 
 class FinancialProductIn(Schema):
     institution_id: int
@@ -40,3 +42,40 @@ class FinancialProductOut(Schema):
         if obj.account and obj.account.parent:
             return obj.account.parent.name
         return "Uncategorized"
+
+class StatementUploadOut(Schema):
+    id: int
+    file_url: Optional[str] = None
+    status: str
+
+    @staticmethod
+    def resolve_file_url(obj):
+        return obj.file.url if obj.file else None
+
+
+class StatementImportOut(Schema):
+    id: int
+    upload_date: datetime
+    document_date: Optional[date] = None
+    file_name: str
+    file_url: Optional[str] = None
+    processed_by_ai: bool
+    processed_by_python: bool
+    status: str
+
+    @staticmethod
+    def resolve_file_name(obj):
+        if not obj.file:
+            return ""
+        return obj.file.name.split("/")[-1]
+
+    @staticmethod
+    def resolve_file_url(obj):
+        return obj.file.url if obj.file else None
+
+class StagedTransactionOut(Schema):
+    id: int
+    bank_date: date
+    raw_description: str
+    amount: Decimal
+    status: str

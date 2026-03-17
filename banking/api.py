@@ -1,13 +1,22 @@
-from ninja import Router
+from ninja import Router, File
 from ninja.errors import HttpError
+from ninja.files import UploadedFile
 from ninja_jwt.authentication import JWTAuth
 from typing import List, Optional
 from django.shortcuts import get_object_or_404
 from django.db.models import ProtectedError
 from users.models import FamilyMember
 
-from .schemas import FinancialProductIn, FinancialProductOut, InstitutionOut, InstitutionIn
-from .models import FinancialInstitution, FinancialProduct
+from .schemas import (
+    FinancialProductIn,
+    FinancialProductOut,
+    InstitutionOut,
+    InstitutionIn,
+    StatementUploadOut,
+    StatementImportOut,
+    StagedTransactionOut,
+)
+from .models import FinancialInstitution, FinancialProduct, BankStatementImport, StagedTransaction
 from .services import provision_financial_product
 
 router = Router(auth=JWTAuth())
@@ -87,3 +96,50 @@ def create_product(request, payload: FinancialProductIn):
     )
     
     return product
+
+@router.post("/products/{product_id}/statements/upload", response=StatementUploadOut)
+def upload_statement(request, product_id: int, file: File[UploadedFile]):
+    """Stores a bank statement and triggers Python extraction pipeline."""
+    import logging
+    from banking.services.extraction import extract_transactions_from_statement
+
+    user = request.auth
+    product = get_object_or_404(FinancialProduct, id=product_id, family=user.family)
+
+    statement = BankStatementImport.objects.create(
+        financial_product=product,
+        file=file,
+        status=BankStatementImport.Status.STAGED,
+        processed_by_ai=False,
+        processed_by_python=False,
+    )
+
+    # Trigger extraction in a try/except so HTTP response is not disrupted
+    try:
+        extract_transactions_from_statement(statement.id)
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.exception(f"Extraction failed for statement {statement.id}: {str(e)}")
+        # Error is already persisted in the statement_import record by extract_transactions_from_statement
+
+    return statement
+
+
+@router.get("/products/{product_id}/statements", response=List[StatementImportOut])
+def list_product_statements(request, product_id: int):
+    """Returns staged/imported statements for one product in newest-first order."""
+    user = request.auth
+    product = get_object_or_404(FinancialProduct, id=product_id, family=user.family)
+    return BankStatementImport.objects.filter(financial_product=product).order_by("-upload_date")
+
+
+@router.get("/products/{product_id}/staged-transactions", response=List[StagedTransactionOut])
+def list_staged_transactions(request, product_id: int):
+    """Returns all unprocessed staged transactions for a product, ordered by date (newest first)."""
+    user = request.auth
+    product = get_object_or_404(FinancialProduct, id=product_id, family=user.family)
+    return StagedTransaction.objects.filter(
+        statement_import__financial_product=product,
+        status=StagedTransaction.Status.UNPROCESSED
+    ).order_by("-bank_date")
+

@@ -218,3 +218,51 @@ export async function createFinancialProduct(data: any) {
   }
   return res.json();
 }
+
+export async function uploadStatement(productId: number, file: File) {
+  const token = localStorage.getItem('access_token');
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${API_URL}/banking/products/${productId}/statements/upload`, {
+    method: 'POST',
+    headers: {
+      Authorization: token ? `Bearer ${token}` : '',
+    },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    if (res.status === 401) throw new Error('Unauthorized');
+    throw new Error(errorData?.detail || 'Failed to upload statement');
+  }
+
+  return res.json();
+}
+
+export async function fetchProductStatements(productId: number) {
+  const res = await fetch(`${API_URL}/banking/products/${productId}/statements`, {
+    headers: getAuthHeader(),
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('Unauthorized');
+    throw new Error('Failed to fetch statements');
+  }
+
+  return res.json();
+}
+
+export async function fetchStagedTransactions(productId: number) {
+  const res = await fetch(`${API_URL}/banking/products/${productId}/staged-transactions`, {
+    headers: getAuthHeader(),
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('Unauthorized');
+    throw new Error('Failed to fetch staged transactions');
+  }
+
+  return res.json();
+}

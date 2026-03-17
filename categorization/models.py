@@ -1,6 +1,7 @@
 from django.db import models
 from users.models import Family
 from accounting.models import Account
+from banking.models import FinancialInstitution
 
 class GlobalMerchant(models.Model):
     """
@@ -37,3 +38,28 @@ class PrivateMerchantConfig(models.Model):
 
     def __str__(self):
         return f"{self.merchant.canonical_name} config for {self.family.name}"
+
+class TransactionMappingRule(models.Model):
+    search_text = models.CharField(max_length=255)
+    merchant_name = models.CharField(max_length=255)
+    target_account = models.ForeignKey(
+        Account,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='transaction_mapping_rules',
+    )
+    institution = models.ForeignKey(
+        FinancialInstitution,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='transaction_mapping_rules',
+    )
+
+    class Meta:
+        unique_together = ('search_text', 'institution')
+
+    def __str__(self):
+        institution_name = self.institution.name if self.institution else 'Global'
+        return f"{self.search_text} -> {self.merchant_name} ({institution_name})"
