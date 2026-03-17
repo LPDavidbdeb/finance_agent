@@ -1,12 +1,9 @@
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
+@import "tailwindcss";
+
+/* If you installed geist font via npm, keep this, otherwise remove it */
 @import "@fontsource-variable/geist";
 
-@tailwind base;
-
 @custom-variant dark (&:is(.dark *));
-@tailwind components;
-@tailwind utilities;
 
 :root {
     --background: oklch(1 0 0);

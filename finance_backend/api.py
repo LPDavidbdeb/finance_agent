@@ -1,4 +1,6 @@
 from ninja import NinjaAPI, Router, errors
+from ninja_jwt.controller import NinjaJWTDefaultController
+from ninja_jwt.routers.obtain import obtain_pair_router
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
 from decimal import Decimal
@@ -9,21 +11,8 @@ from accounting.models import Account, JournalEntry, TransactionLine
 from banking.models import StagedTransaction
 
 api = NinjaAPI(title="Finance Headless API")
-auth_router = Router()
 
-@auth_router.post("/login")
-def login(request):
-    return {"message": "login mocked"}
-
-@auth_router.post("/logout")
-def logout(request):
-    return {"message": "logout mocked"}
-
-@auth_router.get("/me")
-def me(request):
-    return {"message": "me mocked"}
-
-api.add_router("/auth/", auth_router)
+api.add_router("/auth/", obtain_pair_router)
 api.add_router("/users/", "users.api.router")
 
 @api.get("/accounts/tree", response=List[AccountSchema])
