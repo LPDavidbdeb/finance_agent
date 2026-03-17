@@ -1,35 +1,45 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import './App.css'
-import { Button } from "@/components/ui/button"
-import { AccountTree } from './components/AccountTree'
+import React from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { Navbar } from './components/Navbar';
+import { OnboardingForm } from './components/OnboardingForm';
+// If you have your AccountTree component, you can import it here later
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-8 flex flex-col items-center font-sans">
-      <div className="flex justify-center mb-6">
-        <a href="https://react.dev" target="_blank" rel="noreferrer">
-          <img src={reactLogo} className="logo react w-24 h-24" alt="React logo" />
-        </a>
-      </div>
-      <h1 className="text-4xl font-bold mb-8 text-center text-slate-800 dark:text-white">Django + React Finance</h1>
-      
-      <div className="flex flex-col items-center gap-8 w-full">
-        <div className="card text-center flex flex-col items-center gap-4 bg-white dark:bg-slate-900 p-6 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800">
-          <Button onClick={() => setCount((count) => count + 1)} variant="default">
-            Button Clicks: {count}
-          </Button>
-        </div>
+    <BrowserRouter>
+      {/* The master layout container */}
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        
+        {/* The Navigation Bar - Always visible */}
+        <Navbar />
 
-        {/* The new recursive MPTT Account Ledger */}
-        <div className="w-full">
-          <AccountTree />
-        </div>
+        {/* The Main Content Area - Swaps based on the URL */}
+        <main className="flex-grow p-4 md:p-8 w-full max-w-7xl mx-auto flex flex-col">
+          <Routes>
+            
+            {/* Route 1: The Home Page (URL: / ) 
+              For now, we just put a placeholder message here.
+            */}
+            <Route 
+              path="/" 
+              element={
+                <div className="flex flex-col items-center justify-center flex-grow text-center mt-20">
+                  <h2 className="text-3xl font-semibold text-slate-800">Welcome to your Ledger</h2>
+                  <p className="text-slate-600 mt-2">Get started by creating your household account.</p>
+                </div>
+              } 
+            />
+            
+            {/* Route 2: The Registration Page (URL: /register ) 
+              This is where your form lives now.
+            */}
+            <Route path="/register" element={<OnboardingForm />} />
+
+          </Routes>
+        </main>
       </div>
-    </div>
-  )
+    </BrowserRouter>
+  );
 }
 
 export default App;
