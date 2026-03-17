@@ -21,7 +21,7 @@ def create_financial_institutions(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('banking', '0001_initial'),
+        ('banking', '0002_initial'),
     ]
 
     operations = [

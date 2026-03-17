@@ -24,6 +24,7 @@ def me(request):
     return {"message": "me mocked"}
 
 api.add_router("/auth/", auth_router)
+api.add_router("/users/", "users.api.router")
 
 @api.get("/accounts/tree", response=List[AccountSchema])
 def get_account_tree(request):

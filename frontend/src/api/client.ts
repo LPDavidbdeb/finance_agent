@@ -25,3 +25,18 @@ export async function moveAccount(accountId: number, targetParentId: number) {
   if (!res.ok) throw new Error("Failed to move account");
   return res.json();
 }
+
+export async function registerHousehold(data: any) {
+  const res = await fetch(`${API_URL}/users/register`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.message || "Registration failed");
+  }
+  return res.json();
+}

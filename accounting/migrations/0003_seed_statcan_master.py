@@ -172,7 +172,7 @@ def seed_statcan_tree(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('accounting', '0003_account_global_reference'),
+        ('accounting', '0002_initial'),
     ]
 
     operations = [
