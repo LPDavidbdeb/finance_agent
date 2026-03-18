@@ -2,9 +2,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { fetchFinancialProduct, fetchProductStatements, uploadStatement } from '../api/client';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { 
+  fetchFinancialProduct, 
+  fetchProductStatements, 
+  uploadStatement,
+  deleteStatementImport
+} from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { StagedTransactionsTable } from '../components/StagedTransactionsTable';
+import { useToast } from '../components/ui/use-toast';
 
 type StatementImport = {
   id: number;
@@ -29,6 +37,7 @@ export const ProductDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
+  const { toast } = useToast();
 
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
@@ -36,6 +45,7 @@ export const ProductDetail: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [documentDate, setDocumentDate] = useState<string>('');
   const [statements, setStatements] = useState<StatementImport[]>([]);
   const [stagedTransactionsRefresh, setStagedTransactionsRefresh] = useState(0);
 
@@ -82,6 +92,30 @@ export const ProductDetail: React.FC = () => {
     }
   };
 
+  const handleDeleteStatement = async (importId: number) => {
+    if (!window.confirm("Are you sure you want to delete this statement and all its staged transactions?")) {
+      return;
+    }
+
+    try {
+      await deleteStatementImport(importId);
+      toast({
+        title: "Statement deleted",
+        description: "The statement and its staged transactions have been removed."
+      });
+      if (id) {
+        await loadStatements(Number(id));
+        setStagedTransactionsRefresh(prev => prev + 1);
+      }
+    } catch (err: any) {
+      toast({
+        title: "Error deleting statement",
+        description: err.message || "An unexpected error occurred.",
+        variant: "destructive"
+      });
+    }
+  };
+
   const handleUploadClick = () => {
     if (uploading) return;
     fileInputRef.current?.click();
@@ -94,8 +128,9 @@ export const ProductDetail: React.FC = () => {
     setUploadMessage(null);
     try {
       setUploading(true);
-      await uploadStatement(Number(id), file);
+      await uploadStatement(Number(id), file, documentDate);
       setUploadMessage('Statement uploaded to staging area successfully.');
+      setDocumentDate(''); // Reset date after success
       await loadStatements(Number(id));
       // Trigger StagedTransactionsTable to refresh
       setStagedTransactionsRefresh((prev) => prev + 1);
@@ -169,7 +204,23 @@ export const ProductDetail: React.FC = () => {
               Upload your PDF statements here to automatically extract and reconcile transactions.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col space-y-2">
+              <Label htmlFor="document-date" className="text-sm font-medium">
+                Statement Date (Optional)
+              </Label>
+              <Input
+                id="document-date"
+                type="date"
+                className="max-w-xs"
+                value={documentDate}
+                onChange={(e) => setDocumentDate(e.target.value)}
+              />
+              <p className="text-[10px] text-slate-500">
+                Entering this date helps with transaction extraction accuracy.
+              </p>
+            </div>
+
             <div
               className="border-2 border-dashed border-slate-300 rounded-lg p-12 text-center hover:bg-slate-50 transition-colors cursor-pointer"
               onClick={handleUploadClick}
@@ -204,12 +255,13 @@ export const ProductDetail: React.FC = () => {
                       <th className="px-4 py-2 text-left font-medium text-slate-600">File Name</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-600">Processed by AI</th>
                       <th className="px-4 py-2 text-left font-medium text-slate-600">Processed by Python</th>
+                      <th className="px-4 py-2 text-right font-medium text-slate-600">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
                     {statements.length === 0 && (
                       <tr>
-                        <td className="px-4 py-3 text-slate-500" colSpan={4}>No staged files yet.</td>
+                        <td className="px-4 py-3 text-slate-500" colSpan={5}>No staged files yet.</td>
                       </tr>
                     )}
                     {statements.map((statement) => (
@@ -231,6 +283,16 @@ export const ProductDetail: React.FC = () => {
                           <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold ${statement.processed_by_python ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-700'}`}>
                             {statement.processed_by_python ? 'Yes' : 'No'}
                           </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="text-destructive h-8 px-2"
+                            onClick={() => handleDeleteStatement(statement.id)}
+                          >
+                            Delete
+                          </Button>
                         </td>
                       </tr>
                     ))}

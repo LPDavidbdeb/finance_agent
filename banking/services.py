@@ -8,7 +8,7 @@ import os
 from .validators import validate_statement_math
 from .mappers import create_staged_transactions
 from decimal import Decimal
-from datetime import datetime
+from datetime import date, datetime
 from categorization.services import find_matching_rule
 import logging
 import pandas as pd
@@ -71,7 +71,7 @@ def provision_financial_product(family: Family, owner: FamilyMember, institution
 
     return product
 
-def process_statement_upload(file, financial_product_id: int):
+def process_statement_upload(file, financial_product_id: int, document_date: date = None):
     """
     Orchestrates the entire process of handling a PDF statement upload,
     including AI extraction, validation, and record creation.
@@ -79,6 +79,7 @@ def process_statement_upload(file, financial_product_id: int):
     product = FinancialProduct.objects.get(id=financial_product_id)
     import_record = BankStatementImport.objects.create(
         financial_product=product,
+        document_date=document_date,
         status='PROCESSING',
     )
 

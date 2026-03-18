@@ -75,3 +75,40 @@ def extract_transactions_from_statement(import_id: int):
             'timestamp': datetime.now().isoformat(),
         }
         statement_import.save(update_fields=['status', 'validation_errors'])
+
+
+def rerun_categorization(import_id: int):
+    """
+    Re-applies categorization rules to all UNPROCESSED staged transactions
+    for a given statement import.
+    """
+    try:
+        statement_import = BankStatementImport.objects.select_related('financial_product').get(id=import_id)
+    except BankStatementImport.DoesNotExist:
+        logger.error(f"BankStatementImport with id {import_id} not found.")
+        return 0
+
+    institution_id = statement_import.financial_product.institution_id
+    
+    staged_transactions = StagedTransaction.objects.filter(
+        statement_import_id=import_id,
+        status=StagedTransaction.Status.UNPROCESSED
+    )
+
+    updated_count = 0
+    to_update = []
+    
+    for tx in staged_transactions:
+        rule = find_matching_rule(tx.raw_description, institution_id)
+        if rule:
+            # Only update if something actually changed
+            if tx.clean_description != rule.merchant_name or tx.predicted_account_id != rule.target_account_id:
+                tx.clean_description = rule.merchant_name
+                tx.predicted_account = rule.target_account
+                to_update.append(tx)
+                updated_count += 1
+
+    if to_update:
+        StagedTransaction.objects.bulk_update(to_update, ['clean_description', 'predicted_account'])
+    
+    return updated_count

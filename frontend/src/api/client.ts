@@ -219,10 +219,13 @@ export async function createFinancialProduct(data: any) {
   return res.json();
 }
 
-export async function uploadStatement(productId: number, file: File) {
+export async function uploadStatement(productId: number, file: File, documentDate?: string) {
   const token = localStorage.getItem('access_token');
   const formData = new FormData();
   formData.append('file', file);
+  if (documentDate) {
+    formData.append('document_date', documentDate);
+  }
 
   const res = await fetch(`${API_URL}/banking/products/${productId}/statements/upload`, {
     method: 'POST',
@@ -249,6 +252,36 @@ export async function fetchProductStatements(productId: number) {
   if (!res.ok) {
     if (res.status === 401) throw new Error('Unauthorized');
     throw new Error('Failed to fetch statements');
+  }
+
+  return res.json();
+}
+
+export async function deleteStatementImport(importId: number) {
+  const res = await fetch(`${API_URL}/banking/imports/${importId}`, {
+    method: "DELETE",
+    headers: getAuthHeader(),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error(errorData?.detail || "Failed to delete statement import");
+  }
+
+  return res.json();
+}
+
+export async function rerunCategorization(importId: number) {
+  const res = await fetch(`${API_URL}/banking/imports/${importId}/re-categorize`, {
+    method: "POST",
+    headers: getAuthHeader(),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error(errorData?.detail || "Failed to re-run categorization");
   }
 
   return res.json();

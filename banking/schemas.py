@@ -80,6 +80,7 @@ class StagedTransactionOut(Schema):
     clean_description: Optional[str] = None
     amount: Decimal
     status: str
+    statement_import_id: int
     predicted_account_id: Optional[int] = None
     predicted_account_name: Optional[str] = None
 

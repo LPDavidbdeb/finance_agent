@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { fetchStagedTransactions, approveTransaction } from '../api/client';
+import { fetchStagedTransactions, approveTransaction, rerunCategorization } from '../api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { useToast } from './ui/use-toast';
 import { Badge } from './ui/badge';
+import { Loader2, RefreshCw } from 'lucide-react';
 
 interface StagedTransaction {
   id: number;
@@ -14,6 +15,7 @@ interface StagedTransaction {
   status: string;
   predicted_account_id?: number;
   predicted_account_name?: string;
+  statement_import_id: number;
 }
 
 interface StagedTransactionsTableProps {
@@ -27,6 +29,7 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
 }) => {
   const [transactions, setTransactions] = useState<StagedTransaction[]>([]);
   const [loading, setLoading] = useState(false);
+  const [recategorizing, setRecategorizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [approving, setApproving] = useState<Record<number, boolean>>({});
   const { toast } = useToast();
@@ -50,6 +53,39 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
       loadTransactions();
     }
   }, [productId, refreshTrigger]);
+
+  const handleRerunCategorization = async () => {
+    // Get unique statement import IDs from the current transactions
+    const importIds = Array.from(new Set(transactions.map(tx => tx.statement_import_id)));
+    
+    if (importIds.length === 0) return;
+
+    setRecategorizing(true);
+    try {
+      let totalUpdated = 0;
+      // Re-run categorization for each unique statement import
+      for (const importId of importIds) {
+        const result = await rerunCategorization(importId);
+        totalUpdated += result.updated_count;
+      }
+      
+      toast({
+        title: "Categorization Complete",
+        description: `Updated ${totalUpdated} transaction(s) with new rules.`,
+      });
+      
+      await loadTransactions();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to re-run categorization';
+      toast({
+        variant: "destructive",
+        title: "Re-categorization Failed",
+        description: errorMessage,
+      });
+    } finally {
+      setRecategorizing(false);
+    }
+  };
 
   const handleApprove = async (transactionId: number, targetAccountId?: number) => {
     if (!targetAccountId) {
@@ -107,9 +143,25 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Extracted Transactions</CardTitle>
-        <CardDescription>Review {transactions.length} transaction(s) extracted from your statement</CardDescription>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <div>
+          <CardTitle>Extracted Transactions</CardTitle>
+          <CardDescription>Review {transactions.length} transaction(s) extracted from your statement</CardDescription>
+        </div>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={handleRerunCategorization}
+          disabled={recategorizing || transactions.length === 0}
+          className="flex items-center gap-2"
+        >
+          {recategorizing ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
+          Re-run Categorization
+        </Button>
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto border border-slate-200 rounded-md">

@@ -1,8 +1,9 @@
-from ninja import Router, File
+from ninja import Router, File, Form
 from ninja.errors import HttpError
 from ninja.files import UploadedFile
 from ninja_jwt.authentication import JWTAuth
 from typing import List, Optional
+from datetime import date
 from django.shortcuts import get_object_or_404
 from django.db.models import ProtectedError
 from users.models import FamilyMember
@@ -99,7 +100,7 @@ def create_product(request, payload: FinancialProductIn):
     return product
 
 @router.post("/products/{product_id}/statements/upload", response=StatementUploadOut)
-def upload_statement(request, product_id: int, file: File[UploadedFile]):
+def upload_statement(request, product_id: int, file: File[UploadedFile], document_date: Optional[date] = Form(None)):
     """Stores a bank statement and triggers Python extraction pipeline."""
     import logging
     from banking.extraction import extract_transactions_from_statement
@@ -110,6 +111,7 @@ def upload_statement(request, product_id: int, file: File[UploadedFile]):
     statement = BankStatementImport.objects.create(
         financial_product=product,
         file=file,
+        document_date=document_date,
         status=BankStatementImport.Status.STAGED,
         processed_by_ai=False,
         processed_by_python=False,
@@ -132,6 +134,27 @@ def list_product_statements(request, product_id: int):
     user = request.auth
     product = get_object_or_404(FinancialProduct, id=product_id, family=user.family)
     return BankStatementImport.objects.filter(financial_product=product).order_by("-upload_date")
+
+
+@router.delete("/imports/{import_id}")
+def delete_statement_import(request, import_id: int):
+    """Deletes a statement import and all its staged transactions (via CASCADE)."""
+    user = request.auth
+    statement = get_object_or_404(BankStatementImport, id=import_id, financial_product__family=user.family)
+    statement.delete()
+    return {"success": True}
+
+
+@router.post("/imports/{import_id}/re-categorize")
+def recategorize_statement_import(request, import_id: int):
+    """Re-applies categorization rules to all UNPROCESSED staged transactions."""
+    from .extraction import rerun_categorization
+    user = request.auth
+    # Verify tenant access
+    get_object_or_404(BankStatementImport, id=import_id, financial_product__family=user.family)
+    
+    updated_count = rerun_categorization(import_id)
+    return {"success": True, "updated_count": updated_count}
 
 
 @router.get("/products/{product_id}/staged-transactions", response=List[StagedTransactionOut])
