@@ -1,5 +1,16 @@
+# IDE and Environment (Massive token sinks)
 venv/
 .idea/
 __pycache__/
+.git/
+
+# Data Files (Do not send raw financial data/logs to the AI)
 *.csv
+*.xlsx
 *.json
+*.sqlite
+*.db
+*.log
+
+# Environment Variables (Keep your API keys safe)
+*.env
