@@ -17,6 +17,7 @@ api = NinjaAPI(title="Finance Headless API", auth=JWTAuth())
 api.add_router("/auth/", obtain_pair_router, auth=None)
 api.add_router("/users/", "users.api.router")
 api.add_router("/banking/", "banking.api.router")
+api.add_router("/categorization/", "categorization.api.router")
 
 @api.get("/accounts/tree", response=List[AccountSchema])
 def get_account_tree(request):

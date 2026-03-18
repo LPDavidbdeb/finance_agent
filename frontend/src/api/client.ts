@@ -272,16 +272,22 @@ export async function deleteStatementImport(importId: number) {
   return res.json();
 }
 
-export async function rerunCategorization(importId: number) {
-  const res = await fetch(`${API_URL}/banking/imports/${importId}/re-categorize`, {
+export async function createAndApplyRule(data: {
+  search_text: string;
+  merchant_name: string;
+  target_account_id: number;
+  institution_id?: number;
+}) {
+  const res = await fetch(`${API_URL}/categorization/create-and-apply`, {
     method: "POST",
     headers: getAuthHeader(),
+    body: JSON.stringify(data),
   });
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => null);
     if (res.status === 401) throw new Error("Unauthorized");
-    throw new Error(errorData?.detail || "Failed to re-run categorization");
+    throw new Error(errorData?.detail || "Failed to create and apply rule");
   }
 
   return res.json();

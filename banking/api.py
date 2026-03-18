@@ -119,7 +119,7 @@ def upload_statement(request, product_id: int, file: File[UploadedFile], documen
 
     # Trigger extraction in a try/except so HTTP response is not disrupted
     try:
-        extract_transactions_from_statement(statement.id)
+        extract_transactions_from_statement(statement.id, user)
     except Exception as e:
         logger = logging.getLogger(__name__)
         logger.exception(f"Extraction failed for statement {statement.id}: {str(e)}")
@@ -143,18 +143,6 @@ def delete_statement_import(request, import_id: int):
     statement = get_object_or_404(BankStatementImport, id=import_id, financial_product__family=user.family)
     statement.delete()
     return {"success": True}
-
-
-@router.post("/imports/{import_id}/re-categorize")
-def recategorize_statement_import(request, import_id: int):
-    """Re-applies categorization rules to all UNPROCESSED staged transactions."""
-    from .extraction import rerun_categorization
-    user = request.auth
-    # Verify tenant access
-    get_object_or_404(BankStatementImport, id=import_id, financial_product__family=user.family)
-    
-    updated_count = rerun_categorization(import_id)
-    return {"success": True, "updated_count": updated_count}
 
 
 @router.get("/products/{product_id}/staged-transactions", response=List[StagedTransactionOut])

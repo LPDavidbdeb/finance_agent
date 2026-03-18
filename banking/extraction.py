@@ -1,4 +1,5 @@
 from .models import BankStatementImport, StagedTransaction
+from .services import approve_staged_transaction
 from ai_core.extractors.factory import PDFExtractorFactory
 from decimal import Decimal
 from datetime import datetime
@@ -8,7 +9,7 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-def extract_transactions_from_statement(import_id: int):
+def extract_transactions_from_statement(import_id: int, user):
     """
     Extract transactions from an uploaded statement, auto-categorize them,
     and stage them for review.
@@ -62,6 +63,25 @@ def extract_transactions_from_statement(import_id: int):
         if staged_transactions:
             StagedTransaction.objects.bulk_create(staged_transactions, batch_size=1000)
 
+        # Auto-approve transactions with a predicted account
+        auto_approve_queryset = StagedTransaction.objects.filter(
+            statement_import_id=import_id,
+            predicted_account__isnull=False,
+            status=StagedTransaction.Status.UNPROCESSED
+        )
+        
+        for tx in auto_approve_queryset:
+            try:
+                approve_staged_transaction(
+                    transaction_id=tx.id,
+                    target_account_id=tx.predicted_account_id,
+                    user=user
+                )
+            except (PermissionError, ValueError) as e:
+                logger.warning(f"Auto-approval skipped for transaction {tx.id}: {str(e)}")
+            except Exception as e:
+                logger.exception(f"Unexpected error during auto-approval for transaction {tx.id}: {str(e)}")
+
         statement_import.processed_by_python = True
         statement_import.status = BankStatementImport.Status.COMPLETED
         statement_import.validation_errors = None
@@ -75,40 +95,3 @@ def extract_transactions_from_statement(import_id: int):
             'timestamp': datetime.now().isoformat(),
         }
         statement_import.save(update_fields=['status', 'validation_errors'])
-
-
-def rerun_categorization(import_id: int):
-    """
-    Re-applies categorization rules to all UNPROCESSED staged transactions
-    for a given statement import.
-    """
-    try:
-        statement_import = BankStatementImport.objects.select_related('financial_product').get(id=import_id)
-    except BankStatementImport.DoesNotExist:
-        logger.error(f"BankStatementImport with id {import_id} not found.")
-        return 0
-
-    institution_id = statement_import.financial_product.institution_id
-    
-    staged_transactions = StagedTransaction.objects.filter(
-        statement_import_id=import_id,
-        status=StagedTransaction.Status.UNPROCESSED
-    )
-
-    updated_count = 0
-    to_update = []
-    
-    for tx in staged_transactions:
-        rule = find_matching_rule(tx.raw_description, institution_id)
-        if rule:
-            # Only update if something actually changed
-            if tx.clean_description != rule.merchant_name or tx.predicted_account_id != rule.target_account_id:
-                tx.clean_description = rule.merchant_name
-                tx.predicted_account = rule.target_account
-                to_update.append(tx)
-                updated_count += 1
-
-    if to_update:
-        StagedTransaction.objects.bulk_update(to_update, ['clean_description', 'predicted_account'])
-    
-    return updated_count
