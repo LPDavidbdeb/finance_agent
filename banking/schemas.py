@@ -77,5 +77,19 @@ class StagedTransactionOut(Schema):
     id: int
     bank_date: date
     raw_description: str
+    clean_description: Optional[str] = None
     amount: Decimal
     status: str
+    predicted_account_id: Optional[int] = None
+    predicted_account_name: Optional[str] = None
+
+    @staticmethod
+    def resolve_predicted_account_id(obj):
+        return obj.predicted_account.id if obj.predicted_account else None
+
+    @staticmethod
+    def resolve_predicted_account_name(obj):
+        return obj.predicted_account.name if obj.predicted_account else None
+
+class TransactionApproveIn(Schema):
+    target_account_id: int

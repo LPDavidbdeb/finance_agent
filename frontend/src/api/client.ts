@@ -266,3 +266,19 @@ export async function fetchStagedTransactions(productId: number) {
 
   return res.json();
 }
+
+export async function approveTransaction(productId: number, transactionId: number, targetAccountId: number) {
+  const res = await fetch(`${API_URL}/banking/products/${productId}/staged-transactions/${transactionId}/approve`, {
+    method: "POST",
+    headers: getAuthHeader(),
+    body: JSON.stringify({ target_account_id: targetAccountId }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ detail: "An unknown error occurred." }));
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error(errorData.detail);
+  }
+
+  return res.json();
+}

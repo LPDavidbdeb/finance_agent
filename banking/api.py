@@ -15,9 +15,10 @@ from .schemas import (
     StatementUploadOut,
     StatementImportOut,
     StagedTransactionOut,
+    TransactionApproveIn,
 )
 from .models import FinancialInstitution, FinancialProduct, BankStatementImport, StagedTransaction
-from .services import provision_financial_product
+from .services import provision_financial_product, approve_staged_transaction
 
 router = Router(auth=JWTAuth())
 
@@ -101,7 +102,7 @@ def create_product(request, payload: FinancialProductIn):
 def upload_statement(request, product_id: int, file: File[UploadedFile]):
     """Stores a bank statement and triggers Python extraction pipeline."""
     import logging
-    from banking.services.extraction import extract_transactions_from_statement
+    from banking.extraction import extract_transactions_from_statement
 
     user = request.auth
     product = get_object_or_404(FinancialProduct, id=product_id, family=user.family)
@@ -141,5 +142,31 @@ def list_staged_transactions(request, product_id: int):
     return StagedTransaction.objects.filter(
         statement_import__financial_product=product,
         status=StagedTransaction.Status.UNPROCESSED
-    ).order_by("-bank_date")
+    ).select_related('predicted_account').order_by("-bank_date")
 
+
+@router.post("/products/{product_id}/staged-transactions/{transaction_id}/approve")
+def approve_transaction_endpoint(request, product_id: int, transaction_id: int, payload: TransactionApproveIn):
+    """Approves a staged transaction and records it in the double-entry ledger."""
+    user = request.auth
+    
+    # We just need to check if the product exists for the user, logic is handled in service
+    get_object_or_404(FinancialProduct, id=product_id, family=user.family)
+
+    try:
+        approve_staged_transaction(
+            transaction_id=transaction_id,
+            target_account_id=payload.target_account_id,
+            user=user
+        )
+        return {"success": True, "message": "Transaction approved and reconciled."}
+    except PermissionError as e:
+        raise HttpError(403, str(e))
+    except ValueError as e:
+        raise HttpError(400, str(e))
+    except Exception as e:
+        # Log unexpected errors
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.exception(f"Unexpected error approving transaction {transaction_id}")
+        raise HttpError(500, "An internal error occurred.")

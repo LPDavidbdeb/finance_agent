@@ -1,13 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { fetchStagedTransactions } from '../api/client';
+import { fetchStagedTransactions, approveTransaction } from '../api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Button } from './ui/button';
+import { useToast } from './ui/use-toast';
+import { Badge } from './ui/badge';
 
 interface StagedTransaction {
   id: number;
   bank_date: string;
   raw_description: string;
+  clean_description?: string;
   amount: number;
   status: string;
+  predicted_account_id?: number;
+  predicted_account_name?: string;
 }
 
 interface StagedTransactionsTableProps {
@@ -22,6 +28,8 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
   const [transactions, setTransactions] = useState<StagedTransaction[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [approving, setApproving] = useState<Record<number, boolean>>({});
+  const { toast } = useToast();
 
   const loadTransactions = async () => {
     try {
@@ -38,19 +46,46 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
   };
 
   useEffect(() => {
-    loadTransactions();
+    if (productId) {
+      loadTransactions();
+    }
   }, [productId, refreshTrigger]);
 
+  const handleApprove = async (transactionId: number, targetAccountId?: number) => {
+    if (!targetAccountId) {
+      toast({
+        variant: "destructive",
+        title: "Approval Failed",
+        description: "No predicted account to approve this transaction.",
+      });
+      return;
+    }
+    setApproving(prev => ({ ...prev, [transactionId]: true }));
+    try {
+      await approveTransaction(productId, transactionId, targetAccountId);
+      toast({
+        title: "Success",
+        description: "Transaction approved and reconciled.",
+      });
+      loadTransactions(); // Refresh the list
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Approval failed';
+      toast({
+        variant: "destructive",
+        title: "Approval Failed",
+        description: errorMessage,
+      });
+    } finally {
+      setApproving(prev => ({ ...prev, [transactionId]: false }));
+    }
+  };
+
   if (loading) {
-    return (
-      <div className="text-center text-slate-500">Loading staged transactions...</div>
-    );
+    return <div className="text-center text-slate-500">Loading staged transactions...</div>;
   }
 
   if (error) {
-    return (
-      <div className="text-center text-destructive">{error}</div>
-    );
+    return <div className="text-center text-destructive">{error}</div>;
   }
 
   if (transactions.length === 0) {
@@ -62,20 +97,6 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
         </CardHeader>
         <CardContent>
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="48"
-              height="48"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="text-slate-300 mb-4"
-            >
-              <path d="M12 2v20M2 12h20" />
-            </svg>
             <p className="text-slate-500 font-medium">No pending transactions to review.</p>
             <p className="text-slate-400 text-sm mt-1">Upload a PDF statement to extract transactions.</p>
           </div>
@@ -96,9 +117,10 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
             <thead className="bg-slate-50">
               <tr>
                 <th className="px-4 py-3 text-left font-medium text-slate-700">Date</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-700">Merchant / Description</th>
+                <th className="px-4 py-3 text-left font-medium text-slate-700">Description</th>
+                <th className="px-4 py-3 text-left font-medium text-slate-700">Account / Category</th>
                 <th className="px-4 py-3 text-right font-medium text-slate-700">Amount</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-700">Status</th>
+                <th className="px-4 py-3 text-right font-medium text-slate-700">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
@@ -107,16 +129,30 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
                   <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
                     {new Date(tx.bank_date).toLocaleDateString()}
                   </td>
-                  <td className="px-4 py-3 text-slate-700">{tx.raw_description}</td>
-                  <td className="px-4 py-3 text-slate-900 font-mono text-right">
-                    {typeof tx.amount === 'number'
-                      ? `$${Math.abs(tx.amount).toFixed(2)}`
-                      : `$${tx.amount}`}
+                  <td className="px-4 py-3 text-slate-700">
+                    <div>{tx.clean_description || tx.raw_description}</div>
+                    {tx.clean_description && <div className="text-xs text-slate-400">{tx.raw_description}</div>}
                   </td>
                   <td className="px-4 py-3">
-                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
-                      Pending Review
-                    </span>
+                    {tx.predicted_account_name ? (
+                      <Badge variant="secondary" className="bg-green-100 text-green-800">
+                        Predicted: {tx.predicted_account_name}
+                      </Badge>
+                    ) : (
+                      <span className="text-slate-400">Uncategorized</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-slate-900 font-mono text-right">
+                    {`$${Math.abs(tx.amount).toFixed(2)}`}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <Button 
+                      size="sm"
+                      onClick={() => handleApprove(tx.id, tx.predicted_account_id)}
+                      disabled={approving[tx.id] || !tx.predicted_account_id}
+                    >
+                      {approving[tx.id] ? 'Approving...' : 'Approve'}
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -127,4 +163,3 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
     </Card>
   );
 };
-
