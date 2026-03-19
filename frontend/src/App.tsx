@@ -7,6 +7,8 @@ import { InstitutionManager } from './components/InstitutionManager';
 import { MemberProfile } from './pages/MemberProfile';
 import { ProductDetail } from './pages/ProductDetail';
 import { MerchantManager } from './pages/MerchantManager';
+import { MerchantDetail } from './pages/MerchantDetail';
+import { AccountDetail } from './pages/AccountDetail';
 import { AccountTree } from './components/AccountTree';
 import { AuthProvider } from './context/AuthContext';
 
@@ -25,6 +27,8 @@ function App() {
               <Route path="/dashboard/member/:id" element={<MemberProfile />} />
               <Route path="/dashboard/product/:id" element={<ProductDetail />} />
               <Route path="/dashboard/merchants" element={<MerchantManager />} />
+              <Route path="/dashboard/merchants/:id" element={<MerchantDetail />} />
+              <Route path="/dashboard/accounts/:id" element={<AccountDetail />} />
               <Route path="/settings/banks" element={<InstitutionManager />} />
               <Route path="/ledger" element={<AccountTree />} />
             </Routes>

@@ -8,8 +8,18 @@ from typing import List, Literal, Optional
 from decimal import Decimal
 
 from .models import Account, TransactionLine, JournalEntry
+from .schemas import AccountDetailOut
 
 router = Router(auth=JWTAuth())
+
+@router.get("/accounts/{account_id}", response=AccountDetailOut)
+def get_account_detail(request, account_id: int):
+    """
+    Returns full details for an account, including children and linked merchants.
+    """
+    user = request.auth
+    account = get_object_or_404(Account, id=account_id, family=user.family)
+    return account
 
 @router.get("/spending-evolution")
 def get_spending_evolution(

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -97,7 +98,11 @@ export const MerchantManager: React.FC = () => {
                 )}
                 {merchants.map((merchant) => (
                   <tr key={merchant.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3 text-slate-900 font-medium">{merchant.name}</td>
+                    <td className="px-4 py-3 text-slate-900 font-medium">
+                      <Link to={`/dashboard/merchants/${merchant.id}`} className="hover:text-blue-600 hover:underline">
+                        {merchant.name}
+                      </Link>
+                    </td>
                     <td className="px-4 py-3">
                       {merchant.default_account_name ? (
                         <span className="text-slate-700">{merchant.default_account_name}</span>

@@ -1,5 +1,5 @@
 from ninja import Schema
-from typing import Optional
+from typing import Optional, List
 
 class RuleCreateAndApplyIn(Schema):
     search_text: str
@@ -16,4 +16,28 @@ class MerchantOut(Schema):
     default_account_name: Optional[str] = None
 
 class MerchantUpdateIn(Schema):
-    default_account_id: int
+    name: Optional[str] = None
+    default_account_id: Optional[int] = None
+    is_unique_provider: Optional[bool] = None
+    update_history: bool = False
+
+class MappingRuleOut(Schema):
+    id: int
+    search_text: str
+    institution_name: Optional[str] = None
+
+    @staticmethod
+    def resolve_institution_name(obj):
+        return obj.institution.name if obj.institution else "All Institutions"
+
+class MerchantDetailOut(Schema):
+    id: int
+    name: str
+    is_unique_provider: bool
+    default_account_id: Optional[int] = None
+    default_account_name: Optional[str] = None
+    mapping_rules: List[MappingRuleOut]
+
+class MerchantMergeIn(Schema):
+    target_id: int
+    source_ids: List[int]

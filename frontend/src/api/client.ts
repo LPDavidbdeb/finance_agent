@@ -35,6 +35,17 @@ export async function fetchAnnualStatements(year: number) {
   return res.json();
 }
 
+export async function fetchAccountDetail(id: number) {
+  const res = await fetch(`${API_URL}/accounting/accounts/${id}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to fetch account details");
+  }
+  return res.json();
+}
+
 export async function fetchAccountTree() {
   const res = await fetch(`${API_URL}/accounts/tree`, {
     headers: getAuthHeader(),
@@ -334,6 +345,43 @@ export async function fetchMerchants() {
   if (!res.ok) {
     if (res.status === 401) throw new Error("Unauthorized");
     throw new Error("Failed to fetch merchants");
+  }
+  return res.json();
+}
+
+export async function fetchMerchantDetail(id: number) {
+  const res = await fetch(`${API_URL}/categorization/merchants/${id}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to fetch merchant details");
+  }
+  return res.json();
+}
+
+export async function updateMerchant(id: number, data: { name?: string; default_account_id?: number; is_unique_provider?: boolean; update_history?: boolean }) {
+  const res = await fetch(`${API_URL}/categorization/merchants/${id}`, {
+    method: "PATCH",
+    headers: getAuthHeader(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.detail || "Failed to update merchant");
+  }
+  return res.json();
+}
+
+export async function mergeMerchants(targetId: number, sourceIds: number[]) {
+  const res = await fetch(`${API_URL}/categorization/merchants/merge`, {
+    method: "POST",
+    headers: getAuthHeader(),
+    body: JSON.stringify({ target_id: targetId, source_ids: sourceIds }),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.detail || "Failed to merge merchants");
   }
   return res.json();
 }

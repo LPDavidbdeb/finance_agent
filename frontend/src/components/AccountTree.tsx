@@ -1,6 +1,7 @@
-import { useState, useEffect, DragEvent } from "react";
+import React, { useState, useEffect, DragEvent } from "react";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { ChevronRight, ChevronDown, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { fetchAccountTree, deleteAccount, moveAccount } from "../api/client";
 
 type Account = {
@@ -98,13 +99,20 @@ const AccountNode = ({ account, level = 0, onMove, onDelete, onSelect, isSelectM
               <ChevronRight className="w-4 h-4 text-slate-200 dark:text-slate-700 invisible" />
             )}
           </div>
-          <span className={`truncate select-none px-1 rounded transition-all ${
-            isSelectMode 
-              ? "hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 font-medium cursor-pointer" 
-              : ""
-          }`}>
-            {account.name} 
-          </span>
+          
+          {isSelectMode ? (
+            <span className="truncate select-none px-1 rounded hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 font-medium cursor-pointer transition-all">
+              {account.name}
+            </span>
+          ) : (
+            <Link 
+              to={`/dashboard/accounts/${account.id}`}
+              className="truncate select-none px-1 rounded hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all"
+              onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            >
+              {account.name}
+            </Link>
+          )}
         </div>
 
         {/* Delete Button (visible on group hover) */}

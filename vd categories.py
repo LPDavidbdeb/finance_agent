@@ -1,4 +1,17 @@
 banniere_dict_vd = {
+'GEOPARC DE PERCE PERCE QC': ['GEOPARC DE PERCE PERCE QC'],
+    'Ski Bromont': ['Ski Bromont Online BROMONT QC'],
+'TOWN OF SPRINGDALE SPRINGDALE UT': ['TOWN OF SPRINGDALE SPRINGDALE UT'],
+     'TRAVERSE RDL ST-SIMEON RIVIERE-DU-LOQC': ['TRAVERSE RDL ST-SIMEON RIVIERE-DU-LOQC'],
+    'SEPAQ': ['SEPAQ 1 800 665 6527 QUEBEC',
+              'SEPAQ 1 800 665 6527 QUEBEC QC',
+              'SEPAQ YAMASKA ROXTON POND QC',
+              ],
+    'SERVICE CANADA': ['SERVICE CANADA PT AUX TR PT AUX TREMB QC'],
+    'YUL CAMDEN DORVAL QC': ['YUL CAMDEN DORVAL QC'],
+    'ZION NATIONAL PARK SPRINGDALE UT': ['ZION NATIONAL PARK SPRINGDALE UT'],
+    'SOCIETE DES TRAVERSIER SOREL-TRACY QC': ['SOCIETE DES TRAVERSIER SOREL-TRACY QC'],
+    'SOS LABYRINTHE': ['SOS LABYRINTHE MONTREAL QC'],
     'RIVIERE EMERAUDE PERCE QC': ['RIVIERE EMERAUDE PERCE QC'],
     'HEBERGEMENT MT TREMBLA 10MT TREMBLANT QC': ['HEBERGEMENT MT TREMBLA 10MT TREMBLANT QC'],
     'HOTEL SUITE LAC BROME FOSTER QC': ['HOTEL SUITE LAC BROME FOSTER QC'],
@@ -22,74 +35,62 @@ banniere_dict_vd = {
     'CINEMA TRIOMPHE INC. TERREBONNE QC': ['CINEMA TRIOMPHE INC. TERREBONNE QC'],
     'CINEMAS CINE ENT. 450-581-5757 QC': ['CINEMAS CINE ENT. 450-581-5757 QC'],
     'HORIZON ROC MONTREAL QC': ['HORIZON ROC MONTREAL QC'],
-
-
+    'CONCORDIA - RECREATION MONTREAL QC': ['CONCORDIA - RECREATION MONTREAL QC'],
 
 
     'PAYPAL': ['PAYPAL *FORMEDUC 4188427523 QC'],
     'Amazon': ['AMZ*PremiumpartsWhosal WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*0L0WZ4IS3 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*156UA1NW3 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*1F3HO5IV3 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*4984K8R43 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*4L5L22N53 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*5002Y9IQ3 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*AS0TR8WS3 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*CO1SM78J3 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*CR18X5CT3 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*EN6CD3NE3 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*I489R6693 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*NQ5PS64O3 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*ON08X2F93 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*ON15U9843 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*R02NV4N72 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*R02XQ7LA2 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*RB7W18NK2 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*RT11H5NE0 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*RU2TG6OY0 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*RX99W7CZ3 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*T10UZ0KR0 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*T16F392L0 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*T188C8AS2 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*T35OE2JH2 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*T66HU1NV3 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*T98OL3ZE1 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*TA84J1ZZ1 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*TK9R88SO2 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*TQ0828ME2 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*TQ5FP7010 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*TQ7D69XB2 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*TX0II8Z91 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*TX9DD0OD0 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*TX9JK69D0 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*TY0SP8963 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*VW5AP2J43 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*XL4LQ88Z3 WWW.AMAZON.CAON',
-                                                'AMZN Mktp CA*YM9MP41Y3 WWW.AMAZON.CAON',
-                                                'Amazon.ca*KP8828J23 AMAZON.CA ON',
-                                                'Amazon.ca*SD6270PY3 AMAZON.CA ON',
-                                                'Amazon.ca*W24QU6FL3 AMAZON.CA ON',
-                                               ],
+                                            'AMZN Mktp CA WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*0L0WZ4IS3 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*156UA1NW3 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*1F3HO5IV3 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*4984K8R43 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*4L5L22N53 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*5002Y9IQ3 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*AS0TR8WS3 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*CO1SM78J3 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*CR18X5CT3 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*EN6CD3NE3 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*I489R6693 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*NQ5PS64O3 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*ON08X2F93 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*ON15U9843 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*R02NV4N72 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*R02XQ7LA2 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*RB7W18NK2 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*RT11H5NE0 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*RU2TG6OY0 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*RX99W7CZ3 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*T10UZ0KR0 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*T16F392L0 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*T188C8AS2 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*T35OE2JH2 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*T66HU1NV3 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*T98OL3ZE1 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*TA84J1ZZ1 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*TK9R88SO2 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*TQ0828ME2 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*TQ5FP7010 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*TQ7D69XB2 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*TX0II8Z91 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*TX9DD0OD0 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*TX9JK69D0 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*TY0SP8963 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*VW5AP2J43 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*XL4LQ88Z3 WWW.AMAZON.CAON',
+                                            'AMZN Mktp CA*YM9MP41Y3 WWW.AMAZON.CAON',
+                                            'Amazon.ca*KP8828J23 AMAZON.CA ON',
+                                            'Amazon.ca*SD6270PY3 AMAZON.CA ON',
+                                            'Amazon.ca*W24QU6FL3 AMAZON.CA ON',
+                                           ],
     'aliexpress': ['aliexpress Vancouver BC'],
-    'WAL-MART': ['WAL-MART STORE#1169 POINTE-AUX-TRQC',
-                 'WALMART.CA MISSISSAUGA ON'
-                 ],
+    'WAL-MART': ['WAL-MART STORE#1169 POINTE-AUX-TRQC', 'WALMART.CA MISSISSAUGA ON'],
     'WINNERS': ['WINNERS 474 MONTREAL QC'],
+    'TEMU': ['TEMU.COM VICTORIA BC', 'TEMU.COM WWW.TEMU.COM BC'],
+    'TUANGO': ['TUANGO INC/#LD-0063868 MONTREAL QC', 'TUANGO INC/#LD-0068960 MONTREAL QC', 'TUANGO INC/#LD-0079190 MONTREAL QC',],
 
-
-     'APPLE': ['APPLE.COM/BILL 866-712-7753 ON',
-               'APPLE.COM/BILL TORONTO ON'
-              ],
-    'NETFLIX': ['NETFLIX.COM 844-5052993 BC',
-                     'NETFLIX.COM 866-716-0414 ON',
-                     'NETFLIX.COM Vancover BC',
-                    ],
 
 'AVANT-GARDE MONTREAL QC': ['AVANT-GARDE MONTREAL QC'],
-
-
-
 
      'CDNCANCERSOC-DR 888-955-5455 ON': ['CDNCANCERSOC-DR 888-955-5455 ON'],
 
@@ -97,7 +98,7 @@ banniere_dict_vd = {
 
 
      'COBIEBOUTIQUE LONDON GB': ['COBIEBOUTIQUE LONDON GB'],
-     'CONCORDIA - RECREATION MONTREAL QC': ['CONCORDIA - RECREATION MONTREAL QC'],
+
      'COUCHE-TARD': ['COUCHE-TARD # 1219 CHARLEMAGNE QC'],
      'CPC / SCP 227730 MONTRÉAL QC': ['CPC / SCP 227730 MONTRÉAL QC'],
 
@@ -110,7 +111,7 @@ banniere_dict_vd = {
 
      'FONDATION CHRISTIAN VA MAGOG QC': ['FONDATION CHRISTIAN VA MAGOG QC'],
 
-    'GEOPARC DE PERCE PERCE QC': ['GEOPARC DE PERCE PERCE QC'],
+
      'GLOBAL EXC 8 CASA NOUACEUR MA': ['GLOBAL EXC 8 CASA NOUACEUR MA'],
 
 
@@ -120,24 +121,8 @@ banniere_dict_vd = {
 
      'INSCRIPTIONENLIGNE.CA SAINT-EUSTACHQC': ['INSCRIPTIONENLIGNE.CA SAINT-EUSTACHQC'],
 
-     'JEAN COUTU': ['JEAN COUTU 045 POINTE AUX TRQC',
-                    'JEAN COUTU 046 REPENTIGNY QC',
-                    'JEAN COUTU 341 REPENTIGNY QC',
-                   ],
-    'PHARMACIE VINH THE JIMMY MONTREAL QC': ['PHARMACIE VINH THE JIMMY MONTREAL QC'],
-    'PHARMAPRIX': ['PHARMAPRIX #0061 MONTREAL QC',
-                   'PHARMAPRIX #0061 PTE AUX TREMBQC'
-                   ],
-    'BRUNET PLUS': ['BRUNET PLUS ANJOU ANJOU QC'],
-    'PROXIM': ['PROXI EXTRA ORFORD ORFORD QC'],
-
-
-
-
      'KLINIK DENTAIRE LABERGE NREPENTIGNY QC': ['KLINIK DENTAIRE LABERGE NREPENTIGNY QC'],
-     'KNIX WEAR INC TORONTO ON': ['KNIX WEAR INC TORONTO ON'],
-
-
+    'LUNETTERIE CORBEIL SAINT-LEONARDQC': ['LUNETTERIE CORBEIL SAINT-LEONARDQC'],
 
 
 
@@ -147,22 +132,21 @@ banniere_dict_vd = {
      'LIBRAIRIE RENAUD BRAY MONTREAL QC': ['LIBRAIRIE RENAUD BRAY MONTREAL QC',
                                            'LIBRAIRIE RENAUD BRAY REPENTIGNY QC',
                                           ],
+     'QUEBECLOISIRS PLACE VE MONTREAL QC': ['QUEBECLOISIRS PLACE VE MONTREAL QC'],
 
     'LEPOINTDEVENTE.COM QUEBEC CITY QC': ['LEPOINTDEVENTE.COM QUEBEC CITY QC'],
-    'LES ANIMALERIES T.D. ZOO POINTE-AUX-TRQC': ['LES ANIMALERIES T.D. ZOO POINTE-AUX-TRQC'],
+
      'LS 9394-5459 Quebec I Montreal QC': ['LS 9394-5459 Quebec I Montreal QC'],
-     'LUNETTERIE CORBEIL SAINT-LEONARDQC': ['LUNETTERIE CORBEIL SAINT-LEONARDQC'],
+
      "LUSH GALERIES D'ANJOU VILLE D'ANJOUQC": ["LUSH GALERIES D'ANJOU VILLE D'ANJOUQC"],
 
-    'PATRICK MORIN': ['PATRICK MORIN 11 POINTE-AUX-TRQC'],
-     'CANADIAN TIRES': ['MAGASIN CDN TIRE #00009 ST LEONARD QC',
-                                               'MAGASIN CDN TIRE #0303 MONTREAL QC'
-                                              ],
+    'LES ANIMALERIES T.D. ZOO POINTE-AUX-TRQC': ['LES ANIMALERIES T.D. ZOO POINTE-AUX-TRQC'],
 
 
 
-     'MEUBLES RD': ['MEUBLES RD/12424 VICTORIAVILLEQC'],
-    'LINEN CHEST 801 WEB ONLINLAVAL QC': ['LINEN CHEST 801 WEB ONLINLAVAL QC'],
+
+
+
 
      'MISSKIT PHOTO INC. SAINT-CHARLESQC': ['MISSKIT PHOTO INC. SAINT-CHARLESQC'],
      'NATH & COMPAGNIE PERCE QC': ['NATH & COMPAGNIE PERCE QC'],
@@ -185,7 +169,7 @@ banniere_dict_vd = {
 
      'PUBLICITEJL 5147554377 QC': ['PUBLICITEJL 5147554377 QC'],
      'Prezi, Inc. 415-4948313 CA': ['Prezi, Inc. 415-4948313 CA'],
-     'QUEBECLOISIRS PLACE VE MONTREAL QC': ['QUEBECLOISIRS PLACE VE MONTREAL QC'],
+
      'RACEROSTER PRISON LONDON ON': ['RACEROSTER PRISON LONDON ON'],
      'RAM 1479652367222MONTREAL QC': ['RAM 1479652367222MONTREAL QC'],
      'RAM 1479652367225MONTREAL QC': ['RAM 1479652367225MONTREAL QC'],
@@ -198,91 +182,57 @@ banniere_dict_vd = {
 
 
 
-     'SEPAQ': ['SEPAQ 1 800 665 6527 QUEBEC',
-               'SEPAQ 1 800 665 6527 QUEBEC QC',
-               'SEPAQ YAMASKA ROXTON POND QC',
-              ],
-     'SERVICE CANADA': ['SERVICE CANADA PT AUX TR PT AUX TREMB QC'],
 
-
-     'SOCIETE DES TRAVERSIER SOREL-TRACY QC': ['SOCIETE DES TRAVERSIER SOREL-TRACY QC'],
-     'SOS LABYRINTHE': ['SOS LABYRINTHE MONTREAL QC'],
      'BKIND PRODUCTS MONTREAL QC': ['SP BKIND PRODUCTS MONTREAL QC'],
      'CANADA VALISE DEP ST-LAURENT QC': ['SP CANADA VALISE DEP ST-LAURENT QC'],
      'JOELLE COLLECTION TROIS-RIVIEREQC': ['SP JOELLE COLLECTION TROIS-RIVIEREQC'],
 
-     'MONSIEUR COCKTAIL': ['SP MONSIEUR COCKTAIL QUEBEC CITY QC'],
-     'SP MONTELLE INTIMATE MONTREAL QC': ['SP MONTELLE INTIMATE MONTREAL QC'],
-     'YELLOW SHOES': ['SP YELLOW SHOES ECOM MONTREAL QC'],
+
+
+
      'YUL RUN CANADA MONTREAL QC': ['SP YUL RUN CANADA MONTREAL QC'],
      'SHOWTIME INC. Mont-TremblanQC': ['SQ *5678 SHOWTIME INC. Mont-TremblanQC'],
      '*9483-1104 QUEBEC INC.LANORAIE QC': ['SQ *9483-1104 QUEBEC INC.LANORAIE QC'],
-     '*FERME LA VRAIE VIE Saint-Zenon QC': ['SQ *FERME LA VRAIE VIE Saint-Zenon QC'],
+
      'FORUM Terrebonne QC': ['SQ *FORUM Terrebonne QC'],
      "L'ATELIER DE CAFE Foster QC": ["SQ *L'ATELIER DE CAFE Foster QC"],
 
      'STOCK AND ROW Bloomfield ON': ['SQ *STOCK AND ROW Bloomfield ON'],
 
 
+'YELLOW': ['SP YELLOW SHOES ECOM MONTREAL QC'],
 
-     'Ski Bromont': ['Ski Bromont Online BROMONT QC'],
-     'TEMU': ['TEMU.COM VICTORIA BC',
-              'TEMU.COM WWW.TEMU.COM BC'
-             ],
      "THE CHILDREN'S PLACE": ["THE CHILDREN'S PLACE #300ANJOU QC"],
-
-
-     'TOWN OF SPRINGDALE SPRINGDALE UT': ['TOWN OF SPRINGDALE SPRINGDALE UT'],
-     'TRAVERSE RDL ST-SIMEON RIVIERE-DU-LOQC': ['TRAVERSE RDL ST-SIMEON RIVIERE-DU-LOQC'],
-     'TUANGO': ['TUANGO INC/#LD-0063868 MONTREAL QC',
-                'TUANGO INC/#LD-0068960 MONTREAL QC',
-                'TUANGO INC/#LD-0079190 MONTREAL QC',
-               ],
 
 
      'UNARBREPOURMONQUARTIER MONTREAL QC': ['UNARBREPOURMONQUARTIER MONTREAL QC'],
 
      'WOLVERINE WORLDWIDE': ['WOLVERINE WORLDWIDE CANADMISSISSAUGA ON'],
      'Y** LE GROUPE ARCANTIA MONTREAL QC': ['Y** LE GROUPE ARCANTIA MONTREAL QC'],
-     'YUL CAMDEN DORVAL QC': ['YUL CAMDEN DORVAL QC'],
-     'ZION NATIONAL PARK SPRINGDALE UT': ['ZION NATIONAL PARK SPRINGDALE UT'],
 
-'SPORTS EXPERTS': ['#414 SPORTS EXPERTS ANJOU QC'],
+
+    'SPORTS EXPERTS': ['#414 SPORTS EXPERTS ANJOU QC'],
     'Billabong Halifax NS': ['Billabong Halifax NS'],
     'Decathlon': ['Decathlon Canada Inc. Montreal QC'],
     'AU COIN DU PEDALEUR ET REPENTIGNY QC': ['AU COIN DU PEDALEUR ET REPENTIGNY QC'],
 
-    'STM': ['STM HONORE BEAUG DIN101 MONTREAL QC',
-            'STM LAURIER DIN101 MONTREAL QC',
-            'STM LOGE LANGELIER N101 MONTREAL QC',
-    ],
-    'SHELL': ['SHELL C81389 CHARLEMAGNE QC',
-            'SHELL OIL10007497018 CEDAR CITY UT',
-    ],
-    'PETRO CANADA': ['PETRO CANADA 16137 GASPE QC',
-            'PETRO CANADA10492 SAINTE LUCE QC',
-            'PETRO CANADA13094 ANGE GRDN DE QC',
-            'PETRO CANADA14110 MONTREAL QC',
-            'PETRO CANADA16114 ST SIMON QC',
-    ],
-
-    'ESSO': ['ESSO COUCHE-TARD SAINT-LAMBERTQC'],
-    'ULTRAMAR': ['ULTRAMAR 24405 POINTE-AUX-TRQC'],
 
     'FLO SERVICES QUEBEC QC': ['FLO SERVICES QUEBEC QC'],
     'LE CIRCUIT ELECTRIQUE MONTREAL QC': ['LE CIRCUIT ELECTRIQUE MONTREAL QC'],
+
     }
 
 banniere_dict_vd_categories = {
     'Food purchased from stores': {
+        {'FERME LA VRAIE VIE': ['SQ *FERME LA VRAIE VIE Saint-Zenon QC'],},
         {'Nespresso': ['Nespresso Canada Toronto ON'],},
         {'PASTA AND FUMO MAGOG QC': ['PASTA AND FUMO MAGOG QC'],},
-        {'MARCHE NOTRE DAME 2225 MONTREAL QC': ['MARCHE NOTRE DAME 2225 MONTREAL QC'], },
-        {'MARCHE RICHELIEU QUEBEC QC': ['MARCHE RICHELIEU QUEBEC QC'], },
+        {'MARCHE NOTRE DAME': ['MARCHE NOTRE DAME 2225 MONTREAL QC'], },
+        {'MARCHE RICHELIEU': ['MARCHE RICHELIEU QUEBEC QC'], },
         {'MARCHE ST JEAN BAPTI 2 POINTE AUX TRQC': ['MARCHE ST JEAN BAPTI 2 POINTE AUX TRQC'], },
         {'MARCHE TAU': ['MARCHE TAU MONTREAL QC'], },
         {'FOODHERO': ['FOODHERO MONTREAL', 'FOODHERO MONTREAL QC',],},
-        {'MIEL MORAND INC. Saint-Zenon QC': ['SQ *MIEL MORAND INC. Saint-Zenon QC'],},
+        {'MIEL MORAND INC.': ['SQ *MIEL MORAND INC. Saint-Zenon QC'],},
         {'IGA': ['IGA #8168 MONTREAL QC', 'IGA EXTRA # 8528 TERREBONNE QC', 'IGA EXTRA 259 ST-LEONARD QC',]},
         {"'PROVIGO'": ['PROVIGO LE GARDEUR #85 LE GARDEUR QC']},
         {"'SUPER C'": ['SUPER C B ST PAUL 261 BAIE SAINT PAQC', 'SUPER C PAT 5963 POINTE AUX TRQC', 'SUPER C REPENTIGNY REPENTIGNY QC', 'SUPER C ST LEONARD SAINT LEONARDQC']},
@@ -397,7 +347,7 @@ banniere_dict_vd_categories = {
         {'A&W': ['A&W #5374 DONNACONA QC']},
         {'ALLO MON COCO': ['ALLO MON COCO PAT PTE AUX TREMBQC'],},
     },
-    'Alcoholic beverages' : {
+    'Alcoholic beverages purchased from stores' : {
         {'SAQ': ['SAQ.COM/12424 QUEBEC QC',
              'SAQ23004 BROSSARD QC',
              "SAQ23011 HALLES D'ANJOU MONTREAL QC",
@@ -413,8 +363,7 @@ banniere_dict_vd_categories = {
              'SAQ23303 TERREBONNE-MTEE TERREBONNE QC',
              'SAQ23327 REPENTIGNY REPENTIGNY QC',
              'SAQ33532 CLERMONT CLERMONT QC',
-            ],
-         },
+            ],},
         {'LCBO': ['LCBO/RAO #0071 GANANOQUE ON', 'LCBO/RAO #0449 WELLINGTON ON'],},
         {"'CLOSSON CHASE VINEYARD HILLIER ON'": ['CLOSSON CHASE VINEYARD HILLIER ON']},
         {"'COUNTY CIDER PICTON ON'": ['COUNTY CIDER PICTON ON']},
@@ -429,7 +378,58 @@ banniere_dict_vd_categories = {
         {"'HINTERLAND WINE COMPAPrince EdwardON'": ['SQ *HINTERLAND WINE COMPAPrince EdwardON']},
         {"'PARSONS BREWING COMPAPrince EdwardON'": ['SQ *PARSONS BREWING COMPAPrince EdwardON']},
     },
+    'Alcoholic beverages served in licensed establishments':{
+        {'MONSIEUR COCKTAIL': ['SP MONSIEUR COCKTAIL QUEBEC CITY QC'],}},
     'Household repaires appliances': {
         {'APPLIANCE PARTS 866-985-5301 BC': ['APPLIANCE PARTS 866-985-5301 BC']}
     },
+    'Personal care supplies and equipment':{
+        {"'JEAN COUTU'": ['JEAN COUTU 045 POINTE AUX TRQC', 'JEAN COUTU 046 REPENTIGNY QC', 'JEAN COUTU 341 REPENTIGNY QC']},
+        {"'PHARMACIE VINH THE JIMMY MONTREAL QC'": ['PHARMACIE VINH THE JIMMY MONTREAL QC']},
+        {"'PHARMAPRIX'": ['PHARMAPRIX #0061 MONTREAL QC', 'PHARMAPRIX #0061 PTE AUX TREMBQC']},
+        {"'BRUNET PLUS'": ['BRUNET PLUS ANJOU ANJOU QC']},
+        {"'PROXIM'": ['PROXI EXTRA ORFORD ORFORD QC']}
+    },
+    'Gasoline' : {
+        {"'SHELL'": ['SHELL C81389 CHARLEMAGNE QC', 'SHELL OIL10007497018 CEDAR CITY UT']},
+        {"'PETRO CANADA'": ['PETRO CANADA 16137 GASPE QC', 'PETRO CANADA10492 SAINTE LUCE QC', 'PETRO CANADA13094 ANGE GRDN DE QC', 'PETRO CANADA14110 MONTREAL QC', 'PETRO CANADA16114 ST SIMON QC']},
+        {"'ESSO'": ['ESSO COUCHE-TARD SAINT-LAMBERTQC']},
+        {"'ULTRAMAR'": ['ULTRAMAR 24405 POINTE-AUX-TRQC']}
+    },
+    'Women\'s clothing':{
+        {'KNIX WEAR INC TORONTO ON': ['KNIX WEAR INC TORONTO ON'],},
+        {"'SUZY SHIER'": ['SUZY SHIER #7846 TERREBONNE QC']},
+        {"'MESBOBETTES.CA'": ['SP MESBOBETTES.CA SHERBROOKE QC']},
+        {"'SHEIN.COM Toronto ON'": ['SHEIN.COM Toronto ON']},
+        {"'RW & CO.'": ['RW #2499 MONTREAL QC', 'RW & CO. #2216 ANJOU QC', 'RWCO 2499 Montreal QC']},
+        {"'ETSY ETSY.COM IE'": ['ETSY ETSY.COM IE']},
+        {"'H&M'": ['H&M CA #087- GALERIES REPENTIGNY QC']},
+        {"'SIMONS'": ['LA MAISON SIMONS INC (ANJANJOU QC', 'LA MAISON SIMONS INC(QUE)QUEBEC QC', 'SIMONS WEB QUEBEC QC']},
+        {"'GLOBO'": ['GLOBO #4534 MONTREAL QC', 'GLOBO CANADA- E-COMMER SAINT- LAURENQC', 'GLOBOSHOES.COM MONTREAL QC']},
+        {"'OLDNAVY'": ['OLDNAVY.COM 2944 505-462-0076 ON']},
+        {"'REITMANS'": ['REITMANS #1499 MONTREAL', 'REITMANS #443 REPENTIGNY QC', 'REITMANS 1499 Montreal QC']},
+        {"'LA VIE EN ROSE'": ['LA VIE EN ROSE INC MONTREAL QC']},
+        {'SP MONTELLE INTIMATE MONTREAL QC': ['SP MONTELLE INTIMATE MONTREAL QC'],},
+
+    },
+    'City bus and subway transportation': {
+        { 'STM': ['STM HONORE BEAUG DIN101 MONTREAL QC', 'STM LAURIER DIN101 MONTREAL QC','STM LOGE LANGELIER N101 MONTREAL QC',],}
+    },
+    'Electricity': {
+        {'HYDRO QUEBEC': ['HYDRO QUEBEC MONTREAL QC'],},
+    },
+    'Furniture': {
+        {'MEUBLES RD': ['MEUBLES RD/12424 VICTORIAVILLEQC'], },
+        {'LINEN CHEST 801 WEB ONLINLAVAL QC': ['LINEN CHEST 801 WEB ONLINLAVAL QC'], },
+    },
+    'Video and audio subscription services':{
+        {'APPLE': ['APPLE.COM/BILL 866-712-7753 ON', 'APPLE.COM/BILL TORONTO ON'], },
+        {'NETFLIX': ['NETFLIX.COM 844-5052993 BC', 'NETFLIX.COM 866-716-0414 ON', 'NETFLIX.COM Vancover BC', ], },
+
+    },
+    'Home Improvement': {
+        {'PATRICK MORIN': ['PATRICK MORIN 11 POINTE-AUX-TRQC'], },
+        {'CANADIAN TIRES': ['MAGASIN CDN TIRE #00009 ST LEONARD QC', 'MAGASIN CDN TIRE #0303 MONTREAL QC'], }
+    },
+
 }
