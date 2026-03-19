@@ -41,13 +41,13 @@ class CategorizationTest(TestCase):
         """Test that institution-specific rules are preferred."""
         rule = find_matching_rule("WAL-MART SUPERCENTER", self.institution.id)
         self.assertEqual(rule, self.rule_rbc)
-        self.assertEqual(rule.merchant.name, "Walmart RBC")
+        self.assertEqual(rule.merchant.name, "WALMART RBC")
 
     def test_find_matching_rule_global(self):
         """Test that global rules are used when no institution rule exists."""
         rule = find_matching_rule("COSTCO GAS", self.institution.id)
         self.assertEqual(rule, self.rule_global)
-        self.assertEqual(rule.merchant.name, "Costco Wholesale")
+        self.assertEqual(rule.merchant.name, "COSTCO WHOLESALE")
 
     def test_find_matching_rule_no_match(self):
         """Test that None is returned if no rule matches."""

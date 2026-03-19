@@ -354,7 +354,8 @@ export async function updateMerchantAccount(merchantId: number, accountId: numbe
 export async function createAndApplyRule(data: {
   search_text: string;
   merchant_name: string;
-  target_account_id: number;
+  target_account_id?: number;
+  is_unique_provider?: boolean;
   institution_id?: number;
 }) {
   const res = await fetch(`${API_URL}/categorization/create-and-apply`, {

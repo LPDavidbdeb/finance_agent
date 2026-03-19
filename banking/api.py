@@ -155,7 +155,7 @@ def list_staged_transactions(request, product_id: int):
     return StagedTransaction.objects.filter(
         statement_import__financial_product=product,
         status=StagedTransaction.Status.UNPROCESSED
-    ).select_related('predicted_account').order_by("-bank_date")
+    ).select_related('predicted_account', 'journal_entry').prefetch_related('journal_entry__lines__account').order_by("-bank_date")
 
 
 @router.get("/products/{product_id}/statement-months", response=List[StatementMonthOut])
@@ -184,7 +184,7 @@ def list_statement_months(request, product_id: int):
 
 @router.get("/products/{product_id}/statements/{year}/{month}/transactions", response=List[StagedTransactionOut])
 def list_statement_transactions(request, product_id: int, year: int, month: int):
-    """Returns transactions for a specific product in a specific month."""
+    """Returns all transactions (unprocessed, pending, and reconciled) for a specific product in a specific month."""
     user = request.auth
     product = get_object_or_404(FinancialProduct, id=product_id, family=user.family)
     
