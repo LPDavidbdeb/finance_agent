@@ -15,7 +15,11 @@ def find_matching_rule(raw_description: str, institution_id: int) -> Optional[Tr
         return None
 
     # We want to find rules where search_text is a substring of description.
-    # Since search_text is a field, we use an annotation to reverse the icontains logic.
+    # We prioritize rules for the specific institution, then fall back to global (null) rules.
+    # We use order_by('-institution_id') because specific IDs are > 0 and NULL is last/first depending on DB,
+    # but more reliably we can just filter and combine.
+    
+    # Check for specific institution first
     institution_match = (
         TransactionMappingRule.objects.filter(
             institution_id=institution_id,
@@ -29,6 +33,7 @@ def find_matching_rule(raw_description: str, institution_id: int) -> Optional[Tr
     if institution_match:
         return institution_match
 
+    # Fallback to global rules
     return (
         TransactionMappingRule.objects.filter(institution__isnull=True)
         .select_related('merchant', 'merchant__default_account')
