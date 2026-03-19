@@ -1,4 +1,4 @@
-from .strategies import VisaDesjardinsExtractor, MasterCardWealthSimpleExtractor
+from .strategies import VisaDesjardinsExtractor, MasterCardWealthSimpleExtractor, CompteDesjardinsExtractor
 
 
 class PDFExtractorFactory:
@@ -7,6 +7,7 @@ class PDFExtractorFactory:
         if "Desjardins" in institution_name:
             if product_type == "CREDIT_CARD":
                 return VisaDesjardinsExtractor()
+            return CompteDesjardinsExtractor()
         elif "Wealthsimple" in institution_name:
             # Route all Wealthsimple accounts to this extractor for now
             return MasterCardWealthSimpleExtractor()

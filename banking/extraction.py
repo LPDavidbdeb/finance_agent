@@ -11,24 +11,37 @@ import re
 
 logger = logging.getLogger(__name__)
 
+FRENCH_MONTHS = {
+    'janvier': 1, 'février': 2, 'mars': 3, 'avril': 4, 'mai': 5, 'juin': 6,
+    'juillet': 7, 'août': 8, 'septembre': 9, 'octobre': 10, 'novembre': 11, 'décembre': 12
+}
+
 def get_statement_date_from_pdf(pdf_path: str) -> tuple[int, int]:
     """
     Extracts the statement year and month from the PDF text using regex.
-    Currently specifically tuned for Desjardins format.
+    Supports Visa Desjardins and Compte Desjardins formats.
     """
     try:
         with pdfplumber.open(pdf_path) as pdf:
             first_page = pdf.pages[0]
             text = first_page.extract_text()
             
-            # Desjardins match: DATE DU RELEVÉ Jour DD Mois MM Année YYYY
-            pattern = r'DATE DU RELEVÉ\s+Jour\s+\d{2}\s+Mois\s+(\d{2})\s+Année\s+(\d{4})'
-            match = re.search(pattern, text)
+            # Pattern 1: Visa Desjardins (DATE DU RELEVÉ Jour DD Mois MM Année YYYY)
+            pattern1 = r'DATE DU RELEVÉ\s+Jour\s+\d{2}\s+Mois\s+(\d{2})\s+Année\s+(\d{4})'
+            match1 = re.search(pattern1, text)
+            if match1:
+                return int(match1.group(2)), int(match1.group(1))
             
-            if match:
-                month = int(match.group(1))
-                year = int(match.group(2))
-                return year, month
+            # Pattern 2: Compte Desjardins (au DD [Mois] YYYY)
+            pattern2 = r'au\s+\d{1,2}\s+([a-zA-Zûé]+)\s+(\d{4})'
+            match2 = re.search(pattern2, text, re.IGNORECASE)
+            if match2:
+                month_name = match2.group(1).lower()
+                month = FRENCH_MONTHS.get(month_name)
+                year = int(match2.group(2))
+                if month:
+                    return year, month
+                    
     except Exception as e:
         logger.warning(f"Failed to extract date from PDF {pdf_path}: {e}")
     
