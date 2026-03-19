@@ -43,8 +43,9 @@ export async function fetchDimensionDetail(slug: string, year: number) {
   return res.json();
 }
 
-export async function fetchAccountDetail(id: number) {
-  const res = await fetch(`${API_URL}/accounting/accounts/${id}`, {
+export async function fetchAccountDetail(id: number, year?: number) {
+  const url = `${API_URL}/accounting/accounts/${id}${year ? `?year=${year}` : ''}`;
+  const res = await fetch(url, {
     headers: getAuthHeader(),
   });
   if (!res.ok) {

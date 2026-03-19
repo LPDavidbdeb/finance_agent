@@ -110,15 +110,68 @@ def get_cumulative_sum_internal(family, root, up_to_date):
         account_id__in=ids,
         journal_entry__date__lte=up_to_date
     ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
+from categorization.models import Merchant
+
+router = Router(auth=JWTAuth())
 
 @router.get("/accounts/{account_id}", response=AccountDetailOut)
-def get_account_detail(request, account_id: int):
+def get_account_detail(request, account_id: int, year: Optional[int] = None):
     """
-    Returns full details for an account, including children and linked merchants.
+    Returns full details for an account, including children and linked merchants 
+    with their transaction balances for the year across the entire branch.
     """
+    if year is None:
+        year = date.today().year
+
     user = request.auth
     account = get_object_or_404(Account, id=account_id, family=user.family)
-    return account
+
+    # 1. Find all descendant accounts (the branch)
+    descendants = account.get_descendants(include_self=True)
+    descendant_ids = descendants.values_list('id', flat=True)
+
+    # 2. Fetch all Merchants mapped to any account in this branch
+    merchants = Merchant.objects.filter(family=user.family, default_account__in=descendants)
+
+    # 3. Fetch transaction sums for the year, grouped by clean_description (which matches Merchant name)
+    # Note: StagedTransaction.clean_description is our link to Merchant.name
+    sums = TransactionLine.objects.filter(
+        journal_entry__family=user.family,
+        account__in=descendants,
+        journal_entry__date__year=year
+    ).values('journal_entry__description').annotate(total=Sum('amount'))
+
+    sum_dict = {item['journal_entry__description']: item['total'] for item in sums}
+
+    # 4. Build merchant list with adjusted balances
+    # If the root of this branch is Revenue, Liability, or Equity, we flip the sign
+    # We find the top-level root of the account to determine type behavior
+    root = account.get_root()
+    flip_sign = root.name in ['Revenue', 'Liabilities', 'Equity']
+
+    merchant_list = []
+    for m in merchants:
+        raw_bal = sum_dict.get(m.name, Decimal('0.00'))
+        bal = -raw_bal if flip_sign else raw_bal
+
+        merchant_list.append({
+            "id": m.id,
+            "name": m.name,
+            "balance": float(bal)
+        })
+
+    # Sort descending by absolute balance (highest activity first)
+    merchant_list.sort(key=lambda x: abs(x['balance']), reverse=True)
+
+    # Manual response construction to inject the calculated merchants
+    return {
+        "id": account.id,
+        "name": account.name,
+        "account_type": account.account_type,
+        "parent_id": account.parent_id,
+        "children": list(account.get_children()),
+        "merchants": merchant_list
+    }
 
 @router.get("/spending-evolution")
 def get_spending_evolution(

@@ -15,6 +15,7 @@ interface ChildAccount {
 interface Merchant {
   id: number;
   name: string;
+  balance: number;
 }
 
 interface AccountDetail {
@@ -29,6 +30,8 @@ interface AccountDetail {
 export const AccountDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const currentYear = new Date().getFullYear();
+  
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +46,7 @@ export const AccountDetail: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await fetchAccountDetail(accountId);
+      const data = await fetchAccountDetail(accountId, currentYear);
       setAccount(data);
     } catch (err: any) {
       setError(err.message || "Failed to load account details.");
@@ -124,22 +127,38 @@ export const AccountDetail: React.FC = () => {
           <CardContent className="p-0">
             {account.merchants.length === 0 ? (
               <div className="p-10 text-center text-slate-400 italic text-sm">
-                No merchants assigned to this category.
+                No transaction activity for Banners in this branch for the selected year.
               </div>
             ) : (
-              <div className="divide-y divide-slate-50">
-                {account.merchants.map(merchant => (
-                  <Link 
-                    key={merchant.id} 
-                    to={`/dashboard/merchants/${merchant.id}`}
-                    className="flex items-center justify-between p-4 hover:bg-slate-50 transition-colors group"
-                  >
-                    <span className="font-medium text-slate-700 group-hover:text-emerald-600">{merchant.name}</span>
-                    <Badge variant="outline" className="text-[10px] uppercase opacity-0 group-hover:opacity-100 transition-opacity">
-                      View Profile
-                    </Badge>
-                  </Link>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50/50 border-b border-slate-100 text-slate-500 font-medium">
+                    <tr>
+                      <th className="px-4 py-2 text-left">Banner</th>
+                      <th className="px-4 py-2 text-right">YTD Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {account.merchants.map(merchant => (
+                      <tr key={merchant.id} className="hover:bg-slate-50/50 transition-colors group">
+                        <td className="px-4 py-3">
+                          <Link 
+                            to={`/dashboard/merchants/${merchant.id}`}
+                            className="font-medium text-slate-700 hover:text-emerald-600 flex items-center gap-2"
+                          >
+                            {merchant.name}
+                            <Badge variant="outline" className="text-[8px] uppercase h-4 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              View
+                            </Badge>
+                          </Link>
+                        </td>
+                        <td className={`px-4 py-3 text-right font-mono font-bold ${merchant.balance > 0 ? 'text-slate-900' : 'text-slate-400'}`}>
+                          ${merchant.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </CardContent>

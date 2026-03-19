@@ -9,6 +9,7 @@ class AccountChildOut(Schema):
 class AccountMerchantOut(Schema):
     id: int
     name: str
+    balance: float = 0.0
 
 class AccountDetailOut(Schema):
     id: int
@@ -21,10 +22,6 @@ class AccountDetailOut(Schema):
     @staticmethod
     def resolve_children(obj):
         return obj.get_children()
-
-    @staticmethod
-    def resolve_merchants(obj):
-        return obj.merchants.all()
 
 class DimensionLineItemOut(Schema):
     id: Optional[int] = None
