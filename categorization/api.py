@@ -69,16 +69,32 @@ def create_and_apply_mapping_rule(request, payload: RuleCreateAndApplyIn):
         tx.clean_description = merchant.name
         
         if can_auto_approve:
-            tx.predicted_account = merchant.default_account
+            target_account = merchant.default_account
+            
+            # CRITICAL: Resolve family-specific account if the default is global (NULL family)
+            if target_account.family_id != user.family_id:
+                resolved_account = Account.objects.filter(name=target_account.name, family=user.family).first()
+                if not resolved_account:
+                    resolved_account = Account.objects.create(
+                        name=target_account.name,
+                        account_type=target_account.account_type,
+                        family=user.family,
+                        parent=Account.objects.filter(name=target_account.parent.name, family=user.family).first() if target_account.parent else None
+                    )
+                target_account = resolved_account
+
+            tx.predicted_account = target_account
             tx.save()
             try:
                 approve_staged_transaction(
                     transaction_id=tx.id,
-                    target_account_id=merchant.default_account.id,
+                    target_account_id=target_account.id,
                     user=user
                 )
                 updated_count += 1
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.error(f"Auto-approve failed for tx {tx.id} during rule creation: {e}")
                 continue
         else:
             # Leave as UNPROCESSED, clear predicted if not unique
