@@ -33,6 +33,7 @@ type Product = {
   id: number;
   account_name: string;
   institution_name: string;
+  institution_id: number;
   product_type: string;
   account_number?: string;
   owner_id?: number;
@@ -336,6 +337,7 @@ export const ProductDetail: React.FC = () => {
 
               <TransactionListTable 
                 productId={Number(id!)}
+                institutionId={product?.institution_id}
                 title="Action Required: Global Backlog"
                 description="Transactions that have been extracted but not yet categorized or approved."
                 fetchFn={fetchBacklog}
@@ -402,6 +404,7 @@ export const ProductDetail: React.FC = () => {
               {/* Ledger Mode */}
               <TransactionListTable 
                 productId={Number(id!)}
+                institutionId={product?.institution_id}
                 title={`Statement: ${selectedMonth.display_name}`}
                 description={`A complete chronological view of all activity for ${selectedMonth.display_name}.`}
                 fetchFn={fetchMonthTransactions}

@@ -38,6 +38,14 @@ class MerchantDetailOut(Schema):
     default_account_name: Optional[str] = None
     mapping_rules: List[MappingRuleOut]
 
+    @staticmethod
+    def resolve_default_account_name(obj):
+        return obj.default_account.name if obj.default_account else None
+
+    @staticmethod
+    def resolve_default_account_id(obj):
+        return obj.default_account_id
+
 class MerchantMergeIn(Schema):
     target_id: int
     source_ids: List[int]

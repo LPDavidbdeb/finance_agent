@@ -23,6 +23,7 @@ export interface StagedTransaction {
 
 interface TransactionListTableProps {
   productId: number;
+  institutionId?: number;
   title: string;
   description: string;
   fetchFn: () => Promise<StagedTransaction[]>;
@@ -32,6 +33,7 @@ interface TransactionListTableProps {
 
 export const TransactionListTable: React.FC<TransactionListTableProps> = ({
   productId,
+  institutionId,
   title,
   description,
   fetchFn,
@@ -230,6 +232,7 @@ export const TransactionListTable: React.FC<TransactionListTableProps> = ({
         onClose={() => setIsRuleModalOpen(false)}
         onSuccess={handleRuleCreated}
         rawDescription={selectedRawDescription}
+        institutionId={institutionId}
       />
 
       {/* Manual Categorization Modal */}

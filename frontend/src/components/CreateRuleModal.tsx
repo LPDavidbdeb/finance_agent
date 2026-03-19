@@ -28,19 +28,22 @@ interface CreateRuleModalProps {
   onClose: () => void;
   onSuccess: (updatedCount: number) => void;
   rawDescription: string;
+  institutionId?: number;
 }
 
 export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
-  rawDescription
+  rawDescription,
+  institutionId
 }) => {
   const [formData, setFormData] = useState({
     search_text: '',
     merchant_name: '',
     target_account_id: 0 as number | undefined,
     is_unique_provider: true,
+    institution_id: undefined as number | undefined,
   });
   
   const [merchants, setMerchants] = useState<Merchant[]>([]);
@@ -60,6 +63,7 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
         merchant_name: '',
         target_account_id: 0,
         is_unique_provider: true,
+        institution_id: institutionId || undefined,
       });
       setSelectedAccountName(null);
       setIsTreeOpen(false);
@@ -67,7 +71,7 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
       loadMerchants();
     }
     setError(null);
-  }, [isOpen, rawDescription]);
+  }, [isOpen, rawDescription, institutionId]);
 
   const loadMerchants = async () => {
     try {
