@@ -4,6 +4,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Button } from './ui/button';
 import { useToast } from './ui/use-toast';
 import { Badge } from './ui/badge';
+import { CreateRuleModal } from './CreateRuleModal';
+import { PlusCircle } from 'lucide-react';
 
 interface StagedTransaction {
   id: number;
@@ -30,6 +32,11 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [approving, setApproving] = useState<Record<number, boolean>>({});
+  
+  // Rule Modal State
+  const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
+  const [selectedRawDescription, setSelectedRawDescription] = useState('');
+
   const { toast } = useToast();
 
   const loadTransactions = async () => {
@@ -79,6 +86,19 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
     } finally {
       setApproving(prev => ({ ...prev, [transactionId]: false }));
     }
+  };
+
+  const handleCreateRuleClick = (rawDescription: string) => {
+    setSelectedRawDescription(rawDescription);
+    setIsRuleModalOpen(true);
+  };
+
+  const handleRuleCreated = (updatedCount: number) => {
+    toast({
+      title: "Rule Created & Applied",
+      description: `New rule created and ${updatedCount} transaction(s) auto-approved.`,
+    });
+    loadTransactions(); // Refresh the list
   };
 
   if (loading) {
@@ -146,7 +166,16 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
                   <td className="px-4 py-3 text-slate-900 font-mono text-right">
                     {`$${Math.abs(tx.amount).toFixed(2)}`}
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right space-x-2">
+                    <Button 
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleCreateRuleClick(tx.raw_description)}
+                      title="Create automation rule for this description"
+                    >
+                      <PlusCircle className="h-4 w-4 mr-1" />
+                      Rule
+                    </Button>
                     <Button 
                       size="sm"
                       onClick={() => handleApprove(tx.id, tx.predicted_account_id)}
@@ -161,6 +190,13 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
           </table>
         </div>
       </CardContent>
+
+      <CreateRuleModal 
+        isOpen={isRuleModalOpen}
+        onClose={() => setIsRuleModalOpen(false)}
+        onSuccess={handleRuleCreated}
+        rawDescription={selectedRawDescription}
+      />
     </Card>
   );
 };

@@ -92,5 +92,10 @@ class StagedTransactionOut(Schema):
     def resolve_predicted_account_name(obj):
         return obj.predicted_account.name if obj.predicted_account else None
 
+class StatementMonthOut(Schema):
+    month: date
+    display_name: str
+    transaction_count: int
+
 class TransactionApproveIn(Schema):
     target_account_id: int

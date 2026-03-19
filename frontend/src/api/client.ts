@@ -9,8 +9,36 @@ function getAuthHeader() {
   };
 }
 
+// --- Accounting API ---
+
+export async function fetchSpendingEvolution(startDate: string, endDate: string, interval: string) {
+  const res = await fetch(`${API_URL}/accounting/spending-evolution?start_date=${startDate}&end_date=${endDate}&interval=${interval}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch spending evolution");
+  return res.json();
+}
+
+export async function fetchSpendingByCategory(startDate: string, endDate: string) {
+  const res = await fetch(`${API_URL}/accounting/spending-by-category?start_date=${startDate}&end_date=${endDate}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch spending by category");
+  return res.json();
+}
+
+export async function fetchAnnualStatements(year: number) {
+  const res = await fetch(`${API_URL}/accounting/annual-statements?year=${year}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch annual statements");
+  return res.json();
+}
+
 export async function fetchAccountTree() {
-  const res = await fetch(`${API_URL}/accounts/tree`);
+  const res = await fetch(`${API_URL}/accounts/tree`, {
+    headers: getAuthHeader(),
+  });
   if (!res.ok) throw new Error("Failed to fetch account tree");
   return res.json();
 }
@@ -18,6 +46,7 @@ export async function fetchAccountTree() {
 export async function deleteAccount(id: number) {
   const res = await fetch(`${API_URL}/accounts/${id}`, {
     method: "DELETE",
+    headers: getAuthHeader(),
   });
   if (!res.ok) throw new Error("Failed to delete account");
   return res.json();
@@ -26,9 +55,7 @@ export async function deleteAccount(id: number) {
 export async function moveAccount(accountId: number, targetParentId: number) {
   const res = await fetch(`${API_URL}/accounts/${accountId}/move`, {
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: getAuthHeader(),
     body: JSON.stringify({ target_parent_id: targetParentId }),
   });
   if (!res.ok) throw new Error("Failed to move account");
@@ -269,6 +296,58 @@ export async function deleteStatementImport(importId: number) {
     throw new Error(errorData?.detail || "Failed to delete statement import");
   }
 
+  return res.json();
+}
+
+export async function fetchStatementMonths(productId: number) {
+  const res = await fetch(`${API_URL}/banking/products/${productId}/statement-months`, {
+    headers: getAuthHeader(),
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('Unauthorized');
+    throw new Error('Failed to fetch statement months');
+  }
+
+  return res.json();
+}
+
+export async function fetchStatementTransactions(productId: number, year: number, month: number) {
+  const res = await fetch(`${API_URL}/banking/products/${productId}/statements/${year}/${month}/transactions`, {
+    headers: getAuthHeader(),
+  });
+
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('Unauthorized');
+    throw new Error('Failed to fetch statement transactions');
+  }
+
+  return res.json();
+}
+
+// --- Categorization API ---
+
+export async function fetchMerchants() {
+  const res = await fetch(`${API_URL}/categorization/merchants`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to fetch merchants");
+  }
+  return res.json();
+}
+
+export async function updateMerchantAccount(merchantId: number, accountId: number) {
+  const res = await fetch(`${API_URL}/categorization/merchants/${merchantId}`, {
+    method: "PATCH",
+    headers: getAuthHeader(),
+    body: JSON.stringify({ default_account_id: accountId }),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.detail || "Failed to update merchant category");
+  }
   return res.json();
 }
 

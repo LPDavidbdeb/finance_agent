@@ -40,8 +40,8 @@ def extract_transactions_from_statement(import_id: int, user):
             raw_description = str(tx_data.get('description', ''))
             rule = find_matching_rule(raw_description, institution_id)
             
-            clean_desc = rule.merchant_name if rule else raw_description
-            predicted_acc = rule.target_account if rule else None
+            clean_desc = rule.merchant.name if rule else raw_description
+            predicted_acc = rule.merchant.default_account if rule else None
             
             amount_val = tx_data.get('amount', 0)
             if pd.isna(amount_val):

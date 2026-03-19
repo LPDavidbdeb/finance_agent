@@ -2,10 +2,11 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Navbar } from './components/Navbar';
 import { OnboardingForm } from './components/OnboardingForm';
 import { LoginForm } from './components/LoginForm';
-import { Dashboard } from './components/Dashboard';
+import { Dashboard } from './pages/Dashboard';
 import { InstitutionManager } from './components/InstitutionManager';
 import { MemberProfile } from './pages/MemberProfile';
 import { ProductDetail } from './pages/ProductDetail';
+import { MerchantManager } from './pages/MerchantManager';
 import { AccountTree } from './components/AccountTree';
 import { AuthProvider } from './context/AuthContext';
 
@@ -23,6 +24,7 @@ function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/dashboard/member/:id" element={<MemberProfile />} />
               <Route path="/dashboard/product/:id" element={<ProductDetail />} />
+              <Route path="/dashboard/merchants" element={<MerchantManager />} />
               <Route path="/settings/banks" element={<InstitutionManager />} />
               <Route path="/ledger" element={<AccountTree />} />
             </Routes>

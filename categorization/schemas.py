@@ -6,3 +6,12 @@ class RuleCreateAndApplyIn(Schema):
     merchant_name: str
     target_account_id: int
     institution_id: Optional[int] = None
+
+class MerchantOut(Schema):
+    id: int
+    name: str
+    default_account_id: Optional[int] = None
+    default_account_name: Optional[str] = None
+
+class MerchantUpdateIn(Schema):
+    default_account_id: int

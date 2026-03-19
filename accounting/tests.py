@@ -95,3 +95,68 @@ class AccountingApiTest(TestCase):
         response = self.client.delete(f"/accounts/{self.cash_b.id}", headers=self.headers_a)
         self.assertNotEqual(response.status_code, 200)
         self.assertTrue(Account.objects.filter(id=self.cash_b.id).exists())
+
+    def test_get_spending_evolution(self):
+        """Test the spending evolution report."""
+        # Create an 'Expenses' root
+        root_exp = Account.objects.create(name="Expenses", account_type=Account.AccountType.EXPENSE, family=self.family_a)
+        sub_exp = Account.objects.create(name="Food", account_type=Account.AccountType.EXPENSE, family=self.family_a, parent=root_exp)
+        
+        # Create some journal entries and lines
+        je = JournalEntry.objects.create(family=self.family_a, date="2023-01-15", description="Groceries")
+        TransactionLine.objects.create(journal_entry=je, account=sub_exp, amount=Decimal("150.00"))
+        TransactionLine.objects.create(journal_entry=je, account=self.cash_a, amount=Decimal("-150.00"))
+        
+        response = self.client.get("/accounting/spending-evolution?start_date=2023-01-01&end_date=2023-12-31&interval=monthly", headers=self.headers_a)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(len(data) > 0)
+        self.assertEqual(data[0]['amount'], 150.00)
+
+    def test_get_spending_by_category(self):
+        """Test the spending by category report."""
+        root_exp = Account.objects.create(name="Expenses", account_type=Account.AccountType.EXPENSE, family=self.family_a)
+        cat_food = Account.objects.create(name="Food", account_type=Account.AccountType.EXPENSE, family=self.family_a, parent=root_exp)
+        cat_rent = Account.objects.create(name="Rent", account_type=Account.AccountType.EXPENSE, family=self.family_a, parent=root_exp)
+        
+        je1 = JournalEntry.objects.create(family=self.family_a, date="2023-01-15", description="Groceries")
+        TransactionLine.objects.create(journal_entry=je1, account=cat_food, amount=Decimal("150.00"))
+        TransactionLine.objects.create(journal_entry=je1, account=self.cash_a, amount=Decimal("-150.00"))
+        
+        je2 = JournalEntry.objects.create(family=self.family_a, date="2023-01-20", description="Rent payment")
+        TransactionLine.objects.create(journal_entry=je2, account=cat_rent, amount=Decimal("1000.00"))
+        TransactionLine.objects.create(journal_entry=je2, account=self.cash_a, amount=Decimal("-1000.00"))
+        
+        response = self.client.get("/accounting/spending-by-category?start_date=2023-01-01&end_date=2023-01-31", headers=self.headers_a)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        # Should be sorted by amount descending
+        self.assertEqual(data[0]['category'], "Rent")
+        self.assertEqual(data[0]['amount'], 1000.00)
+        self.assertEqual(data[1]['category'], "Food")
+        self.assertEqual(data[1]['amount'], 150.00)
+
+    def test_get_annual_statements(self):
+        """Test the annual statements report."""
+        # Setup tree
+        root_rev = Account.objects.create(name="Revenue", account_type=Account.AccountType.REVENUE, family=self.family_a)
+        root_exp = Account.objects.create(name="Expenses", account_type=Account.AccountType.EXPENSE, family=self.family_a)
+        root_asset = Account.objects.create(name="Assets", account_type=Account.AccountType.ASSET, family=self.family_a)
+        
+        # Add some transactions for 2023
+        je1 = JournalEntry.objects.create(family=self.family_a, date="2023-06-01", description="Salary")
+        TransactionLine.objects.create(journal_entry=je1, account=root_rev, amount=Decimal("-5000.00"))
+        TransactionLine.objects.create(journal_entry=je1, account=root_asset, amount=Decimal("5000.00"))
+        
+        je2 = JournalEntry.objects.create(family=self.family_a, date="2023-06-15", description="Rent")
+        TransactionLine.objects.create(journal_entry=je2, account=root_exp, amount=Decimal("1200.00"))
+        TransactionLine.objects.create(journal_entry=je2, account=root_asset, amount=Decimal("-1200.00"))
+        
+        response = self.client.get("/accounting/annual-statements?year=2023", headers=self.headers_a)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        
+        self.assertEqual(data['income_statement']['revenue'], 5000.00)
+        self.assertEqual(data['income_statement']['expenses'], 1200.00)
+        self.assertEqual(data['income_statement']['net_income'], 3800.00)
+        self.assertEqual(data['balance_sheet']['assets'], 3800.00) # 5000 - 1200

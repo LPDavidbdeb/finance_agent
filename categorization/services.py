@@ -17,6 +17,7 @@ def find_matching_rule(raw_description: str, institution_id: int) -> Optional[Tr
         TransactionMappingRule.objects.filter(
             institution_id=institution_id,
         )
+        .select_related('merchant', 'merchant__default_account')
         .annotate(desc=Value(description, output_field=CharField()))
         .filter(desc__icontains=Lower('search_text'))
         .order_by('-search_text') # Prefer longer matches
@@ -27,6 +28,7 @@ def find_matching_rule(raw_description: str, institution_id: int) -> Optional[Tr
 
     return (
         TransactionMappingRule.objects.filter(institution__isnull=True)
+        .select_related('merchant', 'merchant__default_account')
         .annotate(desc=Value(description, output_field=CharField()))
         .filter(desc__icontains=Lower('search_text'))
         .order_by('-search_text') # Prefer longer matches

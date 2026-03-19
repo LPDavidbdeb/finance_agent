@@ -5,7 +5,8 @@ from ninja_jwt.authentication import JWTAuth
 from typing import List, Optional
 from datetime import date
 from django.shortcuts import get_object_or_404
-from django.db.models import ProtectedError
+from django.db.models import ProtectedError, Count
+from django.db.models.functions import TruncMonth
 from users.models import FamilyMember
 
 from .schemas import (
@@ -17,6 +18,7 @@ from .schemas import (
     StatementImportOut,
     StagedTransactionOut,
     TransactionApproveIn,
+    StatementMonthOut,
 )
 from .models import FinancialInstitution, FinancialProduct, BankStatementImport, StagedTransaction
 from .services import provision_financial_product, approve_staged_transaction
@@ -153,6 +155,43 @@ def list_staged_transactions(request, product_id: int):
     return StagedTransaction.objects.filter(
         statement_import__financial_product=product,
         status=StagedTransaction.Status.UNPROCESSED
+    ).select_related('predicted_account').order_by("-bank_date")
+
+
+@router.get("/products/{product_id}/statement-months", response=List[StatementMonthOut])
+def list_statement_months(request, product_id: int):
+    """Returns chronological list of months with transaction counts for a product."""
+    user = request.auth
+    product = get_object_or_404(FinancialProduct, id=product_id, family=user.family)
+    
+    months = StagedTransaction.objects.filter(
+        statement_import__financial_product=product
+    ).annotate(
+        month=TruncMonth('bank_date')
+    ).values('month').annotate(
+        transaction_count=Count('id')
+    ).order_by('-month')
+    
+    return [
+        {
+            "month": m['month'],
+            "display_name": m['month'].strftime("%B %Y"),
+            "transaction_count": m['transaction_count']
+        }
+        for m in months
+    ]
+
+
+@router.get("/products/{product_id}/statements/{year}/{month}/transactions", response=List[StagedTransactionOut])
+def list_statement_transactions(request, product_id: int, year: int, month: int):
+    """Returns transactions for a specific product in a specific month."""
+    user = request.auth
+    product = get_object_or_404(FinancialProduct, id=product_id, family=user.family)
+    
+    return StagedTransaction.objects.filter(
+        statement_import__financial_product=product,
+        bank_date__year=year,
+        bank_date__month=month
     ).select_related('predicted_account').order_by("-bank_date")
 
 

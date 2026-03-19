@@ -4,7 +4,7 @@ from django.db.models import Q
 from users.models import Family, CustomUser
 from accounting.models import Account
 from banking.models import StagedTransaction, FinancialInstitution
-from categorization.models import TransactionMappingRule
+from categorization.models import TransactionMappingRule, Merchant
 from banking.services import approve_staged_transaction
 import uuid
 
@@ -34,7 +34,6 @@ class Command(BaseCommand):
             account = Account.objects.filter(name=name, family=family, parent=current_parent).first()
             if not account:
                 # Check if exists in global under global parent
-                # We need the global parent of this child
                 global_parent = Account.objects.filter(name=current_parent.name, family__isnull=True).first()
                 global_child = None
                 if global_parent:
@@ -180,32 +179,21 @@ class Command(BaseCommand):
         for r_def in rules_to_seed:
             target_account = self.get_or_create_cloned_account(family, r_def['root'], r_def['path'])
             
-            # Create rule (Global rule for simplicity as per user prompt "create TransactionMappingRule records")
-            # The prompt doesn't specify if rules should be family-specific, 
-            # but TransactionMappingRule has institution field, not family. 
-            # Wait, categorization/models.py: TransactionMappingRule does NOT have family field.
-            # But the user said "family-aware management command". 
-            # It seems TransactionMappingRule is global but points to family-specific accounts if we want.
-            # Actually, let's check TransactionMappingRule again.
-            
-            rule, created = TransactionMappingRule.objects.get_or_create(
-                search_text=r_def['search'],
-                institution=None,
-                defaults={
-                    'merchant_name': r_def['merchant'],
-                    'target_account': target_account
-                }
+            # 1. Get or create the Merchant for this family
+            merchant, _ = Merchant.objects.get_or_create(
+                family=family,
+                name=r_def['merchant'],
+                defaults={'default_account': target_account}
             )
             
-            if not created:
-                rule.merchant_name = r_def['merchant']
-                rule.target_account = target_account
-                rule.save()
+            # 2. Get or create the TransactionMappingRule linking to this merchant
+            rule, created = TransactionMappingRule.objects.get_or_create(
+                merchant=merchant,
+                search_text=r_def['search'],
+                institution=None
+            )
 
             # Global Auto-Apply: Query ALL StagedTransaction where status == UNPROCESSED
-            # Prompt: "it should immediately query all StagedTransaction records where status == UNPROCESSED"
-            # Since it's family-aware, I'll filter by family.
-            
             transactions = StagedTransaction.objects.filter(
                 statement_import__financial_product__family=family,
                 status=StagedTransaction.Status.UNPROCESSED,
@@ -220,7 +208,7 @@ class Command(BaseCommand):
             )
 
             for tx in transactions:
-                tx.clean_description = r_def['merchant']
+                tx.clean_description = merchant.name
                 tx.predicted_account = target_account
                 tx.save()
                 total_updated += 1
