@@ -4,9 +4,15 @@ class Merchant(models.Model):
     family = models.ForeignKey('users.Family', on_delete=models.CASCADE, related_name='merchants')
     name = models.CharField(max_length=255)
     default_account = models.ForeignKey('accounting.Account', on_delete=models.SET_NULL, null=True, related_name='merchants')
+    is_unique_provider = models.BooleanField(default=True)
 
     class Meta:
         unique_together = ('family', 'name')
+
+    def save(self, *args, **kwargs):
+        if self.name:
+            self.name = self.name.strip().upper()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name

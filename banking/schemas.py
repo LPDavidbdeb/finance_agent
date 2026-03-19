@@ -83,6 +83,7 @@ class StagedTransactionOut(Schema):
     statement_import_id: int
     predicted_account_id: Optional[int] = None
     predicted_account_name: Optional[str] = None
+    reconciled_account_name: Optional[str] = None
 
     @staticmethod
     def resolve_predicted_account_id(obj):
@@ -91,6 +92,18 @@ class StagedTransactionOut(Schema):
     @staticmethod
     def resolve_predicted_account_name(obj):
         return obj.predicted_account.name if obj.predicted_account else None
+
+    @staticmethod
+    def resolve_reconciled_account_name(obj):
+        if not obj.journal_entry:
+            return None
+        # The category is the account that does NOT have a linked FinancialProduct
+        # (The other side of the double-entry is the bank account)
+        for line in obj.journal_entry.lines.all():
+            # Use hasattr check for OneToOne reverse relationship
+            if not hasattr(line.account, 'financial_product'):
+                return line.account.name
+        return None
 
 class StatementMonthOut(Schema):
     month: date

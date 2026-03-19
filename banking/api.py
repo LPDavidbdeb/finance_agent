@@ -192,7 +192,7 @@ def list_statement_transactions(request, product_id: int, year: int, month: int)
         statement_import__financial_product=product,
         bank_date__year=year,
         bank_date__month=month
-    ).select_related('predicted_account').order_by("-bank_date")
+    ).select_related('predicted_account', 'journal_entry').prefetch_related('journal_entry__lines__account').order_by("-bank_date")
 
 
 @router.post("/products/{product_id}/staged-transactions/{transaction_id}/approve")

@@ -5,7 +5,8 @@ import { Button } from './ui/button';
 import { useToast } from './ui/use-toast';
 import { Badge } from './ui/badge';
 import { CreateRuleModal } from './CreateRuleModal';
-import { PlusCircle } from 'lucide-react';
+import { AccountTree } from './AccountTree';
+import { PlusCircle, Tag } from 'lucide-react';
 
 interface StagedTransaction {
   id: number;
@@ -16,6 +17,7 @@ interface StagedTransaction {
   status: string;
   predicted_account_id?: number;
   predicted_account_name?: string;
+  reconciled_account_name?: string;
   statement_import_id: number;
 }
 
@@ -36,6 +38,10 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
   // Rule Modal State
   const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
   const [selectedRawDescription, setSelectedRawDescription] = useState('');
+
+  // Inline Categorization State
+  const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
+  const [categorizingTxId, setCategorizingTxId] = useState<number | null>(null);
 
   const { toast } = useToast();
 
@@ -64,7 +70,7 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
       toast({
         variant: "destructive",
         title: "Approval Failed",
-        description: "No predicted account to approve this transaction.",
+        description: "No target account selected to approve this transaction.",
       });
       return;
     }
@@ -99,6 +105,19 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
       description: `New rule created and ${updatedCount} transaction(s) auto-approved.`,
     });
     loadTransactions(); // Refresh the list
+  };
+
+  const handleAssignCategoryClick = (txId: number) => {
+    setCategorizingTxId(txId);
+    setIsAccountModalOpen(true);
+  };
+
+  const handleAccountSelect = async (account: any) => {
+    if (categorizingTxId) {
+      await handleApprove(categorizingTxId, account.id);
+      setIsAccountModalOpen(false);
+      setCategorizingTxId(null);
+    }
   };
 
   if (loading) {
@@ -155,12 +174,24 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
                     {tx.clean_description && <div className="text-xs text-slate-400">{tx.raw_description}</div>}
                   </td>
                   <td className="px-4 py-3">
-                    {tx.predicted_account_name ? (
+                    {tx.status === 'RECONCILED' ? (
+                      <Badge className="bg-blue-600 text-white border-none">
+                        {tx.reconciled_account_name || 'Reconciled'}
+                      </Badge>
+                    ) : tx.predicted_account_name ? (
                       <Badge variant="secondary" className="bg-green-100 text-green-800">
                         Predicted: {tx.predicted_account_name}
                       </Badge>
                     ) : (
-                      <span className="text-slate-400">Uncategorized</span>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="h-7 text-[10px] gap-1 border-dashed"
+                        onClick={() => handleAssignCategoryClick(tx.id)}
+                      >
+                        <Tag className="h-3 w-3" />
+                        Assign Category
+                      </Button>
                     )}
                   </td>
                   <td className="px-4 py-3 text-slate-900 font-mono text-right">
@@ -172,6 +203,7 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
                       size="sm"
                       onClick={() => handleCreateRuleClick(tx.raw_description)}
                       title="Create automation rule for this description"
+                      disabled={tx.status === 'RECONCILED'}
                     >
                       <PlusCircle className="h-4 w-4 mr-1" />
                       Rule
@@ -179,9 +211,9 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
                     <Button 
                       size="sm"
                       onClick={() => handleApprove(tx.id, tx.predicted_account_id)}
-                      disabled={approving[tx.id] || !tx.predicted_account_id}
+                      disabled={approving[tx.id] || !tx.predicted_account_id || tx.status === 'RECONCILED'}
                     >
-                      {approving[tx.id] ? 'Approving...' : 'Approve'}
+                      {tx.status === 'RECONCILED' ? 'Approved' : (approving[tx.id] ? 'Approving...' : 'Approve')}
                     </Button>
                   </td>
                 </tr>
@@ -197,6 +229,31 @@ export const StagedTransactionsTable: React.FC<StagedTransactionsTableProps> = (
         onSuccess={handleRuleCreated}
         rawDescription={selectedRawDescription}
       />
+
+      {/* Manual Categorization Modal */}
+      {isAccountModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <Card className="w-full max-w-2xl mx-auto shadow-2xl max-h-[90vh] flex flex-col">
+            <CardHeader className="border-b">
+              <CardTitle>Assign Accounting Category</CardTitle>
+              <CardDescription>
+                Select the destination account for this transaction.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-y-auto p-6">
+              <AccountTree 
+                isSelectMode={true} 
+                onSelect={handleAccountSelect} 
+              />
+              <div className="flex justify-end mt-6">
+                <Button variant="outline" onClick={() => { setIsAccountModalOpen(false); setCategorizingTxId(null); }}>
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </Card>
   );
 };
