@@ -25,3 +25,13 @@ class AccountDetailOut(Schema):
     @staticmethod
     def resolve_merchants(obj):
         return obj.merchants.all()
+
+class DimensionLineItemOut(Schema):
+    id: Optional[int] = None
+    name: str
+    balance: float
+
+class DimensionBreakdownOut(Schema):
+    dimension_name: str
+    total_amount: float
+    line_items: List[DimensionLineItemOut]

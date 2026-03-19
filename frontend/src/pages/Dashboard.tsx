@@ -162,7 +162,10 @@ export const Dashboard: React.FC = () => {
       {/* Annual Summary Cards */}
       {statements && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-          <Card className="bg-white border-l-4 border-l-green-500">
+          <Card 
+            className="bg-white border-l-4 border-l-green-500 cursor-pointer hover:bg-slate-50 transition-all hover:shadow-md"
+            onClick={() => navigate(`/dashboard/dimension/revenue?year=${selectedYear}`)}
+          >
             <CardHeader className="pb-2">
               <CardDescription className="text-xs uppercase font-bold tracking-wider">Revenue</CardDescription>
               <CardTitle className="text-xl flex items-center gap-2">
@@ -171,7 +174,10 @@ export const Dashboard: React.FC = () => {
               </CardTitle>
             </CardHeader>
           </Card>
-          <Card className="bg-white border-l-4 border-l-orange-500">
+          <Card 
+            className="bg-white border-l-4 border-l-orange-500 cursor-pointer hover:bg-slate-50 transition-all hover:shadow-md"
+            onClick={() => navigate(`/dashboard/dimension/expenses?year=${selectedYear}`)}
+          >
             <CardHeader className="pb-2">
               <CardDescription className="text-xs uppercase font-bold tracking-wider">Expenses</CardDescription>
               <CardTitle className="text-xl flex items-center gap-2">
@@ -180,7 +186,10 @@ export const Dashboard: React.FC = () => {
               </CardTitle>
             </CardHeader>
           </Card>
-          <Card className="bg-white border-l-4 border-l-blue-500">
+          <Card 
+            className="bg-white border-l-4 border-l-blue-500 cursor-pointer hover:bg-slate-50 transition-all hover:shadow-md"
+            onClick={() => navigate(`/dashboard/dimension/net-income?year=${selectedYear}`)}
+          >
             <CardHeader className="pb-2">
               <CardDescription className="text-xs uppercase font-bold tracking-wider">Net Income</CardDescription>
               <CardTitle className={`text-xl ${statements.income_statement.net_income >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -188,7 +197,10 @@ export const Dashboard: React.FC = () => {
               </CardTitle>
             </CardHeader>
           </Card>
-          <Card className="bg-white border-l-4 border-l-emerald-600">
+          <Card 
+            className="bg-white border-l-4 border-l-emerald-600 cursor-pointer hover:bg-slate-50 transition-all hover:shadow-md"
+            onClick={() => navigate(`/dashboard/dimension/assets?year=${selectedYear}`)}
+          >
             <CardHeader className="pb-2">
               <CardDescription className="text-xs uppercase font-bold tracking-wider">Total Assets</CardDescription>
               <CardTitle className="text-xl flex items-center gap-2">
@@ -197,7 +209,10 @@ export const Dashboard: React.FC = () => {
               </CardTitle>
             </CardHeader>
           </Card>
-          <Card className="bg-white border-l-4 border-l-red-500">
+          <Card 
+            className="bg-white border-l-4 border-l-red-500 cursor-pointer hover:bg-slate-50 transition-all hover:shadow-md"
+            onClick={() => navigate(`/dashboard/dimension/liabilities?year=${selectedYear}`)}
+          >
             <CardHeader className="pb-2">
               <CardDescription className="text-xs uppercase font-bold tracking-wider">Liabilities</CardDescription>
               <CardTitle className="text-xl flex items-center gap-2 text-red-600">
@@ -206,7 +221,10 @@ export const Dashboard: React.FC = () => {
               </CardTitle>
             </CardHeader>
           </Card>
-          <Card className="bg-slate-900 text-white border-none shadow-lg transform scale-105 z-10">
+          <Card 
+            className="bg-slate-900 text-white border-none shadow-lg transform scale-105 z-10 cursor-pointer hover:bg-slate-800 transition-all hover:shadow-2xl"
+            onClick={() => navigate(`/dashboard/dimension/net-worth?year=${selectedYear}`)}
+          >
             <CardHeader className="pb-2">
               <CardDescription className="text-xs uppercase font-bold tracking-wider text-slate-400">Net Worth</CardDescription>
               <CardTitle className="text-xl text-blue-400">

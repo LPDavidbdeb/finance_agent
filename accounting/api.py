@@ -8,9 +8,108 @@ from typing import List, Literal, Optional
 from decimal import Decimal
 
 from .models import Account, TransactionLine, JournalEntry
-from .schemas import AccountDetailOut
+from .schemas import AccountDetailOut, DimensionBreakdownOut
 
 router = Router(auth=JWTAuth())
+
+@router.get("/reports/dimension/{dimension_slug}", response=DimensionBreakdownOut)
+def get_dimension_breakdown(request, dimension_slug: str, year: int):
+    """
+    Returns a detailed breakdown of a specific financial dimension for a given year.
+    """
+    user = request.auth
+    family = user.family
+    jan_1 = date(year, 1, 1)
+    dec_31 = date(year, 12, 31)
+
+    line_items = []
+    total_amount = Decimal('0.00')
+    dimension_name = dimension_slug.replace('-', ' ').title()
+
+    # Helper to sum lines for a specific account (descendants)
+    def get_account_balance(account, start, end, cumulative=False):
+        ids = account.get_descendants(include_self=True).values_list('id', flat=True)
+        q = Q(journal_entry__family=family, account_id__in=ids)
+        if cumulative:
+            q &= Q(journal_entry__date__lte=end)
+        else:
+            q &= Q(journal_entry__date__range=[start, end])
+        
+        return TransactionLine.objects.filter(q).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
+
+    if dimension_slug in ['revenue', 'expenses', 'assets', 'liabilities', 'equity']:
+        # Map slug to proper root name
+        root_map = {
+            'revenue': 'Revenue',
+            'expenses': 'Expenses',
+            'assets': 'Assets',
+            'liabilities': 'Liabilities',
+            'equity': 'Equity'
+        }
+        root_name = root_map[dimension_slug]
+        root = get_object_or_404(Account, family=family, name=root_name, parent=None)
+        
+        is_cumulative = dimension_slug in ['assets', 'liabilities', 'equity']
+        
+        # Total for the root
+        total_balance = get_account_balance(root, jan_1, dec_31, cumulative=is_cumulative)
+        
+        # Break down by immediate children
+        children = root.get_children()
+        for child in children:
+            bal = get_account_balance(child, jan_1, dec_31, cumulative=is_cumulative)
+            # Display logic: Revenues and Liabilities are usually shown as positive in reports
+            display_bal = bal
+            if dimension_slug in ['revenue', 'liabilities', 'equity']:
+                display_bal = -bal
+                
+            line_items.append({
+                "id": child.id,
+                "name": child.name,
+                "balance": float(display_bal)
+            })
+        
+        total_amount = -total_balance if dimension_slug in ['revenue', 'liabilities', 'equity'] else total_balance
+
+    elif dimension_slug == 'net-income':
+        root_rev = Account.objects.get(family=family, name='Revenue', parent=None)
+        root_exp = Account.objects.get(family=family, name='Expenses', parent=None)
+        
+        rev_bal = get_account_balance(root_rev, jan_1, dec_31)
+        exp_bal = get_account_balance(root_exp, jan_1, dec_31)
+        
+        total_amount = -rev_bal - exp_bal
+        line_items = [
+            {"name": "Total Revenue", "balance": float(-rev_bal)},
+            {"name": "Total Expenses", "balance": float(exp_bal)}
+        ]
+
+    elif dimension_slug == 'net-worth':
+        root_ast = Account.objects.get(family=family, name='Assets', parent=None)
+        root_lib = Account.objects.get(family=family, name='Liabilities', parent=None)
+        
+        ast_bal = get_cumulative_sum_internal(family, root_ast, dec_31)
+        lib_bal = get_cumulative_sum_internal(family, root_lib, dec_31)
+        
+        total_amount = ast_bal + lib_bal # Liabilities are negative
+        line_items = [
+            {"name": "Total Assets", "balance": float(ast_bal)},
+            {"name": "Total Liabilities", "balance": float(-lib_bal)}
+        ]
+
+    return {
+        "dimension_name": dimension_name,
+        "total_amount": float(total_amount),
+        "line_items": line_items
+    }
+
+def get_cumulative_sum_internal(family, root, up_to_date):
+    ids = root.get_descendants(include_self=True).values_list('id', flat=True)
+    return TransactionLine.objects.filter(
+        journal_entry__family=family,
+        account_id__in=ids,
+        journal_entry__date__lte=up_to_date
+    ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
 
 @router.get("/accounts/{account_id}", response=AccountDetailOut)
 def get_account_detail(request, account_id: int):

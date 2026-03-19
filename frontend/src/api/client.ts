@@ -35,6 +35,14 @@ export async function fetchAnnualStatements(year: number) {
   return res.json();
 }
 
+export async function fetchDimensionDetail(slug: string, year: number) {
+  const res = await fetch(`${API_URL}/accounting/reports/dimension/${slug}?year=${year}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch dimension breakdown");
+  return res.json();
+}
+
 export async function fetchAccountDetail(id: number) {
   const res = await fetch(`${API_URL}/accounting/accounts/${id}`, {
     headers: getAuthHeader(),

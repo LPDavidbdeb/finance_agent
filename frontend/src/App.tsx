@@ -9,6 +9,7 @@ import { ProductDetail } from './pages/ProductDetail';
 import { MerchantManager } from './pages/MerchantManager';
 import { MerchantDetail } from './pages/MerchantDetail';
 import { AccountDetail } from './pages/AccountDetail';
+import { DimensionDetail } from './pages/DimensionDetail';
 import { AccountTree } from './components/AccountTree';
 import { AuthProvider } from './context/AuthContext';
 
@@ -29,6 +30,7 @@ function App() {
               <Route path="/dashboard/merchants" element={<MerchantManager />} />
               <Route path="/dashboard/merchants/:id" element={<MerchantDetail />} />
               <Route path="/dashboard/accounts/:id" element={<AccountDetail />} />
+              <Route path="/dashboard/dimension/:slug" element={<DimensionDetail />} />
               <Route path="/settings/banks" element={<InstitutionManager />} />
               <Route path="/ledger" element={<AccountTree />} />
             </Routes>
