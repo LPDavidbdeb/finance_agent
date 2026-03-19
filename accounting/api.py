@@ -9,6 +9,7 @@ from decimal import Decimal
 
 from .models import Account, TransactionLine, JournalEntry
 from .schemas import AccountDetailOut, DimensionBreakdownOut
+from categorization.models import Merchant
 
 router = Router(auth=JWTAuth())
 
@@ -16,103 +17,130 @@ router = Router(auth=JWTAuth())
 def get_dimension_breakdown(request, dimension_slug: str, year: int):
     """
     Returns a detailed breakdown of a specific financial dimension for a given year.
+    Uses a branch-wide aggregation logic.
     """
     user = request.auth
     family = user.family
     jan_1 = date(year, 1, 1)
     dec_31 = date(year, 12, 31)
 
-    line_items = []
-    total_amount = Decimal('0.00')
     dimension_name = dimension_slug.replace('-', ' ').title()
+    
+    # 1. Identify the root node
+    root_map = {
+        'revenue': 'Revenue',
+        'expenses': 'Expenses',
+        'assets': 'Assets',
+        'liabilities': 'Liabilities',
+        'equity': 'Equity'
+    }
+    
+    if dimension_slug not in root_map and dimension_slug not in ['net-income', 'net-worth']:
+        raise errors.HttpError(404, f"Dimension {dimension_slug} not recognized.")
 
-    # Helper to sum lines for a specific account (descendants)
-    def get_account_balance(account, start, end, cumulative=False):
-        ids = account.get_descendants(include_self=True).values_list('id', flat=True)
-        q = Q(journal_entry__family=family, account_id__in=ids)
-        if cumulative:
-            q &= Q(journal_entry__date__lte=end)
-        else:
-            q &= Q(journal_entry__date__range=[start, end])
-        
-        return TransactionLine.objects.filter(q).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
+    if dimension_slug in ['net-income', 'net-worth']:
+        # Handle calculated dimensions
+        if dimension_slug == 'net-income':
+            root_rev = get_object_or_404(Account, family=family, name='Revenue', parent=None)
+            root_exp = get_object_or_404(Account, family=family, name='Expenses', parent=None)
+            rev_bal = get_branch_sum(family, root_rev, jan_1, dec_31, False)
+            exp_bal = get_branch_sum(family, root_exp, jan_1, dec_31, False)
+            return {
+                "dimension_name": "Net Income",
+                "total_amount": float(-rev_bal - exp_bal),
+                "line_items": [
+                    {"name": "Total Revenue", "balance": float(-rev_bal)},
+                    {"name": "Total Expenses", "balance": float(exp_bal)}
+                ]
+            }
+        else: # net-worth
+            root_ast = get_object_or_404(Account, family=family, name='Assets', parent=None)
+            root_lib = get_object_or_404(Account, family=family, name='Liabilities', parent=None)
+            ast_bal = get_branch_sum(family, root_ast, jan_1, dec_31, True)
+            lib_bal = get_branch_sum(family, root_lib, jan_1, dec_31, True)
+            return {
+                "dimension_name": "Net Worth",
+                "total_amount": float(ast_bal + lib_bal),
+                "line_items": [
+                    {"name": "Total Assets", "balance": float(ast_bal)},
+                    {"name": "Total Liabilities", "balance": float(-lib_bal)}
+                ]
+            }
 
-    if dimension_slug in ['revenue', 'expenses', 'assets', 'liabilities', 'equity']:
-        # Map slug to proper root name
-        root_map = {
-            'revenue': 'Revenue',
-            'expenses': 'Expenses',
-            'assets': 'Assets',
-            'liabilities': 'Liabilities',
-            'equity': 'Equity'
-        }
-        root_name = root_map[dimension_slug]
-        root = get_object_or_404(Account, family=family, name=root_name, parent=None)
-        
-        is_cumulative = dimension_slug in ['assets', 'liabilities', 'equity']
-        
-        # Total for the root
-        total_balance = get_account_balance(root, jan_1, dec_31, cumulative=is_cumulative)
-        
-        # Break down by immediate children
-        children = root.get_children()
-        for child in children:
-            bal = get_account_balance(child, jan_1, dec_31, cumulative=is_cumulative)
-            # Display logic: Revenues and Liabilities are usually shown as positive in reports
-            display_bal = bal
-            if dimension_slug in ['revenue', 'liabilities', 'equity']:
-                display_bal = -bal
-                
-            line_items.append({
-                "id": child.id,
-                "name": child.name,
-                "balance": float(display_bal)
-            })
-        
-        total_amount = -total_balance if dimension_slug in ['revenue', 'liabilities', 'equity'] else total_balance
+    # 2. Handle standard dimensions
+    root_name = root_map[dimension_slug]
+    root = get_object_or_404(Account, family=family, name=root_name, parent=None)
+    is_cumulative = dimension_slug in ['assets', 'liabilities', 'equity']
+    flip_sign = dimension_slug in ['revenue', 'liabilities', 'equity']
 
-    elif dimension_slug == 'net-income':
-        root_rev = Account.objects.get(family=family, name='Revenue', parent=None)
-        root_exp = Account.objects.get(family=family, name='Expenses', parent=None)
-        
-        rev_bal = get_account_balance(root_rev, jan_1, dec_31)
-        exp_bal = get_account_balance(root_exp, jan_1, dec_31)
-        
-        total_amount = -rev_bal - exp_bal
-        line_items = [
-            {"name": "Total Revenue", "balance": float(-rev_bal)},
-            {"name": "Total Expenses", "balance": float(exp_bal)}
-        ]
+    # Fetch immediate children
+    children = root.get_children()
+    line_items = []
+    total_sum = Decimal('0.00')
 
-    elif dimension_slug == 'net-worth':
-        root_ast = Account.objects.get(family=family, name='Assets', parent=None)
-        root_lib = Account.objects.get(family=family, name='Liabilities', parent=None)
+    for child in children:
+        # Sum all transactions for this child and all its descendants
+        balance = get_branch_sum(family, child, jan_1, dec_31, is_cumulative)
+        display_bal = -balance if flip_sign else balance
         
-        ast_bal = get_cumulative_sum_internal(family, root_ast, dec_31)
-        lib_bal = get_cumulative_sum_internal(family, root_lib, dec_31)
-        
-        total_amount = ast_bal + lib_bal # Liabilities are negative
-        line_items = [
-            {"name": "Total Assets", "balance": float(ast_bal)},
-            {"name": "Total Liabilities", "balance": float(-lib_bal)}
-        ]
+        line_items.append({
+            "id": child.id,
+            "name": child.name,
+            "balance": float(display_bal)
+        })
+        total_sum += balance
 
+    # 3. Handle Merchant (Banner) breakdown for the entire root branch
+    # This follows the user's hint: "fetch the sub account (all the children) and then the banners related to them"
+    all_descendants = root.get_descendants(include_self=True)
+    all_merchants = Merchant.objects.filter(family=family, default_account__in=all_descendants)
+    
+    # Grouped sums by clean_description
+    q_all = Q(journal_entry__family=family, account_id__in=all_descendants.values_list('id', flat=True))
+    if is_cumulative:
+        q_all &= Q(journal_entry__date__lte=dec_31)
+    else:
+        q_all &= Q(journal_entry__date__range=[jan_1, dec_31])
+        
+    merchant_sums = TransactionLine.objects.filter(q_all).values('journal_entry__description').annotate(total=Sum('amount'))
+    merchant_sum_dict = {item['journal_entry__description']: item['total'] for item in merchant_sums}
+
+    merchant_items = []
+    for m in all_merchants:
+        m_bal = merchant_sum_dict.get(m.name, Decimal('0.00'))
+        m_display_bal = -m_bal if flip_sign else m_bal
+        
+        # Only include if there's activity or requested
+        merchant_items.append({
+            "id": m.id,
+            "name": m.name,
+            "balance": float(m_display_bal)
+        })
+
+    # Sort merchant items by balance
+    merchant_items.sort(key=lambda x: abs(x['balance']), reverse=True)
+
+    # Final result
     return {
         "dimension_name": dimension_name,
-        "total_amount": float(total_amount),
-        "line_items": line_items
+        "total_amount": float(-total_sum if flip_sign else total_sum),
+        "line_items": sorted(line_items, key=lambda x: x['balance'], reverse=True),
+        "merchant_items": merchant_items
     }
 
-def get_cumulative_sum_internal(family, root, up_to_date):
-    ids = root.get_descendants(include_self=True).values_list('id', flat=True)
-    return TransactionLine.objects.filter(
-        journal_entry__family=family,
-        account_id__in=ids,
-        journal_entry__date__lte=up_to_date
-    ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
-from categorization.models import Merchant
-
-router = Router(auth=JWTAuth())
+def get_branch_sum(family, account, start, end, cumulative):
+    """
+    Helper to sum all transaction lines for an account and its descendants.
+    """
+    descendant_ids = account.get_descendants(include_self=True).values_list('id', flat=True)
+    q = Q(journal_entry__family=family, account_id__in=descendant_ids)
+    
+    if cumulative:
+        q &= Q(journal_entry__date__lte=end)
+    else:
+        q &= Q(journal_entry__date__range=[start, end])
+        
+    return TransactionLine.objects.filter(q).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
 
 @router.get("/accounts/{account_id}", response=AccountDetailOut)
 def get_account_detail(request, account_id: int, year: Optional[int] = None):

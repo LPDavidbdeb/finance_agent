@@ -28,7 +28,13 @@ class DimensionLineItemOut(Schema):
     name: str
     balance: float
 
+class MerchantItemOut(Schema):
+    id: int
+    name: str
+    balance: float
+
 class DimensionBreakdownOut(Schema):
     dimension_name: str
     total_amount: float
     line_items: List[DimensionLineItemOut]
+    merchant_items: List[MerchantItemOut] = []

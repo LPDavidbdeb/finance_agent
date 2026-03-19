@@ -15,10 +15,17 @@ interface LineItem {
   balance: number;
 }
 
+interface MerchantItem {
+  id: number;
+  name: string;
+  balance: number;
+}
+
 interface DimensionData {
   dimension_name: string;
   total_amount: number;
   line_items: LineItem[];
+  merchant_items: MerchantItem[];
 }
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#8dd1e1'];
@@ -32,6 +39,7 @@ export const DimensionDetail: React.FC = () => {
   const [data, setData] = useState<DimensionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'categories' | 'merchants'>('categories');
 
   useEffect(() => {
     if (slug) {
@@ -54,14 +62,15 @@ export const DimensionDetail: React.FC = () => {
 
   const chartData = useMemo(() => {
     if (!data) return [];
+    const source = viewMode === 'categories' ? data.line_items : data.merchant_items;
     // Sort and take top 8 for the chart, group others
-    const sorted = [...data.line_items].sort((a, b) => b.balance - a.balance);
+    const sorted = [...source].sort((a, b) => b.balance - a.balance);
     if (sorted.length <= 8) return sorted;
     
     const top = sorted.slice(0, 7);
     const otherSum = sorted.slice(7).reduce((acc, curr) => acc + curr.balance, 0);
     return [...top, { name: 'Others', balance: otherSum }];
-  }, [data]);
+  }, [data, viewMode]);
 
   if (loading) return <div className="flex justify-center p-20"><Loader2 className="h-8 w-8 animate-spin text-blue-600" /></div>;
   if (error || !data) return <div className="p-20 text-center text-red-500">{error || "Report not found"}</div>;
@@ -96,7 +105,7 @@ export const DimensionDetail: React.FC = () => {
           <CardHeader className="bg-slate-50/50 border-b border-slate-100">
             <CardTitle className="text-lg flex items-center gap-2">
               <PieIcon className="h-5 w-5 text-blue-600" />
-              Distribution
+              Distribution ({viewMode === 'categories' ? 'Categories' : 'Banners'})
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-6">
@@ -127,46 +136,82 @@ export const DimensionDetail: React.FC = () => {
 
         {/* Line Items Table */}
         <Card className="shadow-sm">
-          <CardHeader className="bg-slate-50/50 border-b border-slate-100">
+          <CardHeader className="bg-slate-50/50 border-b border-slate-100 flex flex-row items-center justify-between">
             <CardTitle className="text-lg flex items-center gap-2">
               <List className="h-5 w-5 text-emerald-600" />
               Breakdown
             </CardTitle>
+            <div className="flex bg-slate-100 p-1 rounded-md text-[10px]">
+              <button 
+                className={`px-2 py-1 rounded ${viewMode === 'categories' ? 'bg-white shadow-sm font-bold' : 'text-slate-500'}`}
+                onClick={() => setViewMode('categories')}
+              >
+                Categories
+              </button>
+              <button 
+                className={`px-2 py-1 rounded ${viewMode === 'merchants' ? 'bg-white shadow-sm font-bold' : 'text-slate-500'}`}
+                onClick={() => setViewMode('merchants')}
+              >
+                Banners
+              </button>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50/50 border-b border-slate-100 text-slate-500 font-medium">
                   <tr>
-                    <th className="px-6 py-3 text-left">Category</th>
+                    <th className="px-6 py-3 text-left">{viewMode === 'categories' ? 'Category' : 'Merchant Banner'}</th>
                     <th className="px-6 py-3 text-right">Balance</th>
                     <th className="px-6 py-3 text-right">Prop.</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {data.line_items.map((item, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50/50 transition-colors group">
-                      <td className="px-6 py-4">
-                        {item.id ? (
+                  {viewMode === 'categories' ? (
+                    data.line_items.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/50 transition-colors group">
+                        <td className="px-6 py-4">
+                          {item.id ? (
+                            <Link 
+                              to={`/dashboard/accounts/${item.id}?year=${year}`}
+                              className="font-semibold text-slate-700 hover:text-blue-600 flex items-center gap-2"
+                            >
+                              {item.name}
+                              <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </Link>
+                          ) : (
+                            <span className="font-semibold text-slate-700">{item.name}</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-right font-mono font-medium">
+                          ${item.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-6 py-4 text-right text-slate-400 text-xs">
+                          {((item.balance / (data.total_amount || 1)) * 100).toFixed(1)}%
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    data.merchant_items.map((m, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/50 transition-colors group">
+                        <td className="px-6 py-4">
                           <Link 
-                            to={`/dashboard/accounts/${item.id}`}
-                            className="font-semibold text-slate-700 hover:text-blue-600 flex items-center gap-2"
+                            to={`/dashboard/merchants/${m.id}`}
+                            className="font-semibold text-slate-700 hover:text-emerald-600 flex items-center gap-2"
                           >
-                            {item.name}
+                            {m.name}
                             <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                           </Link>
-                        ) : (
-                          <span className="font-semibold text-slate-700">{item.name}</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-right font-mono font-medium">
-                        ${item.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="px-6 py-4 text-right text-slate-400 text-xs">
-                        {((item.balance / (data.total_amount || 1)) * 100).toFixed(1)}%
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-6 py-4 text-right font-mono font-medium">
+                          ${m.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-6 py-4 text-right text-slate-400 text-xs">
+                          {((m.balance / (data.total_amount || 1)) * 100).toFixed(1)}%
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
