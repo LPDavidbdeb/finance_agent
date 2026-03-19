@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from .base import BasePDFExtractor
 
 
@@ -6,7 +7,7 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
     def tabula_parameters(self) -> dict:
         return {'pages': 'all', 'stream': True}
 
-    def process_dataframe(self, df: pd.DataFrame, extract_year: int) -> pd.DataFrame:
+    def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> pd.DataFrame:
         df.columns = [str(x).upper() for x in df.columns]
 
         header_found = False
@@ -33,9 +34,13 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
         valid_rows = extracted_dates[0].notna() & extracted_dates[1].notna()
         df_clean = df_clean[valid_rows].copy()
 
+        # Rollover logic: If statement is in January and transaction is in December, it's from previous year
+        tx_months = extracted_dates[1][valid_rows].astype(int)
+        tx_days = extracted_dates[0][valid_rows].astype(int)
+        tx_years = np.where((statement_month == 1) & (tx_months == 12), statement_year - 1, statement_year)
+
         df_clean['date'] = pd.to_datetime(
-            dict(year=extract_year, month=extracted_dates[1][valid_rows].astype(int),
-                 day=extracted_dates[0][valid_rows].astype(int)),
+            dict(year=tx_years, month=tx_months, day=tx_days),
             errors='coerce'
         )
 
@@ -84,7 +89,7 @@ class MasterCardWealthSimpleExtractor(BasePDFExtractor):
             df[col_name] = amount_list
         return df
 
-    def process_dataframe(self, df: pd.DataFrame, extract_year: int) -> pd.DataFrame:
+    def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> pd.DataFrame:
         if len(df.columns) == 4:
             if df.columns.to_list() == ['Activity - Current period', 'Unnamed: 0', 'Unnamed: 1', 'Unnamed: 2']:
                 date_operation_desc_execution_list = df['Activity - Current period'][1:].to_list()

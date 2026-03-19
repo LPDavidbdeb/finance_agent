@@ -2,12 +2,37 @@ from .models import BankStatementImport, StagedTransaction
 from .services import approve_staged_transaction
 from ai_core.extractors.factory import PDFExtractorFactory
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, date
 from categorization.services import find_matching_rule
 import logging
 import pandas as pd
+import pdfplumber
+import re
 
 logger = logging.getLogger(__name__)
+
+def get_statement_date_from_pdf(pdf_path: str) -> tuple[int, int]:
+    """
+    Extracts the statement year and month from the PDF text using regex.
+    Currently specifically tuned for Desjardins format.
+    """
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            first_page = pdf.pages[0]
+            text = first_page.extract_text()
+            
+            # Desjardins match: DATE DU RELEVÉ Jour DD Mois MM Année YYYY
+            pattern = r'DATE DU RELEVÉ\s+Jour\s+\d{2}\s+Mois\s+(\d{2})\s+Année\s+(\d{4})'
+            match = re.search(pattern, text)
+            
+            if match:
+                month = int(match.group(1))
+                year = int(match.group(2))
+                return year, month
+    except Exception as e:
+        logger.warning(f"Failed to extract date from PDF {pdf_path}: {e}")
+    
+    return None, None
 
 def extract_transactions_from_statement(import_id: int, user):
     """
@@ -27,10 +52,25 @@ def extract_transactions_from_statement(import_id: int, user):
         if not statement_import.file:
             raise ValueError("No file attached to statement import.")
 
+        # 1. Attempt to get statement date from PDF content
+        pdf_year, pdf_month = get_statement_date_from_pdf(statement_import.file.path)
+        
+        if pdf_year and pdf_month:
+            statement_import.document_date = date(pdf_year, pdf_month, 1)
+            statement_import.save(update_fields=['document_date'])
+            statement_year = pdf_year
+            statement_month = pdf_month
+        else:
+            # Fallback to current date or existing document_date
+            fallback_date = statement_import.document_date or datetime.now().date()
+            statement_year = fallback_date.year
+            statement_month = fallback_date.month
+
         product = statement_import.financial_product
         extractor = PDFExtractorFactory.get_extractor(product.institution.name, product.product_type)
-        extract_year = statement_import.document_date.year if statement_import.document_date else datetime.now().year
-        df = extractor.extract(statement_import.file.path, extract_year)
+        
+        # 2. Extract with year/month context
+        df = extractor.extract(statement_import.file.path, statement_year, statement_month)
         
         transactions_data = df.to_dict('records')
         institution_id = statement_import.financial_product.institution_id

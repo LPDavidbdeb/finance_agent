@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 
 
 class BasePDFExtractor(ABC):
-    def extract(self, pdf_path: str, extract_year: int) -> pd.DataFrame:
+    def extract(self, pdf_path: str, statement_year: int, statement_month: int) -> pd.DataFrame:
         try:
             dfs = tabula.read_pdf(pdf_path, **self.tabula_parameters())
             if not dfs:
@@ -12,7 +12,7 @@ class BasePDFExtractor(ABC):
 
             processed_dfs = []
             for df in dfs:
-                clean_df = self.process_dataframe(df, extract_year)
+                clean_df = self.process_dataframe(df, statement_year, statement_month)
                 if not clean_df.empty:
                     processed_dfs.append(clean_df)
 
@@ -27,7 +27,7 @@ class BasePDFExtractor(ABC):
             return pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier'])
 
     @abstractmethod
-    def process_dataframe(self, df: pd.DataFrame, extract_year: int) -> pd.DataFrame:
+    def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> pd.DataFrame:
         pass
 
     def tabula_parameters(self) -> dict:
