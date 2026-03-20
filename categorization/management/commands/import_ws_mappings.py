@@ -76,7 +76,7 @@ class Command(BaseCommand):
                 rule = find_matching_rule(tx.raw_description, institution_id)
                 
                 if rule and rule.merchant.default_account:
-                    tx.clean_description = rule.merchant.name
+                    tx.merchant = rule.merchant
                     tx.predicted_account = rule.merchant.default_account
                     tx.save()
                     

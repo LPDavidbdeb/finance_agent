@@ -3,15 +3,18 @@ import { Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { fetchMerchants, updateMerchantAccount } from '../api/client';
+import { Input } from '../components/ui/input';
+import { fetchMerchants, updateMerchantAccount, updateMerchant } from '../api/client';
 import { AccountTree } from '../components/AccountTree';
 import { useToast } from '../components/ui/use-toast';
+import { Search, History, Loader2 } from 'lucide-react';
 
 interface Merchant {
   id: number;
   name: string;
   default_account_id?: number;
   default_account_name?: string;
+  is_unique_provider: boolean;
 }
 
 export const MerchantManager: React.FC = () => {
@@ -19,6 +22,8 @@ export const MerchantManager: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingMerchant, setEditingMerchant] = useState<Merchant | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [processingIds, setProcessingIds] = useState<number[]>([]);
   const { toast } = useToast();
 
   const loadMerchants = async () => {
@@ -57,6 +62,39 @@ export const MerchantManager: React.FC = () => {
     }
   };
 
+  const handleToggleUnique = async (merchant: Merchant, newValue: boolean) => {
+    setProcessingIds(prev => [...prev, merchant.id]);
+    try {
+      await updateMerchant(merchant.id, { is_unique_provider: newValue });
+      setMerchants(prev => prev.map(m => m.id === merchant.id ? { ...m, is_unique_provider: newValue } : m));
+      toast({ title: "Updated", description: `${merchant.name} unique status updated.` });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Error", description: err.message });
+    } finally {
+      setProcessingIds(prev => prev.filter(id => id !== merchant.id));
+    }
+  };
+
+  const handleSyncHistory = async (merchant: Merchant) => {
+    if (!merchant.default_account_id) return;
+    setProcessingIds(prev => [...prev, merchant.id]);
+    try {
+      await updateMerchant(merchant.id, { 
+        default_account_id: merchant.default_account_id, 
+        update_history: true 
+      });
+      toast({ title: "History Synced", description: `Past transactions for ${merchant.name} have been updated.` });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Error", description: err.message });
+    } finally {
+      setProcessingIds(prev => prev.filter(id => id !== merchant.id));
+    }
+  };
+
+  const filteredMerchants = merchants.filter(m => 
+    m.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   if (loading) return <div className="text-center p-8">Loading merchants...</div>;
   if (error) return <div className="text-center p-8 text-destructive">{error}</div>;
 
@@ -69,6 +107,16 @@ export const MerchantManager: React.FC = () => {
             Manage the default accounting categories for your identified merchants.
           </p>
         </div>
+      </div>
+
+      <div className="relative w-full max-w-md mb-6">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+        <Input 
+          placeholder="Search merchants..." 
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="pl-9"
+        />
       </div>
 
       <Card>
@@ -85,18 +133,19 @@ export const MerchantManager: React.FC = () => {
                 <tr>
                   <th className="px-4 py-3 text-left font-medium text-slate-700">Merchant Name</th>
                   <th className="px-4 py-3 text-left font-medium text-slate-700">Current Category</th>
+                  <th className="px-4 py-3 text-left font-medium text-slate-700">Unique Provider</th>
                   <th className="px-4 py-3 text-right font-medium text-slate-700">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {merchants.length === 0 && (
+                {filteredMerchants.length === 0 && (
                   <tr>
-                    <td className="px-4 py-8 text-center text-slate-500" colSpan={3}>
-                      No merchants identified yet. Create a rule from a staged transaction to get started.
+                    <td className="px-4 py-8 text-center text-slate-500" colSpan={4}>
+                      No merchants found matching your search.
                     </td>
                   </tr>
                 )}
-                {merchants.map((merchant) => (
+                {filteredMerchants.map((merchant) => (
                   <tr key={merchant.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3 text-slate-900 font-medium">
                       <Link to={`/dashboard/merchants/${merchant.id}`} className="hover:text-blue-600 hover:underline">
@@ -112,13 +161,27 @@ export const MerchantManager: React.FC = () => {
                         </Badge>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => setEditingMerchant(merchant)}
-                      >
+                    <td className="px-4 py-3">
+                      <input 
+                        type="checkbox" 
+                        checked={merchant.is_unique_provider}
+                        onChange={(e) => handleToggleUnique(merchant, e.target.checked)}
+                        disabled={processingIds.includes(merchant.id)}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer disabled:opacity-50"
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-right space-x-2 whitespace-nowrap">
+                      <Button variant="outline" size="sm" onClick={() => setEditingMerchant(merchant)} disabled={processingIds.includes(merchant.id)}>
                         Edit Category
+                      </Button>
+                      <Button 
+                        variant="secondary" 
+                        size="sm" 
+                        onClick={() => handleSyncHistory(merchant)} 
+                        disabled={!merchant.default_account_id || processingIds.includes(merchant.id)}
+                        title="Apply category to historical transactions"
+                      >
+                        {processingIds.includes(merchant.id) ? <Loader2 className="h-4 w-4 animate-spin" /> : <History className="h-4 w-4" />}
                       </Button>
                     </td>
                   </tr>

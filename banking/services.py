@@ -158,7 +158,7 @@ def approve_staged_transaction(transaction_id: int, target_account_id: int, user
     journal_entry = JournalEntry.objects.create(
         family=family,
         date=staged_tx.bank_date,
-        description=staged_tx.clean_description or staged_tx.raw_description,
+        description=staged_tx.merchant.name if staged_tx.merchant else staged_tx.raw_description,
         is_reconciled=True
     )
 

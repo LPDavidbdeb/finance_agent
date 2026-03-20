@@ -76,7 +76,7 @@ class Command(BaseCommand):
                 
                 # If we matched one of our newly configured unique transfer merchants
                 if rule and rule.merchant.is_unique_provider and rule.merchant.default_account:
-                    tx.clean_description = rule.merchant.name
+                    tx.merchant = rule.merchant
                     tx.predicted_account = rule.merchant.default_account
                     tx.save()
                     

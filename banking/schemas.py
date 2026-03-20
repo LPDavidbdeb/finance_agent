@@ -77,13 +77,17 @@ class StagedTransactionOut(Schema):
     id: int
     bank_date: date
     raw_description: str
-    clean_description: Optional[str] = None
+    merchant_name: Optional[str] = None
     amount: Decimal
     status: str
     statement_import_id: int
     predicted_account_id: Optional[int] = None
     predicted_account_name: Optional[str] = None
     reconciled_account_name: Optional[str] = None
+
+    @staticmethod
+    def resolve_merchant_name(obj):
+        return obj.merchant.name if obj.merchant else None
 
     @staticmethod
     def resolve_predicted_account_id(obj):

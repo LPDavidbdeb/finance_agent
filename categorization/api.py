@@ -69,8 +69,8 @@ def create_and_apply_mapping_rule(request, payload: RuleCreateAndApplyIn):
     can_auto_approve = bool(merchant.is_unique_provider and merchant.default_account)
     
     for tx in matching_transactions:
-        tx.clean_description = merchant.name
-        
+        tx.merchant = merchant
+
         if can_auto_approve:
             target_account = merchant.default_account
             

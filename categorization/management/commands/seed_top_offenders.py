@@ -208,7 +208,7 @@ class Command(BaseCommand):
             )
 
             for tx in transactions:
-                tx.clean_description = merchant.name
+                tx.merchant = merchant
                 tx.predicted_account = target_account
                 tx.save()
                 total_updated += 1

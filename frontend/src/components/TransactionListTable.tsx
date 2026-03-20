@@ -12,7 +12,7 @@ export interface StagedTransaction {
   id: number;
   bank_date: string;
   raw_description: string;
-  clean_description?: string;
+  merchant_name?: string;
   amount: number;
   status: string;
   predicted_account_id?: number;
@@ -173,8 +173,8 @@ export const TransactionListTable: React.FC<TransactionListTableProps> = ({
                       {new Date(tx.bank_date).toLocaleDateString()}
                     </td>
                     <td className="px-4 py-3 text-slate-700">
-                      <div>{tx.clean_description || tx.raw_description}</div>
-                      {tx.clean_description && <div className="text-xs text-slate-400">{tx.raw_description}</div>}
+                      <div>{tx.merchant_name || tx.raw_description}</div>
+                      {tx.merchant_name && <div className="text-xs text-slate-400">{tx.raw_description}</div>}
                     </td>
                     <td className="px-4 py-3">
                       {tx.status === 'RECONCILED' ? (
