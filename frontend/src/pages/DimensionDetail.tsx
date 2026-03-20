@@ -13,6 +13,7 @@ interface LineItem {
   id?: number;
   name: string;
   balance: number;
+  sub_items?: { name: string; balance: number }[];
 }
 
 interface MerchantItem {
@@ -40,6 +41,11 @@ export const DimensionDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'categories' | 'merchants'>('categories');
+  const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
+
+  const toggleRow = (idx: number) => {
+    setExpandedRows(prev => ({ ...prev, [idx]: !prev[idx] }));
+  };
 
   useEffect(() => {
     if (slug) {
@@ -169,27 +175,49 @@ export const DimensionDetail: React.FC = () => {
                 <tbody className="divide-y divide-slate-100">
                   {viewMode === 'categories' ? (
                     data.line_items.map((item, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50/50 transition-colors group">
-                        <td className="px-6 py-4">
-                          {item.id ? (
-                            <Link 
-                              to={`/dashboard/accounts/${item.id}?year=${year}`}
-                              className="font-semibold text-slate-700 hover:text-blue-600 flex items-center gap-2"
-                            >
-                              {item.name}
-                              <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                            </Link>
-                          ) : (
-                            <span className="font-semibold text-slate-700">{item.name}</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-right font-mono font-medium">
-                          ${item.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="px-6 py-4 text-right text-slate-400 text-xs">
-                          {((item.balance / (data.total_amount || 1)) * 100).toFixed(1)}%
-                        </td>
-                      </tr>
+                      <React.Fragment key={idx}>
+                        <tr className="hover:bg-slate-50/50 transition-colors group">
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-2">
+                              {item.sub_items && item.sub_items.length > 0 && (
+                                <button 
+                                  onClick={() => toggleRow(idx)}
+                                  className="p-1 hover:bg-slate-200 rounded transition-colors text-slate-400"
+                                >
+                                  <ChevronRight className={`h-3 w-3 transition-transform ${expandedRows[idx] ? 'rotate-90' : ''}`} />
+                                </button>
+                              )}
+                              {item.id ? (
+                                <Link 
+                                  to={`/dashboard/accounts/${item.id}?year=${year}`}
+                                  className="font-semibold text-slate-700 hover:text-blue-600 flex items-center gap-2"
+                                >
+                                  {item.name}
+                                </Link>
+                              ) : (
+                                <span className="font-semibold text-slate-700">{item.name}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-right font-mono font-medium">
+                            ${item.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="px-6 py-4 text-right text-slate-400 text-xs">
+                            {((item.balance / (data.total_amount || 1)) * 100).toFixed(1)}%
+                          </td>
+                        </tr>
+                        {expandedRows[idx] && item.sub_items && item.sub_items.map((sub, sIdx) => (
+                          <tr key={`sub-${idx}-${sIdx}`} className="bg-slate-50/30 text-xs italic">
+                            <td className="px-12 py-2 text-slate-500">
+                              {sub.name}
+                            </td>
+                            <td className="px-6 py-2 text-right text-slate-500 font-mono">
+                              ${sub.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </td>
+                            <td></td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
                     ))
                   ) : (
                     data.merchant_items.map((m, idx) => (

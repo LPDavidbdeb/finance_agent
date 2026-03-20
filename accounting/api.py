@@ -73,25 +73,79 @@ def get_dimension_breakdown(request, dimension_slug: str, year: int):
     is_cumulative = dimension_slug in ['assets', 'liabilities', 'equity']
     flip_sign = dimension_slug in ['revenue', 'liabilities', 'equity']
 
+    # Calculate the True Total for the entire branch first
+    true_total_balance = get_branch_sum(family, root, jan_1, dec_31, is_cumulative)
+
     # Fetch immediate children
     children = root.get_children()
     line_items = []
-    total_sum = Decimal('0.00')
+    child_sum = Decimal('0.00')
 
     for child in children:
         # Sum all transactions for this child and all its descendants
         balance = get_branch_sum(family, child, jan_1, dec_31, is_cumulative)
+        child_sum += balance
         display_bal = -balance if flip_sign else balance
+        
+        # SCOPING FIX: Fetch sub-items (Banners) specifically for this child's branch
+        child_descendant_ids = child.get_descendants(include_self=True).values_list('id', flat=True)
+        q_child = Q(journal_entry__family=family, account_id__in=child_descendant_ids)
+        if is_cumulative:
+            q_child &= Q(journal_entry__date__lte=dec_31)
+        else:
+            q_child &= Q(journal_entry__date__year=year)
+            
+        sums = TransactionLine.objects.filter(q_child).values('journal_entry__description').annotate(total=Sum('amount'))
+        
+        sub_items_list = []
+        for item in sums:
+            val = -item['total'] if flip_sign else item['total']
+            if abs(val) > Decimal('0.01'):
+                sub_items_list.append({
+                    "name": item['journal_entry__description'],
+                    "balance": float(val)
+                })
         
         line_items.append({
             "id": child.id,
             "name": child.name,
-            "balance": float(display_bal)
+            "balance": float(display_bal),
+            "sub_items": sorted(sub_items_list, key=lambda x: x['balance'], reverse=True)
         })
-        total_sum += balance
 
-    # 3. Handle Merchant (Banner) breakdown for the entire root branch
-    # This follows the user's hint: "fetch the sub account (all the children) and then the banners related to them"
+    # Calculate the Direct Root Remainder
+    root_direct_bal = true_total_balance - child_sum
+    display_root_direct = -root_direct_bal if flip_sign else root_direct_bal
+    
+    if abs(display_root_direct) > Decimal('0.01'):
+        # Query banners directly mapped strictly to the root ID
+        q_root_strict = Q(journal_entry__family=family, account_id=root.id)
+        if is_cumulative:
+            q_root_strict &= Q(journal_entry__date__lte=dec_31)
+        else:
+            q_root_strict &= Q(journal_entry__date__year=year)
+            
+        root_sums = TransactionLine.objects.filter(q_root_strict).values('journal_entry__description').annotate(total=Sum('amount'))
+        
+        root_sub_items = []
+        for item in root_sums:
+            val = -item['total'] if flip_sign else item['total']
+            if abs(val) > Decimal('0.01'):
+                root_sub_items.append({
+                    "name": item['journal_entry__description'],
+                    "balance": float(val)
+                })
+        
+        line_items.append({
+            "id": root.id,
+            "name": f"Directly under {root_name}",
+            "balance": float(display_root_direct),
+            "sub_items": sorted(root_sub_items, key=lambda x: x['balance'], reverse=True)
+        })
+
+    total_amount = -true_total_balance if flip_sign else true_total_balance
+
+    # 3. Handle Merchant (Banner) breakdown for the entire root branch (Global View)
     all_descendants = root.get_descendants(include_self=True)
     all_merchants = Merchant.objects.filter(family=family, default_account__in=all_descendants)
     
@@ -123,7 +177,7 @@ def get_dimension_breakdown(request, dimension_slug: str, year: int):
     # Final result
     return {
         "dimension_name": dimension_name,
-        "total_amount": float(-total_sum if flip_sign else total_sum),
+        "total_amount": float(total_amount),
         "line_items": sorted(line_items, key=lambda x: x['balance'], reverse=True),
         "merchant_items": merchant_items
     }

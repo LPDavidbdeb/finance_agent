@@ -27,6 +27,7 @@ class DimensionLineItemOut(Schema):
     id: Optional[int] = None
     name: str
     balance: float
+    sub_items: List[dict] = []
 
 class MerchantItemOut(Schema):
     id: int

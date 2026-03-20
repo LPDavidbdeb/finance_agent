@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -29,8 +29,10 @@ interface AccountDetail {
 
 export const AccountDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const currentYear = new Date().getFullYear();
+  const year = parseInt(searchParams.get('year') || currentYear.toString());
+  const navigate = useNavigate();
   
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,13 +42,13 @@ export const AccountDetail: React.FC = () => {
     if (id) {
       loadAccount(Number(id));
     }
-  }, [id]);
+  }, [id, year]);
 
   const loadAccount = async (accountId: number) => {
     try {
       setLoading(true);
       setError(null);
-      const data = await fetchAccountDetail(accountId, currentYear);
+      const data = await fetchAccountDetail(accountId, year);
       setAccount(data);
     } catch (err: any) {
       setError(err.message || "Failed to load account details.");
@@ -60,15 +62,20 @@ export const AccountDetail: React.FC = () => {
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto w-full pb-20">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" onClick={() => navigate('/ledger')} size="sm" className="gap-2">
-          <ArrowLeft className="h-4 w-4" /> Back to Ledger
-        </Button>
-        {account.parent_id && (
-          <Button variant="ghost" onClick={() => navigate(`/dashboard/accounts/${account.parent_id}`)} size="sm" className="gap-2">
-            Up to Parent
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" onClick={() => navigate('/ledger')} size="sm" className="gap-2">
+            <ArrowLeft className="h-4 w-4" /> Back to Ledger
           </Button>
-        )}
+          {account.parent_id && (
+            <Button variant="ghost" onClick={() => navigate(`/dashboard/accounts/${account.parent_id}?year=${year}`)} size="sm" className="gap-2">
+              Up to Parent
+            </Button>
+          )}
+        </div>
+        <Badge variant="outline" className="px-3 py-1 text-sm font-medium">
+          Fiscal Year {year}
+        </Badge>
       </div>
 
       {/* Header */}
@@ -103,7 +110,7 @@ export const AccountDetail: React.FC = () => {
                 {account.children.map(child => (
                   <Link 
                     key={child.id} 
-                    to={`/dashboard/accounts/${child.id}`}
+                    to={`/dashboard/accounts/${child.id}?year=${year}`}
                     className="flex items-center justify-between p-4 hover:bg-slate-50 transition-colors group"
                   >
                     <span className="font-medium text-slate-700 group-hover:text-blue-600">{child.name}</span>
@@ -138,7 +145,7 @@ export const AccountDetail: React.FC = () => {
                       <th className="px-4 py-2 text-right">YTD Total</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
+                  <tbody className="divide-y divide-slate-50">
                     {account.merchants.map(merchant => (
                       <tr key={merchant.id} className="hover:bg-slate-50/50 transition-colors group">
                         <td className="px-4 py-3">
