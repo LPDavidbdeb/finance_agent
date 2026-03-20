@@ -40,19 +40,17 @@ class Command(BaseCommand):
                 if rule:
                     tx.clean_description = rule.merchant.name
                     
-                    # Logic: Unique providers with default accounts can be auto-approved
-                    if rule.merchant.is_unique_provider and rule.merchant.default_account:
-                        target_account = rule.merchant.default_account
-                        
+                    # 1. Grab the target account
+                    target_account = rule.merchant.default_account
+                    
+                    if target_account:
                         # Resolve family-specific account if the default is global
                         if target_account.family_id != family.id:
                             resolved_account = Account.objects.filter(name=target_account.name, family=family).first()
                             if not resolved_account:
-                                # Recursively find/create parent in family
                                 parent = None
                                 if target_account.parent:
                                     parent = Account.objects.filter(name=target_account.parent.name, family=family).first()
-                                
                                 resolved_account = Account.objects.create(
                                     name=target_account.name,
                                     account_type=target_account.account_type,
@@ -60,11 +58,13 @@ class Command(BaseCommand):
                                     parent=parent
                                 )
                             target_account = resolved_account
-
+                        
+                        # Save prediction
                         tx.predicted_account = target_account
                         tx.save()
                         total_categorized += 1
                         
+                        # 2. AUTO-APPROVE purely based on the existence of the target_account
                         try:
                             approve_staged_transaction(
                                 transaction_id=tx.id,
@@ -73,9 +73,10 @@ class Command(BaseCommand):
                             )
                             total_approved += 1
                         except Exception as e:
-                            logger.error(f"Reprocess failed to approve tx {tx.id}: {e}")
+                            self.stdout.write(self.style.ERROR(f"Failed to approve tx {tx.id}: {e}"))
+                            
                     else:
-                        # Non-unique or no category: just set description
+                        # 3. No default account exists. Leave in Inbox.
                         tx.predicted_account = None
                         tx.save()
                         total_categorized += 1

@@ -1,10 +1,13 @@
 from ninja import Router, errors
 from django.db import transaction, models
+from django.db.models import Sum, Min
+from django.db.models.functions import Abs
 from django.shortcuts import get_object_or_404
 from ninja_jwt.authentication import JWTAuth
 from typing import List
+from datetime import date
 
-from .schemas import RuleCreateAndApplyIn, MerchantOut, MerchantUpdateIn, MerchantDetailOut, MerchantMergeIn
+from .schemas import RuleCreateAndApplyIn, MerchantOut, MerchantUpdateIn, MerchantDetailOut, MerchantMergeIn, MerchantStatsOut
 from .models import TransactionMappingRule, Merchant
 from .services import find_matching_rule, update_merchant_category
 from banking.models import StagedTransaction
@@ -182,6 +185,55 @@ def update_merchant(request, merchant_id: int, payload: MerchantUpdateIn):
         )
         
     return {"success": True}
+
+@router.get("/merchants/{merchant_id}/stats", response=MerchantStatsOut)
+def get_merchant_stats(request, merchant_id: int):
+    """
+    Calculates spending statistics and daily activity for a specific merchant.
+    """
+    user = request.auth
+    merchant = get_object_or_404(Merchant, id=merchant_id, family=user.family)
+    
+    # Base queryset for reconciled transactions
+    qs = StagedTransaction.objects.filter(
+        clean_description=merchant.name,
+        status='RECONCILED',
+        statement_import__financial_product__family=user.family
+    )
+    
+    # 1. Total Amount (Absolute sum of expenses/revenues)
+    total_amount = qs.aggregate(total=Sum(Abs('amount')))['total'] or 0.0
+    
+    # 2. Historical Monthly Average
+    historical_monthly_avg = 0.0
+    earliest_date = qs.aggregate(min_date=Min('bank_date'))['min_date']
+    if earliest_date:
+        today = date.today()
+        # Calculate month difference
+        months_diff = (today.year - earliest_date.year) * 12 + (today.month - earliest_date.month)
+        months_diff = max(1, months_diff)
+        historical_monthly_avg = float(total_amount) / months_diff
+        
+    # 3. Current Year Monthly Average
+    current_year = date.today().year
+    current_month_num = date.today().month
+    current_year_total = qs.filter(bank_date__year=current_year).aggregate(total=Sum(Abs('amount')))['total'] or 0.0
+    current_year_monthly_avg = float(current_year_total) / current_month_num
+    
+    # 4. Daily Activity
+    # Group by bank_date and sum absolute amounts
+    daily_qs = qs.values('bank_date').annotate(total=Sum(Abs('amount'))).order_by('bank_date')
+    daily_activity = [
+        {"date": item['bank_date'].strftime("%Y-%m-%d"), "amount": float(item['total'])}
+        for item in daily_qs
+    ]
+    
+    return {
+        "total_amount": float(total_amount),
+        "historical_monthly_avg": float(historical_monthly_avg),
+        "current_year_monthly_avg": float(current_year_monthly_avg),
+        "daily_activity": daily_activity
+    }
 
 @router.get("/merchants/{merchant_id}", response=MerchantDetailOut)
 def get_merchant_detail(request, merchant_id: int):

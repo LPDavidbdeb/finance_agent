@@ -49,3 +49,9 @@ class MerchantDetailOut(Schema):
 class MerchantMergeIn(Schema):
     target_id: int
     source_ids: List[int]
+
+class MerchantStatsOut(Schema):
+    total_amount: float
+    historical_monthly_avg: float
+    current_year_monthly_avg: float
+    daily_activity: List[dict]

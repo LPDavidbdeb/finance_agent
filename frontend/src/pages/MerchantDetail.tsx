@@ -5,10 +5,19 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
-import { fetchMerchantDetail, updateMerchant, mergeMerchants, fetchMerchants } from '../api/client';
+import { 
+  fetchMerchantDetail, 
+  updateMerchant, 
+  mergeMerchants, 
+  fetchMerchants, 
+  fetchMerchantStats 
+} from '../api/client';
 import { AccountTree } from '../components/AccountTree';
 import { useToast } from '../components/ui/use-toast';
-import { Loader2, Edit2, Check, X, ArrowLeft, Merge, Trash2, Tag, History } from 'lucide-react';
+import { 
+  Loader2, Edit2, Check, X, ArrowLeft, Merge, Trash2, Tag, 
+  History, DollarSign, TrendingUp, Calendar 
+} from 'lucide-react';
 
 interface MappingRule {
   id: number;
@@ -37,6 +46,7 @@ export const MerchantDetail: React.FC = () => {
 
   const [merchant, setMerchant] = useState<MerchantDetail | null>(null);
   const [allMerchants, setAllMerchants] = useState<MerchantSummary[]>([]);
+  const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,13 +77,15 @@ export const MerchantDetail: React.FC = () => {
   const loadData = async (merchantId: number) => {
     try {
       setLoading(true);
-      const [detail, others] = await Promise.all([
+      const [detail, others, merchantStats] = await Promise.all([
         fetchMerchantDetail(merchantId),
-        fetchMerchants()
+        fetchMerchants(),
+        fetchMerchantStats(merchantId)
       ]);
       setMerchant(detail);
       setNewName(detail.name);
       setAllMerchants(others.filter((m: any) => m.id !== merchantId));
+      setStats(merchantStats);
     } catch (err: any) {
       setError(err.message || "Failed to load merchant details.");
     } finally {
@@ -156,6 +168,44 @@ export const MerchantDetail: React.FC = () => {
     !selectedSourceIds.includes(m.id)
   ).slice(0, 5);
 
+  const renderActivityCalendar = () => {
+    if (!stats?.daily_activity) return null;
+
+    const days = [];
+    const today = new Date();
+    const activityMap = new Map<string, number>(
+      stats.daily_activity.map((a: any) => [a.date, a.amount])
+    );
+
+    for (let i = 364; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(today.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      const amount = activityMap.get(dateStr) || 0;
+      
+      let color = "bg-slate-100";
+      if (amount > 0) {
+        if (amount < 50) color = "bg-blue-200";
+        else if (amount < 200) color = "bg-blue-400";
+        else color = "bg-blue-600";
+      }
+
+      days.push(
+        <div 
+          key={dateStr}
+          className={`w-3 h-3 rounded-sm ${color} cursor-help transition-transform hover:scale-150`}
+          title={`${dateStr}: $${amount.toLocaleString()}`}
+        />
+      );
+    }
+
+    return (
+      <div className="flex flex-wrap gap-1 max-w-full overflow-hidden">
+        {days}
+      </div>
+    );
+  };
+
   if (loading) return <div className="flex justify-center p-20"><Loader2 className="h-8 w-8 animate-spin text-blue-600" /></div>;
   if (error || !merchant) return <div className="p-20 text-center text-red-500">{error || "Merchant not found"}</div>;
 
@@ -218,6 +268,72 @@ export const MerchantDetail: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Stats Cards */}
+      {stats && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Card className="bg-white shadow-sm border-slate-200">
+            <CardHeader className="pb-2">
+              <CardDescription className="text-xs uppercase font-bold tracking-wider flex items-center gap-2 text-slate-500">
+                <DollarSign className="h-3 w-3" /> Total Volume
+              </CardDescription>
+              <CardTitle className="text-2xl font-black text-slate-900">
+                ${stats.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </CardTitle>
+            </CardHeader>
+          </Card>
+          <Card className="bg-white shadow-sm border-slate-200">
+            <CardHeader className="pb-2">
+              <CardDescription className="text-xs uppercase font-bold tracking-wider flex items-center gap-2 text-slate-500">
+                <History className="h-3 w-3" /> Historical Avg
+              </CardDescription>
+              <CardTitle className="text-2xl font-black text-slate-900">
+                ${stats.historical_monthly_avg.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                <span className="text-[10px] text-slate-400 ml-1">/mo</span>
+              </CardTitle>
+            </CardHeader>
+          </Card>
+          <Card className="bg-white shadow-sm border-slate-200">
+            <CardHeader className="pb-2">
+              <CardDescription className="text-xs uppercase font-bold tracking-wider flex items-center gap-2 text-slate-500">
+                <TrendingUp className="h-3 w-3" /> Current Year Avg
+              </CardDescription>
+              <CardTitle className="text-2xl font-black text-blue-600">
+                ${stats.current_year_monthly_avg.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                <span className="text-[10px] text-slate-400 ml-1">/mo</span>
+              </CardTitle>
+            </CardHeader>
+          </Card>
+        </div>
+      )}
+
+      {/* Activity Calendar */}
+      <Card className="shadow-sm">
+        <CardHeader className="border-b border-slate-50 bg-slate-50/30">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Calendar className="h-5 w-5 text-blue-600" />
+            Activity Calendar
+          </CardTitle>
+          <CardDescription>Frequency and volume of transactions over the last 365 days.</CardDescription>
+        </CardHeader>
+        <CardContent className="p-6 overflow-x-auto">
+          {renderActivityCalendar()}
+          <div className="mt-4 flex items-center gap-4 text-[10px] text-slate-400">
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 bg-slate-100 rounded-sm" /> No activity
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 bg-blue-200 rounded-sm" /> Low
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 bg-blue-400 rounded-sm" /> Medium
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 bg-blue-600 rounded-sm" /> High
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Rules List */}

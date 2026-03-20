@@ -369,6 +369,17 @@ export async function fetchMerchantDetail(id: number) {
   return res.json();
 }
 
+export async function fetchMerchantStats(id: number) {
+  const res = await fetch(`${API_URL}/categorization/merchants/${id}/stats`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to fetch merchant stats");
+  }
+  return res.json();
+}
+
 export async function updateMerchant(id: number, data: { name?: string; default_account_id?: number; is_unique_provider?: boolean; update_history?: boolean }) {
   const res = await fetch(`${API_URL}/categorization/merchants/${id}`, {
     method: "PATCH",
