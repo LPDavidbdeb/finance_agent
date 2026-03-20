@@ -1,82 +1,88 @@
 from django.core.management.base import BaseCommand
+from django.db import transaction
+from users.models import Family, CustomUser
 from banking.models import StagedTransaction
-from categorization.models import Merchant
-
+from accounting.models import Account
+from categorization.services import find_matching_rule
+from banking.services import approve_staged_transaction
+import logging
 
 class Command(BaseCommand):
-    help = (
-        "Backfill merchant and predicted_account for staged transactions where predicted_account is NULL, "
-        "using strict merchant integrity rules."
-    )
-
-    def add_arguments(self, parser):
-        parser.add_argument(
-            "--dry-run",
-            action="store_true",
-            help="Compute and print counts without writing updates.",
-        )
+    help = 'Re-runs the categorization engine against all UNPROCESSED transactions.'
 
     def handle(self, *args, **options):
-        dry_run = options["dry_run"]
+        logger = logging.getLogger(__name__)
+        
+        families = Family.objects.all()
+        
+        total_categorized = 0
+        total_approved = 0
 
-        targets = (
-            StagedTransaction.objects.filter(predicted_account__isnull=True)
-            .exclude(clean_description__isnull=True)
-            .exclude(clean_description="")
-            .select_related("merchant")
-        )
-
-        total_target_rows = targets.count()
-        merchant_fk_backfilled = 0
-        eligible_for_predicted_backfill = 0
-        predicted_updated_rows = 0
-        no_merchant_match = 0
-        merchant_not_unique_provider = 0
-        merchant_unique_but_default_account_null = 0
-
-        for tx in targets.iterator(chunk_size=2000):
-            normalized_clean = ""  # clean_description removed
-            if not normalized_clean:
-                no_merchant_match += 1
+        for family in families:
+            self.stdout.write(f"Processing for family: {family.name}")
+            
+            user = family.users.first()
+            if not user:
+                self.stdout.write(self.style.WARNING(f"  No user found for family {family.name}. Skipping."))
                 continue
 
-            merchant = Merchant.objects.filter(name__iexact=normalized_clean).order_by("id").first()
-            if not merchant:
-                no_merchant_match += 1
-                continue
+            unprocessed_txs = StagedTransaction.objects.filter(
+                status=StagedTransaction.Status.UNPROCESSED,
+                statement_import__financial_product__family=family
+            ).select_related('statement_import__financial_product', 'statement_import__financial_product__institution')
 
-            changed_fields = []
-            if tx.merchant_id != merchant.id:
-                tx.merchant_id = merchant.id
-                changed_fields.append("merchant")
-                merchant_fk_backfilled += 1
+            for tx in unprocessed_txs:
+                institution_id = tx.statement_import.financial_product.institution_id
+                # Multi-tenancy: Pass family.id to find_matching_rule
+                rule = find_matching_rule(tx.raw_description, institution_id, family.id)
+                
+                if rule:
+                    tx.clean_description = rule.merchant.name
+                    tx.merchant = rule.merchant
+                    
+                    # 1. Grab the target account
+                    target_account = rule.merchant.default_account
+                    
+                    if target_account:
+                        # Resolve family-specific account if the default is global
+                        if target_account.family_id != family.id:
+                            resolved_account = Account.objects.filter(name=target_account.name, family=family).first()
+                            if not resolved_account:
+                                parent = None
+                                if target_account.parent:
+                                    parent = Account.objects.filter(name=target_account.parent.name, family=family).first()
+                                resolved_account = Account.objects.create(
+                                    name=target_account.name,
+                                    account_type=target_account.account_type,
+                                    family=family,
+                                    parent=parent
+                                )
+                            target_account = resolved_account
+                        
+                        # Save prediction
+                        tx.predicted_account = target_account
+                        tx.save()
+                        total_categorized += 1
+                        
+                        # 2. AUTO-APPROVE based on the existence of the target_account
+                        try:
+                            approve_staged_transaction(
+                                transaction_id=tx.id,
+                                target_account_id=target_account.id,
+                                user=user
+                            )
+                            total_approved += 1
+                        except Exception as e:
+                            self.stdout.write(self.style.ERROR(f"Failed to approve tx {tx.id}: {e}"))
+                            
+                    else:
+                        # 3. No default account exists. Leave in Inbox.
+                        tx.predicted_account = None
+                        tx.save()
+                        total_categorized += 1
 
-            if merchant.is_unique_provider:
-                if merchant.default_account_id:
-                    eligible_for_predicted_backfill += 1
-                    tx.predicted_account_id = merchant.default_account_id
-                    changed_fields.append("predicted_account")
-                    predicted_updated_rows += 1
-                else:
-                    merchant_unique_but_default_account_null += 1
-            else:
-                merchant_not_unique_provider += 1
-
-            if not dry_run and changed_fields:
-                tx.save(update_fields=changed_fields)
-
-        residual_unmatched_rows = total_target_rows - predicted_updated_rows
-
-        self.stdout.write(self.style.SUCCESS("Backfill diagnostics"))
-        self.stdout.write(f"dry_run: {dry_run}")
-        self.stdout.write(f"target_rows(predicted_account is NULL, clean_description set): {total_target_rows}")
-        self.stdout.write(f"merchant_fk_backfilled: {merchant_fk_backfilled}")
-        self.stdout.write(
-            f"eligible_for_predicted_backfill(unique provider + default account): {eligible_for_predicted_backfill}"
-        )
-        self.stdout.write(f"predicted_updated_rows: {predicted_updated_rows}")
-        self.stdout.write(f"residual_unmatched_rows: {residual_unmatched_rows}")
-        self.stdout.write("--- residual breakdown ---")
-        self.stdout.write(f"no_merchant_match(clean_description != Merchant.name normalized): {no_merchant_match}")
-        self.stdout.write(f"merchant_not_unique_provider(must stay NULL): {merchant_not_unique_provider}")
-        self.stdout.write(f"merchant_unique_but_default_account_null: {merchant_unique_but_default_account_null}")
+        self.stdout.write(self.style.SUCCESS(
+            f"Reprocessing Complete.\n"
+            f"Transactions Categorized: {total_categorized}\n"
+            f"Transactions Auto-Approved: {total_approved}"
+        ))

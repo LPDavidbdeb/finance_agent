@@ -72,7 +72,7 @@ class Command(BaseCommand):
             processed_count = 0
             for tx in unprocessed_txs:
                 institution_id = tx.statement_import.financial_product.institution_id
-                rule = find_matching_rule(tx.raw_description, institution_id)
+                rule = find_matching_rule(tx.raw_description, institution_id, user_family.id)
                 
                 # If we matched one of our newly configured unique transfer merchants
                 if rule and rule.merchant.is_unique_provider and rule.merchant.default_account:

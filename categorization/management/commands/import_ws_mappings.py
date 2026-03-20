@@ -73,7 +73,7 @@ class Command(BaseCommand):
 
             for tx in unprocessed_txs:
                 institution_id = tx.statement_import.financial_product.institution_id
-                rule = find_matching_rule(tx.raw_description, institution_id)
+                rule = find_matching_rule(tx.raw_description, institution_id, user_family.id)
                 
                 if rule and rule.merchant.default_account:
                     tx.merchant = rule.merchant

@@ -87,19 +87,22 @@ def extract_transactions_from_statement(import_id: int, user):
         
         transactions_data = df.to_dict('records')
         institution_id = statement_import.financial_product.institution_id
+        family_id = statement_import.financial_product.family_id
 
         staged_transactions = []
         for tx_data in transactions_data:
             raw_description = str(tx_data.get('description', ''))
-            rule = find_matching_rule(raw_description, institution_id)
+            rule = find_matching_rule(raw_description, institution_id, family_id)
 
-            merchant = None
+            clean_desc = raw_description
             predicted_acc = None
+            merchant_obj = None
 
             if rule:
-                merchant = rule.merchant
-                if merchant.is_unique_provider and merchant.default_account_id:
-                    predicted_acc = merchant.default_account
+                clean_desc = rule.merchant.name
+                merchant_obj = rule.merchant
+                if rule.merchant.is_unique_provider:
+                    predicted_acc = rule.merchant.default_account
 
             amount_val = tx_data.get('amount', 0)
             if pd.isna(amount_val):
@@ -110,13 +113,15 @@ def extract_transactions_from_statement(import_id: int, user):
                     statement_import=statement_import,
                     bank_date=tx_data.get('date'),
                     raw_description=raw_description,
-                    merchant=merchant,
+                    clean_description=clean_desc,
                     predicted_account=predicted_acc,
+                    merchant=merchant_obj,
                     amount=Decimal(str(amount_val)),
                     unique_bank_id=tx_data.get('unique_bank_id'),
                     status=StagedTransaction.Status.UNPROCESSED,
                 )
             )
+
 
         if staged_transactions:
             StagedTransaction.objects.bulk_create(staged_transactions, batch_size=1000)

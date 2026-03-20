@@ -91,7 +91,7 @@ class Command(BaseCommand):
             reconciled_count = 0
             for tx in unprocessed_txs:
                 institution_id = tx.statement_import.financial_product.institution_id
-                rule = find_matching_rule(tx.raw_description, institution_id)
+                rule = find_matching_rule(tx.raw_description, institution_id, user_family.id)
                 
                 if rule and rule.merchant.is_unique_provider and rule.merchant.default_account:
                     tx.merchant = rule.merchant
