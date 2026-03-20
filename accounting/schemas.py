@@ -19,10 +19,6 @@ class AccountDetailOut(Schema):
     children: List[AccountChildOut]
     merchants: List[AccountMerchantOut]
 
-    @staticmethod
-    def resolve_children(obj):
-        return obj.get_children()
-
 class DimensionLineItemOut(Schema):
     id: Optional[int] = None
     name: str
