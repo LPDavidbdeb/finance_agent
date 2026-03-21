@@ -1,11 +1,21 @@
 from typing import Optional
 from decimal import Decimal
+import unicodedata
 from django.db.models import Q, Value, CharField, Case, When, IntegerField, F
-from django.db.models.functions import Lower, Length
+from django.db.models.functions import Length, Trim
 from django.db import transaction
 from .models import TransactionMappingRule, Merchant
 from banking.models import StagedTransaction
 from accounting.models import Account, TransactionLine
+
+
+def normalize_text(text: str) -> str:
+    """Standardize dashes, normalize unicode, and remove surrounding whitespace."""
+    if not text:
+        return ""
+    text = unicodedata.normalize('NFKC', text)
+    text = text.replace('–', '-').replace('—', '-')
+    return text.strip().lower()
 
 
 def find_matching_rule(
@@ -17,7 +27,7 @@ def find_matching_rule(
     if not raw_description:
         return None
 
-    description = raw_description.strip().lower()
+    description = normalize_text(raw_description)
     if not description:
         return None
 
@@ -29,12 +39,6 @@ def find_matching_rule(
             & (Q(max_amount__isnull=True) | Q(max_amount__gte=abs_amount))
         )
 
-    # We want to find rules where search_text is a substring of description.
-    # We prioritize rules for the specific institution, then fall back to global (null) rules.
-    # We also strictly filter by the family of the merchant.
-    # Length-based matching: use .annotate(search_len=Length('search_text')).order_by('-search_len')
-    
-    # Check for specific institution first
     institution_match = (
         TransactionMappingRule.objects.filter(
             institution_id=institution_id,
@@ -44,21 +48,21 @@ def find_matching_rule(
         .select_related('merchant', 'merchant__default_account')
         .annotate(
             desc=Value(description, output_field=CharField()),
-            search_len=Length('search_text'),
+            clean_search_text=Trim('search_text'),
+            search_len=Length('clean_search_text'),
             has_amount_bounds=Case(
                 When(Q(min_amount__isnull=False) | Q(max_amount__isnull=False), then=Value(1)),
                 default=Value(0),
                 output_field=IntegerField(),
             ),
         )
-        .filter(desc__icontains=F('search_text'))
-        .order_by('-search_len', '-has_amount_bounds', '-search_text') # Prefer longer and then bounded matches
+        .filter(desc__icontains=F('clean_search_text'))
+        .order_by('-search_len', '-has_amount_bounds', '-clean_search_text')
         .first()
     )
     if institution_match:
         return institution_match
 
-    # Fallback to global rules for this family
     return (
         TransactionMappingRule.objects.filter(
             institution__isnull=True,
@@ -68,15 +72,16 @@ def find_matching_rule(
         .select_related('merchant', 'merchant__default_account')
         .annotate(
             desc=Value(description, output_field=CharField()),
-            search_len=Length('search_text'),
+            clean_search_text=Trim('search_text'),
+            search_len=Length('clean_search_text'),
             has_amount_bounds=Case(
                 When(Q(min_amount__isnull=False) | Q(max_amount__isnull=False), then=Value(1)),
                 default=Value(0),
                 output_field=IntegerField(),
             ),
         )
-        .filter(desc__icontains=F('search_text'))
-        .order_by('-search_len', '-has_amount_bounds', '-search_text') # Prefer longer and then bounded matches
+        .filter(desc__icontains=F('clean_search_text'))
+        .order_by('-search_len', '-has_amount_bounds', '-clean_search_text')
         .first()
     )
 

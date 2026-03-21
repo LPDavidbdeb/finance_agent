@@ -27,7 +27,10 @@ class Command(BaseCommand):
                 continue
 
             unprocessed_txs = StagedTransaction.objects.filter(
-                status=StagedTransaction.Status.UNPROCESSED,
+                status__in=[
+                    StagedTransaction.Status.UNPROCESSED,
+                    StagedTransaction.Status.PENDING_REVIEW,
+                ],
                 statement_import__financial_product__family=family
             ).select_related('statement_import__financial_product', 'statement_import__financial_product__institution')
 
