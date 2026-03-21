@@ -77,6 +77,7 @@ class StagedTransactionOut(Schema):
     id: int
     bank_date: date
     raw_description: str
+    clean_description: Optional[str] = None
     merchant_name: Optional[str] = None
     amount: Decimal
     status: str

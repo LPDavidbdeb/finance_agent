@@ -66,6 +66,7 @@ class StagedTransaction(models.Model):
     statement_import = models.ForeignKey(BankStatementImport, on_delete=models.CASCADE, related_name='staged_transactions')
     bank_date = models.DateField()
     raw_description = models.CharField(max_length=1024)
+    clean_description = models.CharField(max_length=1024, null=True, blank=True)
     amount = models.DecimalField(max_digits=15, decimal_places=2)
     unique_bank_id = models.CharField(max_length=255, null=True, blank=True)
     status = models.CharField(max_length=50, choices=Status.choices, default=Status.UNPROCESSED)

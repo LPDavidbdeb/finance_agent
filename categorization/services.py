@@ -1,18 +1,32 @@
 from typing import Optional
-from django.db.models import Q, Value, CharField
+from decimal import Decimal
+from django.db.models import Q, Value, CharField, Case, When, IntegerField
 from django.db.models.functions import Lower, Length
 from django.db import transaction
 from .models import TransactionMappingRule, Merchant
 from banking.models import StagedTransaction
 from accounting.models import Account, TransactionLine
 
-def find_matching_rule(raw_description: str, institution_id: int, family_id: int) -> Optional[TransactionMappingRule]:
+def find_matching_rule(
+    raw_description: str,
+    institution_id: int,
+    family_id: int,
+    transaction_amount: Decimal = None,
+) -> Optional[TransactionMappingRule]:
     if not raw_description:
         return None
 
     description = raw_description.strip().lower()
     if not description:
         return None
+
+    amount_filter = Q()
+    if transaction_amount is not None:
+        abs_amount = abs(Decimal(str(transaction_amount)))
+        amount_filter = (
+            (Q(min_amount__isnull=True) | Q(min_amount__lte=abs_amount))
+            & (Q(max_amount__isnull=True) | Q(max_amount__gte=abs_amount))
+        )
 
     # We want to find rules where search_text is a substring of description.
     # We prioritize rules for the specific institution, then fall back to global (null) rules.
@@ -25,13 +39,19 @@ def find_matching_rule(raw_description: str, institution_id: int, family_id: int
             institution_id=institution_id,
             merchant__family_id=family_id
         )
+        .filter(amount_filter)
         .select_related('merchant', 'merchant__default_account')
         .annotate(
             desc=Value(description, output_field=CharField()),
-            search_len=Length('search_text')
+            search_len=Length('search_text'),
+            has_amount_bounds=Case(
+                When(Q(min_amount__isnull=False) | Q(max_amount__isnull=False), then=Value(1)),
+                default=Value(0),
+                output_field=IntegerField(),
+            ),
         )
         .filter(desc__icontains=Lower('search_text'))
-        .order_by('-search_len', '-search_text') # Prefer longer matches
+        .order_by('-search_len', '-has_amount_bounds', '-search_text') # Prefer longer and then bounded matches
         .first()
     )
     if institution_match:
@@ -43,13 +63,19 @@ def find_matching_rule(raw_description: str, institution_id: int, family_id: int
             institution__isnull=True,
             merchant__family_id=family_id
         )
+        .filter(amount_filter)
         .select_related('merchant', 'merchant__default_account')
         .annotate(
             desc=Value(description, output_field=CharField()),
-            search_len=Length('search_text')
+            search_len=Length('search_text'),
+            has_amount_bounds=Case(
+                When(Q(min_amount__isnull=False) | Q(max_amount__isnull=False), then=Value(1)),
+                default=Value(0),
+                output_field=IntegerField(),
+            ),
         )
         .filter(desc__icontains=Lower('search_text'))
-        .order_by('-search_len', '-search_text') # Prefer longer matches
+        .order_by('-search_len', '-has_amount_bounds', '-search_text') # Prefer longer and then bounded matches
         .first()
     )
 

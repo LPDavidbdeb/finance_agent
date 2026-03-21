@@ -182,30 +182,35 @@ class CompteDesjardinsExtractor(BasePDFExtractor):
 
     def process_compte_operations_courrantes(self, df, statement_year, statement_month):
         df_copy = df.copy()
+        # Normalize columns for identification
+        df_copy.columns = [str(c).strip() for c in df_copy.columns]
+        
         try:
             Unnamed_col_index = df_copy.columns.to_list().index('Unnamed: 0')
             if Unnamed_col_index == 3:
-                df_copy.drop('Unnamed: 0', axis=1, inplace=True)
-                df_copy.drop('Description', axis=1, inplace=True)
-                df_copy.rename(columns={'Code': 'Description'}, inplace=True)
-                df_copy = df_copy.loc[~((df_copy['Description'] == 'Solde reporté') | df_copy['Date'].isna())]
+                df_copy = df_copy.drop(['Unnamed: 0', 'Description'], axis=1)
+                df_copy = df_copy.rename(columns={'Code': 'Description'})
+                if 'Date' in df_copy.columns:
+                    df_copy = df_copy.loc[~((df_copy['Description'] == 'Solde reporté') | df_copy['Date'].isna())]
                 df_copy["Code"] = df_copy["Description"].str.split().str[0]
                 df_copy['Code'] = df_copy['Code'].replace('IVMWVirement', 'IVMW')
                 df_copy['Description'] = df_copy.apply(
                     lambda row: row['Description'].replace(row['Code'], '') if pd.notna(row['Description']) and pd.notna(
                         row['Code']) else None, axis=1)
             elif Unnamed_col_index == 2:
-                df_copy.drop('Description', axis=1, inplace=True)
-                df_copy.rename(columns={'Unnamed: 0': 'Description'}, inplace=True)
-                df_copy = df_copy[df_copy['Description'] != 'Solde reporté']
-                df_copy = df_copy.loc[~((df_copy['Description'] == 'Solde reporté') | df_copy['Date'].isna())]
-        except ValueError:
+                df_copy = df_copy.drop('Description', axis=1)
+                df_copy = df_copy.rename(columns={'Unnamed: 0': 'Description'})
+                if 'Date' in df_copy.columns:
+                    df_copy = df_copy.loc[~((df_copy['Description'] == 'Solde reporté') | df_copy['Date'].isna())]
+        except (ValueError, KeyError):
             pass
 
         self.set_col_to_numeric(df_copy, ['Retrait', 'Dépôt', 'Solde'])
-        df_copy["Date"] = df_copy["Date"].apply(lambda d: self.to_date(d, statement_year, statement_month))
-        df_copy.rename(columns={"Solde": "SOLDE", "Date": "DATE", "Retrait": "DEBIT", "Dépôt": "CREDIT",
-                                "Description": "DESCRIPTION"}, inplace=True)
+        if 'Date' in df_copy.columns:
+            df_copy["Date"] = df_copy["Date"].apply(lambda d: self.to_date(d, statement_year, statement_month))
+        
+        df_copy = df_copy.rename(columns={"Solde": "SOLDE", "Date": "DATE", "Retrait": "DEBIT", "Dépôt": "CREDIT",
+                                "Description": "DESCRIPTION"})
         return df_copy
 
     def process_compte_celi(self, df, statement_year, statement_month):
@@ -218,9 +223,9 @@ class CompteDesjardinsExtractor(BasePDFExtractor):
         if nombre_de_colone == 5:
             df_copy.columns = ['Date', 'Code', 'Description', 'Transaction', 'Solde']
             df_copy["Solde"] = pd.to_numeric(df_copy["Solde"].astype(str).str.replace(" ", ""), errors='coerce')
-            df_copy["Solde"].fillna(0, inplace=True)
+            df_copy["Solde"] = df_copy["Solde"].fillna(0)
             difference = df_copy["Solde"].diff()
-            df_copy.replace(to_replace=r'.*Unnamed.*', value='', regex=True, inplace=True)
+            df_copy = df_copy.replace(to_replace=r'.*Unnamed.*', value='', regex=True)
 
             liste_de_depot, liste_de_retrait = [], []
             for k, v in df_copy.iterrows():
@@ -237,15 +242,19 @@ class CompteDesjardinsExtractor(BasePDFExtractor):
                     liste_de_depot.append(0); liste_de_retrait.append(0)
 
             df_copy['Retrait'], df_copy['Dépôt'] = liste_de_retrait, liste_de_depot
-            df_copy.drop('Transaction', axis=1, inplace=True)
+            df_copy = df_copy.drop('Transaction', axis=1)
         elif nombre_de_colone == 6:
             df_copy.columns = ['Date', 'Code', 'Description', 'Retrait', 'Dépôt', 'Solde']
 
         self.set_col_to_numeric(df_copy, ['Retrait', 'Dépôt'])
-        df_copy["Date"] = df_copy["Date"].apply(lambda d: self.to_date(d, statement_year, statement_month))
-        df_copy = df_copy.loc[~((df_copy['Description'] == 'Solde reporté') | df_copy['Date'].isna())]
-        df_copy.rename(columns={"Solde": "SOLDE", "Date": "DATE", "Retrait": "DEBIT", "Dépôt": "CREDIT",
-                                "Description": "DESCRIPTION"}, inplace=True)
+        if 'Date' in df_copy.columns:
+            df_copy["Date"] = df_copy["Date"].apply(lambda d: self.to_date(d, statement_year, statement_month))
+        
+        if 'Description' in df_copy.columns and 'Date' in df_copy.columns:
+            df_copy = df_copy.loc[~((df_copy['Description'] == 'Solde reporté') | df_copy['Date'].isna())]
+            
+        df_copy = df_copy.rename(columns={"Solde": "SOLDE", "Date": "DATE", "Retrait": "DEBIT", "Dépôt": "CREDIT",
+                                "Description": "DESCRIPTION"})
         return df_copy
 
     def process_legacy(self, df, statement_year, statement_month) -> pd.DataFrame:

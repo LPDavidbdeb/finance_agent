@@ -92,7 +92,18 @@ def extract_transactions_from_statement(import_id: int, user):
         staged_transactions = []
         for tx_data in transactions_data:
             raw_description = str(tx_data.get('description', ''))
-            rule = find_matching_rule(raw_description, institution_id, family_id)
+
+            amount_val = tx_data.get('amount', 0)
+            if pd.isna(amount_val):
+                amount_val = 0
+            clean_amount = Decimal(str(amount_val))
+
+            rule = find_matching_rule(
+                raw_description,
+                institution_id,
+                family_id,
+                transaction_amount=clean_amount,
+            )
 
             clean_desc = raw_description
             predicted_acc = None
@@ -104,10 +115,6 @@ def extract_transactions_from_statement(import_id: int, user):
                 if rule.merchant.is_unique_provider:
                     predicted_acc = rule.merchant.default_account
 
-            amount_val = tx_data.get('amount', 0)
-            if pd.isna(amount_val):
-                amount_val = 0
-
             staged_transactions.append(
                 StagedTransaction(
                     statement_import=statement_import,
@@ -116,7 +123,7 @@ def extract_transactions_from_statement(import_id: int, user):
                     clean_description=clean_desc,
                     predicted_account=predicted_acc,
                     merchant=merchant_obj,
-                    amount=Decimal(str(amount_val)),
+                    amount=clean_amount,
                     unique_bank_id=tx_data.get('unique_bank_id'),
                     status=StagedTransaction.Status.UNPROCESSED,
                 )

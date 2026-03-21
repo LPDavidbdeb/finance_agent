@@ -22,6 +22,12 @@ class TransactionMappingRule(models.Model):
     search_text = models.CharField(max_length=255)
     # Note: Using string reference 'banking.FinancialInstitution' to avoid circular imports
     institution = models.ForeignKey('banking.FinancialInstitution', on_delete=models.CASCADE, null=True, blank=True, related_name='mapping_rules')
+    min_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    max_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
     def __str__(self):
+        if self.min_amount is not None or self.max_amount is not None:
+            min_label = self.min_amount if self.min_amount is not None else '-inf'
+            max_label = self.max_amount if self.max_amount is not None else '+inf'
+            return f"{self.search_text} [{min_label}..{max_label}] -> {self.merchant.name}"
         return f"{self.search_text} -> {self.merchant.name}"
