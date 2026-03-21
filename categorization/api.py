@@ -45,10 +45,13 @@ def create_and_apply_mapping_rule(request, payload: RuleCreateAndApplyIn):
         )
     
     # 3. Create the TransactionMappingRule
+    clean_search_text = payload.search_text.strip()
     rule = TransactionMappingRule.objects.create(
         merchant=merchant,
-        search_text=payload.search_text,
-        institution_id=payload.institution_id
+        search_text=clean_search_text,
+        institution_id=payload.institution_id,
+        min_amount=payload.min_amount,
+        max_amount=payload.max_amount
     )
     
     # 4. Query UNPROCESSED transactions for the current family
@@ -62,8 +65,8 @@ def create_and_apply_mapping_rule(request, payload: RuleCreateAndApplyIn):
         queryset = queryset.filter(statement_import__financial_product__institution_id=payload.institution_id)
     
     # 6. Filter transactions by the new rule's search_text (case-insensitive)
-    matching_transactions = queryset.filter(raw_description__icontains=payload.search_text)
-    
+    matching_transactions = queryset.filter(raw_description__icontains=clean_search_text)
+
     # 7. Apply and Auto-Approve (only if unique provider and has category)
     updated_count = 0
     can_auto_approve = bool(merchant.is_unique_provider and merchant.default_account)

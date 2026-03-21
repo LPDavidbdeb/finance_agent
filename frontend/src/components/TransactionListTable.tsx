@@ -23,7 +23,7 @@ export interface StagedTransaction {
 
 interface TransactionListTableProps {
   productId: number;
-  institutionId?: number;
+  institutionId: number;
   title: string;
   description: string;
   fetchFn: () => Promise<StagedTransaction[]>;

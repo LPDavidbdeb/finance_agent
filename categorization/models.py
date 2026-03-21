@@ -25,6 +25,11 @@ class TransactionMappingRule(models.Model):
     min_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     max_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
+    def save(self, *args, **kwargs):
+        if self.search_text:
+            self.search_text = self.search_text.strip().lower()
+        super().save(*args, **kwargs)
+
     def __str__(self):
         if self.min_amount is not None or self.max_amount is not None:
             min_label = self.min_amount if self.min_amount is not None else '-inf'

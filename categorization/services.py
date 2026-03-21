@@ -1,11 +1,12 @@
 from typing import Optional
 from decimal import Decimal
-from django.db.models import Q, Value, CharField, Case, When, IntegerField
+from django.db.models import Q, Value, CharField, Case, When, IntegerField, F
 from django.db.models.functions import Lower, Length
 from django.db import transaction
 from .models import TransactionMappingRule, Merchant
 from banking.models import StagedTransaction
 from accounting.models import Account, TransactionLine
+
 
 def find_matching_rule(
     raw_description: str,
@@ -50,7 +51,7 @@ def find_matching_rule(
                 output_field=IntegerField(),
             ),
         )
-        .filter(desc__icontains=Lower('search_text'))
+        .filter(desc__icontains=F('search_text'))
         .order_by('-search_len', '-has_amount_bounds', '-search_text') # Prefer longer and then bounded matches
         .first()
     )
@@ -74,7 +75,7 @@ def find_matching_rule(
                 output_field=IntegerField(),
             ),
         )
-        .filter(desc__icontains=Lower('search_text'))
+        .filter(desc__icontains=F('search_text'))
         .order_by('-search_len', '-has_amount_bounds', '-search_text') # Prefer longer and then bounded matches
         .first()
     )
