@@ -1,5 +1,6 @@
 from ninja import Schema
 from typing import List, Optional
+from datetime import date
 
 class AccountChildOut(Schema):
     id: int
@@ -63,6 +64,18 @@ class YearlyTrendOut(Schema):
     monthly_avg: float
     breakdown: dict = {} # Map of child_name -> amount
 
+class DrillDownBannerOut(Schema):
+    name: str
+    amount: float
+    count: int
+    category: str
+
+class DrillDownOut(Schema):
+    dimension_name: str
+    period: str
+    category_breakdown: List['DimensionLineItemOut']
+    banners: List[DrillDownBannerOut]
+
 class AccountDetailOut(Schema):
     id: int
     name: str
@@ -80,7 +93,10 @@ class DimensionLineItemOut(Schema):
     id: Optional[int] = None
     name: str
     balance: float
+    average_monthly_balance: float = 0.0
     sub_items: List[dict] = []
+
+DrillDownOut.update_forward_refs()
 
 class MerchantItemOut(Schema):
     id: int

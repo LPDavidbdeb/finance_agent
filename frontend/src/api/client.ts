@@ -52,6 +52,14 @@ export async function fetchDimensionDetail(slug: string, year: number) {
   return res.json();
 }
 
+export async function fetchDrillDown(slug: string, period: string) {
+  const res = await fetch(`${API_URL}/accounting/reports/dimension/${slug}/drill-down?period=${period}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch drill-down data");
+  return res.json();
+}
+
 export async function fetchAccountDetail(id: number, year?: number) {
   const url = `${API_URL}/accounting/accounts/${id}${year ? `?year=${year}` : ''}`;
   const res = await fetch(url, {

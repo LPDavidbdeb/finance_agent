@@ -14,6 +14,7 @@ import {
   PieChart, Pie, Cell
 } from 'recharts';
 import { Loader2, TrendingDown, TrendingUp, Wallet, Receipt, PieChart as PieIcon, RefreshCw } from 'lucide-react';
+import { DrillDownModal } from '../components/DrillDownModal';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#14b8a6', '#6366f1'];
 
@@ -36,6 +37,10 @@ export const Dashboard: React.FC = () => {
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Drill-down State
+  const [isDrillDownOpen, setIsDrillDownOpen] = useState(false);
+  const [drillDownPeriod, setDrillDownPeriod] = useState('');
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -89,6 +94,13 @@ export const Dashboard: React.FC = () => {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleBarClick = (data: any) => {
+    if (data && data.period) {
+      setDrillDownPeriod(data.period);
+      setIsDrillDownOpen(true);
     }
   };
 
@@ -200,7 +212,7 @@ export const Dashboard: React.FC = () => {
 
       {/* Dynamic Chart Zone */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Detail Chart (Evolution or Waterfall soon) */}
+        {/* Detail Chart */}
         <Card className="shadow-sm border-slate-200 overflow-hidden">
           <CardHeader className="bg-slate-50/50 border-b border-slate-100">
             <div className="flex justify-between items-center">
@@ -225,17 +237,23 @@ export const Dashboard: React.FC = () => {
                     <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} dy={10} />
                     <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} tickFormatter={(v) => `$${v}`} />
                     <Tooltip 
-                    cursor={{fill: '#f8fafc'}} 
-                    contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} 
-                    formatter={(value: any) => [`$${value.toLocaleString()}`, activeDimension.replace('-', ' ').toUpperCase()]}
-                  />
-                    <Bar dataKey="amount" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                      cursor={{fill: '#f8fafc'}} 
+                      contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} 
+                      formatter={(value: any) => [`$${value.toLocaleString()}`, activeDimension.replace('-', ' ').toUpperCase()]}
+                    />
+                    <Bar 
+                      dataKey="amount" 
+                      fill="#3b82f6" 
+                      radius={[4, 4, 0, 0]} 
+                      onClick={handleBarClick}
+                      className="cursor-pointer hover:opacity-80 transition-opacity"
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div className="h-[350px] flex items-center justify-center text-slate-400 italic text-sm">
-                Trend data for this dimension is currently available in the Full Report.
+              <div className="h-[350px] flex items-center justify-center text-slate-400 italic text-sm text-center px-8">
+                Trend data for this dimension is currently available in the Full Report.<br/>Select Expenses or Revenue for interactive bar drill-down.
               </div>
             )}
           </CardContent>
@@ -278,6 +296,13 @@ export const Dashboard: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+
+      <DrillDownModal 
+        isOpen={isDrillDownOpen}
+        onClose={() => setIsDrillDownOpen(false)}
+        dimension={activeDimension}
+        period={drillDownPeriod}
+      />
     </div>
   );
 };

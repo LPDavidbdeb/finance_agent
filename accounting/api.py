@@ -6,9 +6,14 @@ from ninja_jwt.authentication import JWTAuth
 from datetime import date
 from typing import List, Literal, Optional
 from decimal import Decimal
+from dateutil.relativedelta import relativedelta
+import numpy as np
 
 from .models import Account, TransactionLine, JournalEntry
-from .schemas import AccountDetailOut, DimensionBreakdownOut, AccountCreateIn, AccountOut
+from .schemas import (
+    AccountDetailOut, DimensionBreakdownOut, AccountCreateIn, AccountOut,
+    DrillDownOut, DrillDownBannerOut
+)
 from categorization.models import Merchant
 
 router = Router(auth=JWTAuth())
@@ -62,7 +67,7 @@ def delete_account(request, account_id: int):
 def get_dimension_breakdown(request, dimension_slug: str, year: int):
     """
     Returns a detailed breakdown of a specific financial dimension for a given year.
-    Uses a branch-wide aggregation logic.
+    Uses a branch-wide aggregation logic with direct root remainder handling.
     """
     user = request.auth
     family = user.family
@@ -84,7 +89,7 @@ def get_dimension_breakdown(request, dimension_slug: str, year: int):
         raise errors.HttpError(404, f"Dimension {dimension_slug} not recognized.")
 
     if dimension_slug in ['net-income', 'net-worth']:
-        # Handle calculated dimensions
+        # Handle calculated dimensions (Net Income / Net Worth)
         if dimension_slug == 'net-income':
             root_rev = get_object_or_404(Account, family=family, name='Revenue', parent=None)
             root_exp = get_object_or_404(Account, family=family, name='Expenses', parent=None)
@@ -94,9 +99,10 @@ def get_dimension_breakdown(request, dimension_slug: str, year: int):
                 "dimension_name": "Net Income",
                 "total_amount": float(-rev_bal - exp_bal),
                 "line_items": [
-                    {"name": "Total Revenue", "balance": float(-rev_bal)},
-                    {"name": "Total Expenses", "balance": float(exp_bal)}
-                ]
+                    {"name": "Total Revenue", "balance": float(-rev_bal), "sub_items": []},
+                    {"name": "Total Expenses", "balance": float(exp_bal), "sub_items": []}
+                ],
+                "merchant_items": []
             }
         else: # net-worth
             root_ast = get_object_or_404(Account, family=family, name='Assets', parent=None)
@@ -107,18 +113,19 @@ def get_dimension_breakdown(request, dimension_slug: str, year: int):
                 "dimension_name": "Net Worth",
                 "total_amount": float(ast_bal + lib_bal),
                 "line_items": [
-                    {"name": "Total Assets", "balance": float(ast_bal)},
-                    {"name": "Total Liabilities", "balance": float(-lib_bal)}
-                ]
+                    {"name": "Total Assets", "balance": float(ast_bal), "sub_items": []},
+                    {"name": "Total Liabilities", "balance": float(-lib_bal), "sub_items": []}
+                ],
+                "merchant_items": []
             }
 
-    # 2. Handle standard dimensions
+    # 2. Handle standard dimensions (Revenue, Expenses, etc.)
     root_name = root_map[dimension_slug]
     root = get_object_or_404(Account, family=family, name=root_name, parent=None)
     is_cumulative = dimension_slug in ['assets', 'liabilities', 'equity']
     flip_sign = dimension_slug in ['revenue', 'liabilities', 'equity']
 
-    # Calculate the True Total for the entire branch first
+    # Step A: Calculate the True Total for the entire root branch first
     true_total_balance = get_branch_sum(family, root, jan_1, dec_31, is_cumulative)
 
     # Fetch immediate children
@@ -127,12 +134,12 @@ def get_dimension_breakdown(request, dimension_slug: str, year: int):
     child_sum = Decimal('0.00')
 
     for child in children:
-        # Sum all transactions for this child and all its descendants
+        # Sum all transactions for this child and ALL its descendants
         balance = get_branch_sum(family, child, jan_1, dec_31, is_cumulative)
         child_sum += balance
         display_bal = -balance if flip_sign else balance
         
-        # SCOPING FIX: Fetch sub-items (Banners) specifically for this child's branch
+        # SCOPING FIX: Query sub-item banners strictly inside this child's branch
         child_descendant_ids = child.get_descendants(include_self=True).values_list('id', flat=True)
         q_child = Q(journal_entry__family=family, account_id__in=child_descendant_ids)
         if is_cumulative:
@@ -158,12 +165,12 @@ def get_dimension_breakdown(request, dimension_slug: str, year: int):
             "sub_items": sorted(sub_items_list, key=lambda x: x['balance'], reverse=True)
         })
 
-    # Calculate the Direct Root Remainder
+    # Step B: Calculate the Direct Root Remainder (Transactions posted directly to the root category)
     root_direct_bal = true_total_balance - child_sum
     display_root_direct = -root_direct_bal if flip_sign else root_direct_bal
     
     if abs(display_root_direct) > Decimal('0.01'):
-        # Query banners directly mapped strictly to the root ID
+        # Query banners directly mapped strictly to the root account ID
         q_root_strict = Q(journal_entry__family=family, account_id=root.id)
         if is_cumulative:
             q_root_strict &= Q(journal_entry__date__lte=dec_31)
@@ -188,13 +195,10 @@ def get_dimension_breakdown(request, dimension_slug: str, year: int):
             "sub_items": sorted(root_sub_items, key=lambda x: x['balance'], reverse=True)
         })
 
-    total_amount = -true_total_balance if flip_sign else true_total_balance
-
-    # 3. Handle Merchant (Banner) breakdown for the entire root branch (Global View)
+    # 3. Handle Merchant (Banner) breakdown for the Global View (The whole branch)
     all_descendants = root.get_descendants(include_self=True)
     all_merchants = Merchant.objects.filter(family=family, default_account__in=all_descendants)
     
-    # Grouped sums by clean_description
     q_all = Q(journal_entry__family=family, account_id__in=all_descendants.values_list('id', flat=True))
     if is_cumulative:
         q_all &= Q(journal_entry__date__lte=dec_31)
@@ -202,29 +206,26 @@ def get_dimension_breakdown(request, dimension_slug: str, year: int):
         q_all &= Q(journal_entry__date__range=[jan_1, dec_31])
         
     merchant_sums = TransactionLine.objects.filter(q_all).values('journal_entry__description').annotate(total=Sum('amount'))
-    merchant_sum_dict = {item['journal_entry__description']: item['total'] for item in merchant_sums}
-
+    
     merchant_items = []
-    for m in all_merchants:
-        m_bal = merchant_sum_dict.get(m.name, Decimal('0.00'))
+    for item in merchant_sums:
+        m_bal = item['total']
         m_display_bal = -m_bal if flip_sign else m_bal
-        
-        # Only include if there's activity or requested
-        merchant_items.append({
-            "id": m.id,
-            "name": m.name,
-            "balance": float(m_display_bal)
-        })
-
-    # Sort merchant items by balance
-    merchant_items.sort(key=lambda x: abs(x['balance']), reverse=True)
+        if abs(m_display_bal) > Decimal('0.01'):
+            # Try to find a merchant with this name to get the ID
+            m_obj = Merchant.objects.filter(family=family, name=item['journal_entry__description']).first()
+            merchant_items.append({
+                "id": m_obj.id if m_obj else 0, # Use 0 if no record exists
+                "name": item['journal_entry__description'],
+                "balance": float(m_display_bal)
+            })
 
     # Final result
     return {
         "dimension_name": dimension_name,
-        "total_amount": float(total_amount),
+        "total_amount": float(-true_total_balance if flip_sign else true_total_balance),
         "line_items": sorted(line_items, key=lambda x: x['balance'], reverse=True),
-        "merchant_items": merchant_items
+        "merchant_items": sorted(merchant_items, key=lambda x: abs(x['balance']), reverse=True)
     }
 
 def get_branch_sum(family, account, start, end, cumulative):
@@ -241,8 +242,112 @@ def get_branch_sum(family, account, start, end, cumulative):
         
     return TransactionLine.objects.filter(q).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
 
-import numpy as np
-from django.db.models import StdDev
+from django.db.models import Sum, Q, Count
+...
+@router.get("/reports/dimension/{dimension_slug}/drill-down", response=DrillDownOut)
+def get_dimension_drill_down(request, dimension_slug: str, period: str):
+    """
+    Returns a detailed drill-down for a dimension in a specific month (YYYY-MM).
+    Includes category-level breakdown with historical averages and banner-grouped transactions.
+    """
+    user = request.auth
+    family = user.family
+    
+    try:
+        year, month = map(int, period.split('-'))
+        start_date = date(year, month, 1)
+        end_date = start_date + relativedelta(months=1) - relativedelta(days=1)
+        
+        # Period for historical average (Current Year)
+        year_start = date(year, 1, 1)
+        year_end = date(year, 12, 31)
+    except (ValueError, TypeError):
+        raise errors.HttpError(400, "Invalid period format. Use YYYY-MM.")
+
+    root_map = {
+        'revenue': 'Revenue',
+        'expenses': 'Expenses',
+        'assets': 'Assets',
+        'liabilities': 'Liabilities',
+        'equity': 'Equity'
+    }
+    
+    if dimension_slug not in root_map:
+        raise errors.HttpError(404, f"Dimension {dimension_slug} not drillable directly.")
+
+    root_name = root_map[dimension_slug]
+    root = get_object_or_404(Account, family=family, name=root_name, parent=None)
+    is_cumulative = dimension_slug in ['assets', 'liabilities', 'equity']
+    flip_sign = dimension_slug in ['revenue', 'liabilities', 'equity']
+
+    # 1. Category Breakdown for this month with Historical Avg
+    children = root.get_children()
+    category_breakdown = []
+    
+    # Range for this month's breakdown
+    q_month = Q(journal_entry__family=family)
+    if is_cumulative:
+        q_month &= Q(journal_entry__date__lte=end_date)
+    else:
+        q_month &= Q(journal_entry__date__range=[start_date, end_date])
+
+    for child in children:
+        child_ids = child.get_descendants(include_self=True).values_list('id', flat=True)
+        
+        # Month Balance
+        bal = TransactionLine.objects.filter(q_month, account_id__in=child_ids).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
+        display_bal = -bal if flip_sign else bal
+        
+        # Historical Year Avg (normalized to monthly)
+        q_year = Q(journal_entry__family=family, account_id__in=child_ids)
+        if is_cumulative:
+            # For cumulative, average is tricky, we'll use the avg of end-of-month snapshots if needed,
+            # but for now let's use the year-total / 12 as a proxy for velocity.
+            year_total = TransactionLine.objects.filter(q_year, journal_entry__date__range=[year_start, year_end]).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
+        else:
+            year_total = TransactionLine.objects.filter(q_year, journal_entry__date__range=[year_start, year_end]).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
+        
+        avg_bal = abs(float(year_total)) / 12
+        
+        if abs(display_bal) > 0.01 or avg_bal > 0.01:
+            category_breakdown.append({
+                "id": child.id,
+                "name": child.name,
+                "balance": float(display_bal),
+                "average_monthly_balance": avg_bal
+            })
+    
+    category_breakdown.sort(key=lambda x: abs(x['balance']), reverse=True)
+
+    # 2. Grouped Banners (Merchants)
+    # We aggregate by description and child category
+    banner_qs = TransactionLine.objects.filter(
+        journal_entry__family=family,
+        account__in=root.get_descendants(include_self=True),
+        journal_entry__date__range=[start_date, end_date]
+    ).values('journal_entry__description', 'account__name').annotate(
+        total=Sum('amount'),
+        tx_count=Count('id')
+    )
+
+    banners = []
+    for item in banner_qs:
+        val = item['total']
+        display_val = -val if flip_sign else val
+        
+        banners.append({
+            "name": item['journal_entry__description'],
+            "amount": float(display_val),
+            "count": item['tx_count'],
+            "category": item['account__name']
+        })
+
+    return {
+        "dimension_name": root_name,
+        "period": period,
+        "category_breakdown": category_breakdown,
+        "banners": sorted(banners, key=lambda x: abs(x['amount']), reverse=True)
+    }
 
 @router.get("/accounts/{account_id}", response=AccountDetailOut)
 def get_account_detail(request, account_id: int, year: Optional[int] = None):
@@ -404,8 +509,6 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
         "avg_yearly_total": avg_yearly,
         "avg_monthly_avg": avg_yearly / 12
     }
-
-from dateutil.relativedelta import relativedelta
 
 @router.get("/dimension-evolution")
 def get_dimension_evolution(
@@ -608,7 +711,9 @@ def get_spending_by_category(request, start_date: date, end_date: date):
     user = request.auth
     family = user.family
 
-    root_expenses = get_object_or_404(Account, family=family, name='Expenses', parent=None)
+    root_expenses = Account.objects.filter(family=family, name='Expenses', parent=None).first()
+    if not root_expenses: return []
+    
     top_categories = root_expenses.get_children()
 
     results = []
