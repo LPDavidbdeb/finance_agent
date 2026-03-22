@@ -5,6 +5,7 @@ class AccountChildOut(Schema):
     id: int
     name: str
     account_type: str
+    balance: float = 0.0
 
 class AccountOut(Schema):
     id: int
@@ -24,6 +25,16 @@ class AccountMerchantOut(Schema):
     id: int
     name: str
     balance: float = 0.0
+
+class MonthlyCategoryBreakdownOut(Schema):
+    child_id: int
+    child_name: str
+    amount: float
+
+class MonthlyBreakdownOut(Schema):
+    month: str # YYYY-MM
+    total: float
+    by_child: List[MonthlyCategoryBreakdownOut]
 
 class CFAInsightsOut(Schema):
     # Universal context
@@ -58,9 +69,10 @@ class AccountDetailOut(Schema):
     account_type: str
     parent_id: Optional[int] = None
     children: List[AccountChildOut]
-    merchants: List[AccountMerchantOut]
+    direct_merchants: List[AccountMerchantOut]
     insights: CFAInsightsOut
     historical_trends: List[YearlyTrendOut] = []
+    monthly_breakdown: List[MonthlyBreakdownOut] = []
     avg_yearly_total: float = 0.0
     avg_monthly_avg: float = 0.0
 

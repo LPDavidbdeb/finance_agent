@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -10,13 +10,14 @@ import {
 import { 
   ArrowLeft, Store, Layers, Loader2, 
   TrendingUp, TrendingDown, Target, Zap, AlertTriangle, CheckCircle2,
-  Clock, PieChart, Activity, BarChart3
+  Clock, PieChart, Activity, BarChart3, Calendar, ChevronRight
 } from 'lucide-react';
 
 interface ChildAccount {
   id: number;
   name: string;
   account_type: string;
+  balance: number;
 }
 
 interface Merchant {
@@ -25,11 +26,16 @@ interface Merchant {
   balance: number;
 }
 
-interface YearlyTrend {
-  year: number;
+interface MonthlyCategory {
+  child_id: number;
+  child_name: string;
+  amount: number;
+}
+
+interface MonthlyBreakdown {
+  month: string;
   total: number;
-  monthly_avg: number;
-  breakdown: Record<string, number>;
+  by_child: MonthlyCategory[];
 }
 
 interface CFAInsights {
@@ -55,17 +61,15 @@ interface AccountDetail {
   account_type: string;
   parent_id?: number;
   children: ChildAccount[];
-  merchants: Merchant[];
+  direct_merchants: Merchant[];
   insights: CFAInsights;
-  historical_trends: YearlyTrend[];
-  avg_yearly_total: number;
-  avg_monthly_avg: number;
+  monthly_breakdown: MonthlyBreakdown[];
 }
 
 const StatCard = ({ title, value, subValue, icon: Icon, color = "text-slate-900" }: any) => (
   <Card className="shadow-sm border-slate-200">
     <CardHeader className="pb-2">
-      <CardDescription className="text-[10px] uppercase font-bold tracking-widest flex items-center gap-2">
+      <CardDescription className="text-[10px] uppercase font-bold tracking-widest flex items-center gap-2 text-slate-500">
         <Icon size={12} /> {title}
       </CardDescription>
       <CardTitle className={`text-2xl font-black ${color}`}>{value}</CardTitle>
@@ -74,9 +78,11 @@ const StatCard = ({ title, value, subValue, icon: Icon, color = "text-slate-900"
   </Card>
 );
 
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 export const AccountDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const currentYear = new Date().getFullYear();
   const year = parseInt(searchParams.get('year') || currentYear.toString());
   const navigate = useNavigate();
@@ -84,6 +90,15 @@ export const AccountDetail: React.FC = () => {
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Dynamic year list: currentYear - 3 up to currentYear
+  const allowedYears = useMemo(() => {
+    const years = [];
+    for (let i = currentYear; i >= currentYear - 3; i--) {
+      years.push(i);
+    }
+    return years;
+  }, [currentYear]);
 
   useEffect(() => {
     if (id) {
@@ -104,34 +119,44 @@ export const AccountDetail: React.FC = () => {
     }
   };
 
-  if (loading) return <div className="flex justify-center p-20"><Loader2 className="h-8 w-8 animate-spin text-blue-600" /></div>;
-  if (error || !account) return <div className="p-20 text-center text-red-500">{error || "Account not found"}</div>;
+  const handleYearChange = (newYear: string) => {
+    setSearchParams({ year: newYear });
+  };
 
-  // Prepare data for stacked charts
-  const allCategoryNames = Array.from(new Set(account.historical_trends.flatMap(t => Object.keys(t.breakdown))));
+  // Prepare chart data
+  const chartData = useMemo(() => {
+    if (!account?.monthly_breakdown) return [];
+    return account.monthly_breakdown.map((m, idx) => {
+      const row: any = { 
+        name: MONTH_NAMES[idx],
+        total: m.total 
+      };
+      m.by_child.forEach(c => {
+        row[c.child_name] = c.amount;
+      });
+      return row;
+    });
+  }, [account]);
+
+  const seriesNames = useMemo(() => {
+    if (!account?.children) return [];
+    return account.children.map(c => c.name);
+  }, [account]);
+
   const colors = [
     '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', 
     '#ec4899', '#06b6d4', '#f97316', '#14b8a6', '#6366f1'
   ];
-  const colorMap = Object.fromEntries(allCategoryNames.map((cat, i) => [cat, colors[i % colors.length]]));
 
-  const stackedYearlyData = account.historical_trends.map(t => ({
-    year: t.year,
-    ...t.breakdown
-  }));
-
-  const stackedMonthlyData = account.historical_trends.map(t => {
-    const monthlyBreakdown: any = { year: t.year };
-    Object.entries(t.breakdown).forEach(([name, val]) => {
-      monthlyBreakdown[name] = val / 12;
-    });
-    return monthlyBreakdown;
-  });
+  if (loading) return <div className="flex justify-center p-20"><Loader2 className="h-8 w-8 animate-spin text-blue-600" /></div>;
+  if (error || !account) return <div className="p-20 text-center text-red-500">{error || "Account not found"}</div>;
 
   const { insights } = account;
   const growthColor = (insights.yoy_growth || 0) > 0 
     ? (account.account_type === 'REVENUE' ? 'text-emerald-600' : 'text-red-600') 
     : (account.account_type === 'REVENUE' ? 'text-red-600' : 'text-emerald-600');
+
+  const monthlyAverage = account.monthly_breakdown.reduce((acc, m) => acc + m.total, 0) / 12;
 
   return (
     <div className="space-y-8 max-w-6xl mx-auto w-full pb-20">
@@ -146,9 +171,20 @@ export const AccountDetail: React.FC = () => {
             </Button>
           )}
         </div>
-        <Badge variant="outline" className="px-3 py-1 text-sm font-medium">
-          Fiscal Year {year}
-        </Badge>
+        
+        <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-1.5 shadow-sm">
+          <Calendar className="h-4 w-4 text-slate-400" />
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-tight mr-1">Fiscal Year</span>
+          <select 
+            value={year} 
+            onChange={(e) => handleYearChange(e.target.value)}
+            className="text-sm font-black text-blue-600 bg-transparent focus:outline-none cursor-pointer"
+          >
+            {allowedYears.map(y => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Summary Bar */}
@@ -156,7 +192,7 @@ export const AccountDetail: React.FC = () => {
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
           <div>
             <div className="flex items-center gap-3 mb-2">
-              <Badge variant="outline" className="bg-slate-50 text-slate-500 border-slate-200 font-mono">
+              <Badge variant="outline" className="bg-slate-50 text-slate-500 border-slate-200 font-mono text-[10px]">
                 {account.account_type}
               </Badge>
               <Badge className={`${
@@ -171,7 +207,7 @@ export const AccountDetail: React.FC = () => {
             </h1>
           </div>
           <div className="text-right">
-            <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-1">Current Period</p>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Period Total</p>
             <p className="text-5xl font-black text-slate-900">
               ${insights.amount_current.toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </p>
@@ -208,180 +244,142 @@ export const AccountDetail: React.FC = () => {
         <StatCard 
           title="Concentration" 
           value={`${(insights.concentration_top_1 * 100).toFixed(0)}%`} 
-          subValue="Top contributor share" 
+          subValue="Top driver share" 
           icon={Target} 
           color={insights.concentration_top_1 > 0.5 ? "text-amber-600" : "text-slate-900"}
         />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left: Decomposition & Drivers */}
         <div className="lg:col-span-2 space-y-8">
           
-          {/* Yearly Trends Visualization */}
+          {/* Monthly Performance Chart */}
           <Card className="shadow-sm overflow-hidden">
-            <CardHeader className="bg-slate-50/30 border-b border-slate-100 flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <BarChart3 className="h-5 w-5 text-blue-600" />
-                  Historical Performance
-                </CardTitle>
-                <CardDescription>Visualizing structural mix and category intensity over time.</CardDescription>
-              </div>
+            <CardHeader className="bg-slate-50/30 border-b border-slate-100">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <BarChart3 className="h-5 w-5 text-blue-600" />
+                Monthly Performance
+              </CardTitle>
+              <CardDescription>Seasonal category intensity and monthly averages.</CardDescription>
             </CardHeader>
-            <CardContent className="pt-6 space-y-12">
-              {/* Yearly Total Stacked Chart */}
-              <div className="space-y-4">
-                <div className="flex justify-between items-end px-2">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">Yearly Total Volume</p>
-                    <p className="text-xs text-slate-500 italic">Stacked by sub-categories</p>
-                  </div>
-                  <p className="text-[10px] font-medium text-red-500">Global Mean: ${account.avg_yearly_total.toLocaleString()}</p>
-                </div>
-                <div className="h-[300px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={stackedYearlyData}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis 
-                        dataKey="year" 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fontSize: 12, fontWeight: 600, fill: '#64748b' }}
+            <CardContent className="pt-6">
+              <div className="h-[350px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis 
+                      dataKey="name" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fontSize: 12, fontWeight: 600, fill: '#64748b' }}
+                    />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fontSize: 10, fill: '#94a3b8' }}
+                      tickFormatter={(val) => `$${val.toLocaleString()}`}
+                    />
+                    <RechartsTooltip 
+                      cursor={{ fill: '#f8fafc' }}
+                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
+                      formatter={(value: any) => [`$${value.toLocaleString()}`, ""]}
+                    />
+                    <ReferenceLine 
+                      y={monthlyAverage} 
+                      stroke="#ef4444" 
+                      strokeDasharray="3 3" 
+                      label={{ position: 'right', value: 'Monthly Avg', fill: '#ef4444', fontSize: 10, fontWeight: 'bold' }} 
+                    />
+                    {seriesNames.map((name, index) => (
+                      <Bar 
+                        key={name} 
+                        dataKey={name} 
+                        stackId="a" 
+                        fill={colors[index % colors.length]} 
+                        radius={[0, 0, 0, 0]}
                       />
-                      <YAxis 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fontSize: 10, fill: '#94a3b8' }}
-                        tickFormatter={(val) => `$${(val / 1000).toFixed(0)}k`}
-                      />
-                      <RechartsTooltip 
-                        cursor={{ fill: '#f8fafc' }}
-                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
-                        formatter={(value: any) => [`$${value.toLocaleString()}`, ""]}
-                      />
-                      <ReferenceLine y={account.avg_yearly_total} stroke="#ef4444" strokeDasharray="3 3" />
-                      {allCategoryNames.map(cat => (
-                        <Bar 
-                          key={cat} 
-                          dataKey={cat} 
-                          stackId="a" 
-                          fill={colorMap[cat]} 
-                          radius={[0, 0, 0, 0]}
-                          barSize={60}
-                        />
-                      ))}
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* Monthly Average Stacked Chart */}
-              <div className="space-y-4">
-                <div className="flex justify-between items-end px-2 border-t border-slate-50 pt-6">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">Monthly Velocity Average</p>
-                    <p className="text-xs text-slate-500 italic">Normalized category intensity</p>
-                  </div>
-                  <p className="text-[10px] font-medium text-red-500">Average Velocity: ${account.avg_monthly_avg.toLocaleString()}</p>
-                </div>
-                <div className="h-[250px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={stackedMonthlyData}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis 
-                        dataKey="year" 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fontSize: 12, fontWeight: 600, fill: '#64748b' }}
-                      />
-                      <YAxis 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fontSize: 10, fill: '#94a3b8' }}
-                        tickFormatter={(val) => `$${val.toLocaleString()}`}
-                      />
-                      <RechartsTooltip 
-                        cursor={{ fill: '#f8fafc' }}
-                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
-                        formatter={(value: any) => [`$${value.toLocaleString()}`, ""]}
-                      />
-                      <ReferenceLine y={account.avg_monthly_avg} stroke="#ef4444" strokeDasharray="3 3" />
-                      {allCategoryNames.map(cat => (
-                        <Bar 
-                          key={cat} 
-                          dataKey={cat} 
-                          stackId="b" 
-                          fill={colorMap[cat]} 
-                          radius={[0, 0, 0, 0]}
-                          barSize={40}
-                        />
-                      ))}
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </CardContent>
           </Card>
 
-          {/* Driver Decomposition */}
+          {/* Driver Decomposition Table */}
           <Card className="shadow-sm">
             <CardHeader className="bg-slate-50/30 border-b border-slate-100">
               <CardTitle className="text-lg flex items-center gap-2">
                 <Layers className="h-5 w-5 text-blue-600" />
                 Driver Decomposition
               </CardTitle>
-              <CardDescription>Hierarchical breakdown of spending/income sources.</CardDescription>
+              <CardDescription>Category contribution to the branch total.</CardDescription>
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50/50 text-slate-500 font-medium">
                     <tr>
-                      <th className="px-6 py-3 text-left">Sub-Account / Source</th>
+                      <th className="px-6 py-3 text-left">Sub-Account</th>
                       <th className="px-6 py-3 text-right">Balance</th>
-                      <th className="px-6 py-3 text-right">Share</th>
+                      <th className="px-6 py-3 text-right">Share %</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {account.children.length === 0 && account.merchants.length === 0 ? (
-                      <tr><td colSpan={3} className="p-10 text-center text-slate-400 italic">No detailed drivers found.</td></tr>
+                    {account.children.length === 0 ? (
+                      <tr><td colSpan={3} className="p-10 text-center text-slate-400 italic">No sub-accounts found.</td></tr>
                     ) : (
-                      <>
-                        {account.children.map(child => (
-                          <tr key={`child-${child.id}`} className="hover:bg-slate-50/50">
-                            <td className="px-6 py-4">
-                              <Link to={`/dashboard/accounts/${child.id}?year=${year}`} className="font-bold text-slate-700 hover:text-blue-600">
-                                {child.name}
-                              </Link>
-                            </td>
-                            <td className="px-6 py-4 text-right font-mono">$0.00</td>
-                            <td className="px-6 py-4 text-right text-slate-400 text-xs">--</td>
-                          </tr>
-                        ))}
-                        {account.merchants.map(merchant => (
-                          <tr key={`merch-${merchant.id}`} className="hover:bg-slate-50/50">
-                            <td className="px-6 py-4 flex items-center gap-2">
-                              <Store size={14} className="text-slate-400" />
-                              <Link to={`/dashboard/merchants/${merchant.id}`} className="font-medium text-slate-600">
-                                {merchant.name}
-                              </Link>
-                            </td>
-                            <td className="px-6 py-4 text-right font-mono font-bold">
-                              ${merchant.balance.toLocaleString()}
-                            </td>
-                            <td className="px-6 py-4 text-right text-slate-400 text-xs">
-                              {((merchant.balance / insights.amount_current) * 100).toFixed(1)}%
-                            </td>
-                          </tr>
-                        ))}
-                      </>
+                      account.children.map(child => (
+                        <tr key={`child-${child.id}`} className="hover:bg-slate-50/50 group transition-colors">
+                          <td className="px-6 py-4">
+                            <Link 
+                              to={`/dashboard/accounts/${child.id}?year=${year}`} 
+                              className="font-black text-slate-700 hover:text-blue-600 flex items-center gap-2"
+                            >
+                              {child.name}
+                              <ChevronRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </Link>
+                          </td>
+                          <td className="px-6 py-4 text-right font-mono font-bold text-slate-900">
+                            ${child.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                          <td className="px-6 py-4 text-right text-slate-500 font-medium">
+                            {insights.amount_current > 0 ? ((child.balance / insights.amount_current) * 100).toFixed(1) : '0.0'}%
+                          </td>
+                        </tr>
+                      ))
                     )}
                   </tbody>
                 </table>
               </div>
             </CardContent>
           </Card>
+
+          {/* Direct Merchants Section */}
+          {account.direct_merchants.length > 0 && (
+            <Card className="shadow-sm">
+              <CardHeader className="bg-slate-50/30 border-b border-slate-100">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Store className="h-5 w-5 text-emerald-600" />
+                  Direct Transactions
+                </CardTitle>
+                <CardDescription>Banners matched directly to this accounting post.</CardDescription>
+              </CardHeader>
+              <CardContent className="p-0">
+                <table className="w-full text-sm">
+                  <tbody className="divide-y divide-slate-100">
+                    {account.direct_merchants.map((m, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/50">
+                        <td className="px-6 py-4 font-medium text-slate-700 uppercase tracking-tight">{m.name}</td>
+                        <td className="px-6 py-4 text-right font-mono font-bold text-slate-900">
+                          ${m.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Action & Risk Panel */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -452,7 +450,7 @@ export const AccountDetail: React.FC = () => {
                 <p className="text-[10px] font-black uppercase text-emerald-600 tracking-widest">Optimization Room</p>
                 <p className="text-2xl font-black">${(insights.optimization_headroom || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  A 5% reduction in top vendor relationships yields this annual savings potential.
+                  A 5% reduction in top contributor relationships yields this annual savings potential.
                 </p>
               </div>
 
@@ -481,7 +479,7 @@ export const AccountDetail: React.FC = () => {
                 <div className="flex items-center gap-2 text-xs text-slate-400">
                   <Clock size={14} /> {insights.strategic_action?.time_horizon}
                 </div>
-                <Badge className="bg-emerald-500 hover:bg-emerald-600 border-none">
+                <Badge className="bg-emerald-500 hover:bg-emerald-600 border-none uppercase text-[10px]">
                   {insights.strategic_action?.owner}
                 </Badge>
               </div>

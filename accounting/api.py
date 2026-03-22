@@ -247,7 +247,7 @@ from django.db.models import StdDev
 @router.get("/accounts/{account_id}", response=AccountDetailOut)
 def get_account_detail(request, account_id: int, year: Optional[int] = None):
     """
-    Returns full details for an account with CFA-grade analytical insights.
+    Returns full details for an account with CFA-grade analytical insights and monthly stacked breakdown.
     """
     if year is None:
         year = date.today().year
@@ -256,16 +256,16 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
     family = user.family
     account = get_object_or_404(Account, id=account_id, family=family)
 
-    # 1. Branch Data
+    # 1. Branch Data Context
     descendants = account.get_descendants(include_self=True)
+    direct_children = account.get_children()
     
-    # 2. Financial Context (Current vs Previous)
-    def get_sum(branch_qs, target_year):
-        val = TransactionLine.objects.filter(
-            journal_entry__family=family,
-            account__in=branch_qs,
-            journal_entry__date__year=target_year
-        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+    # 2. Universal Sum Helper
+    def get_sum(branch_qs, target_year, month=None):
+        q = Q(journal_entry__family=family, account__in=branch_qs, journal_entry__date__year=target_year)
+        if month:
+            q &= Q(journal_entry__date__month=month)
+        val = TransactionLine.objects.filter(q).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
         return abs(float(val))
 
     amt_current = get_sum(descendants, year)
@@ -278,110 +278,108 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
     total_revenue_prev = get_sum(root_revenue.get_descendants(include_self=True) if root_revenue else Account.objects.none(), year - 1)
     
     total_assets_ids = Account.objects.filter(name='Assets', parent=None, family=family).first()
-    # Assets are cumulative
     total_assets = abs(float(TransactionLine.objects.filter(
         journal_entry__family=family,
         account__in=total_assets_ids.get_descendants(include_self=True) if total_assets_ids else Account.objects.none(),
         journal_entry__date__lte=date(year, 12, 31)
     ).aggregate(total=Sum('amount'))['total'] or 0.0))
 
-    # 4. Math Calculations
-    yoy_growth = (amt_current - amt_previous) / amt_previous if amt_previous > 0 else None
-    revenue_growth = (total_revenue_curr - total_revenue_prev) / total_revenue_prev if total_revenue_prev > 0 else 0
-    
-    # Volatility (Std Dev of monthly sums)
-    monthly_sums = TransactionLine.objects.filter(
-        journal_entry__family=family,
-        account__in=descendants,
-        journal_entry__date__year=year
-    ).annotate(month=TruncMonth('journal_entry__date')).values('month').annotate(total=Sum('amount')).values_list('total', flat=True)
-    volatility = float(np.std([float(x) for x in monthly_sums])) if monthly_sums else 0.0
+    # 4. Refactored Child List (with computed branch balances)
+    children_list = []
+    for child in direct_children:
+        child_branch = child.get_descendants(include_self=True)
+        children_list.append({
+            "id": child.id,
+            "name": child.name,
+            "account_type": child.account_type,
+            "balance": get_sum(child_branch, year)
+        })
+    children_list.sort(key=lambda x: x['balance'], reverse=True)
 
-    # Merchants & Concentration
-    sums = TransactionLine.objects.filter(
+    # 5. Refactored Direct Merchants (ONLY transactions posted directly to this ID)
+    direct_merchants_sums = TransactionLine.objects.filter(
         journal_entry__family=family,
-        account__in=descendants,
+        account=account,
         journal_entry__date__year=year
     ).values('journal_entry__description').annotate(total=Sum('amount'))
-    sum_dict = {item['journal_entry__description']: abs(float(item['total'])) for item in sums}
     
-    merchant_list = []
-    merchants_objs = Merchant.objects.filter(family=family, default_account__in=descendants)
-    for m in merchants_objs:
-        bal = sum_dict.get(m.name, 0.0)
-        merchant_list.append({"id": m.id, "name": m.name, "balance": bal})
-    merchant_list.sort(key=lambda x: x['balance'], reverse=True)
-    
-    concentration = (merchant_list[0]['balance'] / amt_current) if amt_current > 0 and merchant_list else 0.0
+    direct_merchants = [
+        {"id": 0, "name": item['journal_entry__description'], "balance": abs(float(item['total']))}
+        for item in direct_merchants_sums if item['total']
+    ]
+    direct_merchants.sort(key=lambda x: x['balance'], reverse=True)
 
-    # CFA Flags
+    # 6. Monthly Stacked Breakdown (Always 12 months)
+    monthly_breakdown = []
+    for month_idx in range(1, 13):
+        month_str = f"{year}-{month_idx:02d}"
+        by_child = []
+        month_total = 0.0
+        
+        for child in direct_children:
+            child_amt = get_sum(child.get_descendants(include_self=True), year, month=month_idx)
+            by_child.append({
+                "child_id": child.id,
+                "child_name": child.name,
+                "amount": child_amt
+            })
+            month_total += child_amt
+            
+        monthly_breakdown.append({
+            "month": month_str,
+            "total": month_total,
+            "by_child": by_child
+        })
+
+    # 7. Math for CFA Insights
+    yoy_growth = (amt_current - amt_previous) / amt_previous if amt_previous > 0 else None
+    revenue_growth = (total_revenue_curr - total_revenue_prev) / total_revenue_prev if total_revenue_prev > 0 else 0
+    drift = (yoy_growth - revenue_growth) if yoy_growth is not None else 0
+    
+    # Volatility
+    monthly_totals = [m['total'] for m in monthly_breakdown]
+    volatility = float(np.std(monthly_totals)) if monthly_totals else 0.0
+    
+    # Concentration (Using children as primary driver of concentration in this refactor)
+    top_driver_bal = children_list[0]['balance'] if children_list else amt_current
+    concentration = (top_driver_bal / amt_current) if amt_current > 0 else 0.0
+
+    # CFA Flags & Tags
+    health_tag = "stable"
     red_flag = None
     green_flag = None
-    health_tag = "stable"
-    drift = (yoy_growth - revenue_growth) if yoy_growth is not None else 0
     
     if account.account_type == 'EXPENSE' and drift > 0.05:
         health_tag = "drifting"
         red_flag = {"title": "Operational Drift", "detail": f"Category growing {drift*100:.1f}% faster than income."}
     elif concentration > 0.5:
         health_tag = "concentrated"
-        red_flag = {"title": "Concentration Risk", "detail": f"Top vendor accounts for {concentration*100:.0f}% of spend."}
+        red_flag = {"title": "Concentration Risk", "detail": f"Top driver accounts for {concentration*100:.0f}% of volume."}
     
     if yoy_growth is not None and yoy_growth < -0.1 and account.account_type == 'EXPENSE':
         green_flag = {"title": "Efficiency Gain", "detail": "Category spend reduced by >10% YoY."}
 
-    # 5. Historical Trends (Last 5 years)
+    # Historical trends (5 year high level)
     historical_trends = []
-    current_year_const = date.today().year
-    
     total_sum_all_years = 0.0
     valid_years_count = 0
-
-    children_objs = list(account.get_children())
-
-    for y in range(current_year_const - 4, current_year_const + 1):
-        year_total = get_sum(descendants, y)
-        
-        # Calculate breakdown by children
-        breakdown_dict = {}
-        if children_objs:
-            for child in children_objs:
-                child_branch = child.get_descendants(include_self=True)
-                child_val = get_sum(child_branch, y)
-                if child_val > 0:
-                    breakdown_dict[child.name] = child_val
-        else:
-            # Fallback to top 5 merchants if no sub-accounts exist
-            top_merchants_desc = TransactionLine.objects.filter(
-                journal_entry__family=family,
-                account__in=descendants,
-                journal_entry__date__year=y
-            ).values('journal_entry__description').annotate(total=Sum('amount')).order_by('-total')[:5]
-            for item in top_merchants_desc:
-                if item['total']:
-                    breakdown_dict[item['journal_entry__description']] = abs(float(item['total']))
-
-        historical_trends.append({
-            "year": y,
-            "total": year_total,
-            "monthly_avg": year_total / 12,
-            "breakdown": breakdown_dict
-        })
-        
-        if year_total > 0:
-            total_sum_all_years += year_total
+    for y in range(year - 4, year + 1):
+        y_total = get_sum(descendants, y)
+        historical_trends.append({"year": y, "total": y_total, "monthly_avg": y_total / 12})
+        if y_total > 0:
+            total_sum_all_years += y_total
             valid_years_count += 1
-
+    
     avg_yearly = total_sum_all_years / valid_years_count if valid_years_count > 0 else 0.0
 
-    # Manual result
     return {
         "id": account.id,
         "name": account.name,
         "account_type": account.account_type,
         "parent_id": account.parent_id,
-        "children": list(account.get_children()),
-        "merchants": merchant_list,
+        "children": children_list,
+        "direct_merchants": direct_merchants,
+        "monthly_breakdown": monthly_breakdown,
         "insights": {
             "amount_current": amt_current,
             "amount_previous": amt_previous,
@@ -391,13 +389,13 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
             "volatility_score": volatility,
             "concentration_top_1": concentration,
             "drift_spread": drift if account.account_type == 'EXPENSE' else None,
-            "optimization_headroom": (merchant_list[0]['balance'] * 0.05) if merchant_list else 0.0,
+            "optimization_headroom": (top_driver_bal * 0.05),
             "burn_coverage_days": (total_assets / (amt_current / 365)) if amt_current > 0 else None,
             "health_tag": health_tag,
             "red_flag": red_flag,
             "green_flag": green_flag,
             "strategic_action": {
-                "action": f"Review {merchant_list[0]['name'] if merchant_list else 'vendors'} for 5% optimization." if health_tag == 'concentrated' else "No immediate action required.",
+                "action": f"Review {children_list[0]['name'] if children_list else 'drivers'} for 5% optimization." if health_tag == 'concentrated' else "Monitor for structural drift.",
                 "owner": "household",
                 "time_horizon": "30d"
             }
