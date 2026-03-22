@@ -147,8 +147,12 @@ class CategorizationAPITest(TestCase):
             status=StagedTransaction.Status.UNPROCESSED
         )
 
-    def test_create_and_apply_respects_amount_bounds(self):
-        """Verify that /create-and-apply only affects transactions within its amount range."""
+    def test_create_and_apply_uses_canonical_matcher_and_amount(self):
+        """
+        use JWT-authenticated API call to create rule with amount bounds,
+        verify only in-range staged txs are backfilled/applied,
+        out-of-range tx remains untouched.
+        """
         from django.test import Client
         import json
         from ninja_jwt.tokens import AccessToken
