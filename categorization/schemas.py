@@ -6,7 +6,7 @@ class RuleCreateAndApplyIn(Schema):
     merchant_name: str
     target_account_id: Optional[int] = None
     is_unique_provider: bool = True
-    institution_id: int
+    institution_id: Optional[int] = None
     min_amount: Optional[float] = None
     max_amount: Optional[float] = None
 

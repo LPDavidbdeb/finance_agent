@@ -110,3 +110,78 @@ class CategorizationTest(TestCase):
         match = find_matching_rule("INSURANCE", self.institution.id, self.family.id, transaction_amount=Decimal("100.00"))
         self.assertEqual(match, rule_spec)
         self.assertEqual(match.merchant.name, "SPECIFIC INSURANCE")
+
+class CategorizationAPITest(TestCase):
+    def setUp(self):
+        from users.models import Family, CustomUser
+        from banking.models import FinancialInstitution, FinancialProduct, BankStatementImport, StagedTransaction
+        
+        self.family = Family.objects.create(name="API Test Family")
+        self.user = CustomUser.objects.create_user(email="test@example.com", password="password", family=self.family)
+        self.institution = FinancialInstitution.objects.create(name="Test Bank")
+        
+        # We need an account for the product
+        self.bank_acc = Account.objects.create(name="Bank", account_type=Account.AccountType.ASSET, family=self.family)
+        
+        self.product = FinancialProduct.objects.create(
+            institution=self.institution,
+            family=self.family,
+            account=self.bank_acc,
+            product_type=FinancialProduct.ProductType.CHECKING
+        )
+        self.statement = BankStatementImport.objects.create(financial_product=self.product)
+        
+        # Create staged transactions with same description but different amounts
+        self.tx_small = StagedTransaction.objects.create(
+            statement_import=self.statement,
+            bank_date="2025-01-01",
+            raw_description="INSURANCE CO PREMIUM",
+            amount=Decimal("-50.00"), # Expense
+            status=StagedTransaction.Status.UNPROCESSED
+        )
+        self.tx_large = StagedTransaction.objects.create(
+            statement_import=self.statement,
+            bank_date="2025-01-01",
+            raw_description="INSURANCE CO PREMIUM",
+            amount=Decimal("-500.00"), # Expense
+            status=StagedTransaction.Status.UNPROCESSED
+        )
+
+    def test_create_and_apply_respects_amount_bounds(self):
+        """Verify that /create-and-apply only affects transactions within its amount range."""
+        from django.test import Client
+        import json
+        from ninja_jwt.tokens import AccessToken
+        
+        client = Client()
+        # Generate token
+        token = str(AccessToken.for_user(self.user))
+        auth_header = f"Bearer {token}"
+        
+        # Create a rule for SMALL insurance only
+        payload = {
+            "search_text": "INSURANCE",
+            "merchant_name": "CAR INSURANCE",
+            "is_unique_provider": False, # Don't auto-approve for now
+            "max_amount": 100.00
+        }
+        
+        response = client.post(
+            "/api/categorization/create-and-apply",
+            data=json.dumps(payload),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=auth_header
+        )
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["updated_count"], 1) # Only the small one should match
+        
+        # Refresh from DB
+        self.tx_small.refresh_from_db()
+        self.tx_large.refresh_from_db()
+        
+        self.assertEqual(self.tx_small.clean_description, "CAR INSURANCE")
+        self.assertIsNone(self.tx_large.clean_description)
+        self.assertEqual(self.tx_small.merchant.name, "CAR INSURANCE")
+        self.assertIsNone(self.tx_large.merchant)

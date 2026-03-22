@@ -36,8 +36,8 @@ class Command(BaseCommand):
 
             for tx in unprocessed_txs:
                 institution_id = tx.statement_import.financial_product.institution_id
-                # Multi-tenancy: Pass family.id to find_matching_rule
-                rule = find_matching_rule(tx.raw_description, institution_id, family.id)
+                # Multi-tenancy & Amount Range: Pass family.id and tx.amount
+                rule = find_matching_rule(tx.raw_description, institution_id, family.id, transaction_amount=tx.amount)
                 
                 if rule:
                     tx.clean_description = rule.merchant.name
