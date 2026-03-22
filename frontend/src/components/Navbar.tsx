@@ -21,6 +21,7 @@ export const Navbar: React.FC = () => {
             // WHAT TO SHOW WHEN LOGGED IN
             <>
               <Link to="/dashboard" className="hover:text-slate-300 transition-colors">Dashboard</Link>
+              <Link to="/dashboard/family" className="hover:text-slate-300 transition-colors">Family</Link>
               <Link to="/dashboard/merchants" className="hover:text-slate-300 transition-colors">Merchants</Link>
               <Link to="/ledger" className="hover:text-slate-300 transition-colors">Ledger</Link>
               <Link to="/settings/banks" className="hover:text-slate-300 transition-colors">Manage Banks</Link>

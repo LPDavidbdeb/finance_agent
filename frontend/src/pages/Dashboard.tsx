@@ -1,26 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { 
-  fetchFamilyMembers, 
-  createFamilyMember, 
-  updateFamilyMember, 
-  deleteFamilyMember,
   fetchSpendingEvolution,
   fetchSpendingByCategory,
-  fetchAnnualStatements
+  fetchAnnualStatements,
+  fetchDimensionDetail
 } from '../api/client';
-import { FamilyMemberModal } from '../components/FamilyMemberModal';
-import { AddProductModal } from '../components/AddProductModal';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
   PieChart, Pie, Cell
 } from 'recharts';
-import { Loader2, TrendingDown, TrendingUp, Wallet, Receipt, CreditCard, Users } from 'lucide-react';
+import { Loader2, TrendingDown, TrendingUp, Wallet, Receipt, PieChart as PieIcon, RefreshCw } from 'lucide-react';
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#8dd1e1'];
+const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#14b8a6', '#6366f1'];
+
+type Dimension = 'revenue' | 'expenses' | 'net-income' | 'assets' | 'liabilities' | 'net-worth';
 
 export const Dashboard: React.FC = () => {
   const { isAuthenticated } = useAuth();
@@ -30,21 +27,15 @@ export const Dashboard: React.FC = () => {
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [selectedInterval, setSelectedInterval] = useState<'monthly' | 'bi-weekly'>('monthly');
+  const [activeDimension, setActiveDimension] = useState<Dimension>('expenses');
 
   // Data State
-  const [members, setMembers] = useState<any[]>([]);
   const [evolutionData, setEvolutionData] = useState<any[]>([]);
   const [categoryData, setCategoryData] = useState<any[]>([]);
   const [statements, setStatements] = useState<any>(null);
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
-  // Modals State
-  const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
-  const [editingMember, setEditingMember] = useState<any | null>(null);
-  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
-  const [selectedMemberIdForProduct, setSelectedMemberIdForProduct] = useState<number | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -52,7 +43,7 @@ export const Dashboard: React.FC = () => {
       return;
     }
     loadAllData();
-  }, [isAuthenticated, navigate, selectedYear, selectedInterval]);
+  }, [isAuthenticated, navigate, selectedYear, selectedInterval, activeDimension]);
 
   const loadAllData = async () => {
     try {
@@ -62,17 +53,41 @@ export const Dashboard: React.FC = () => {
       const startDate = `${selectedYear}-01-01`;
       const endDate = `${selectedYear}-12-31`;
 
-      const [membersData, evolution, categories, annual] = await Promise.all([
-        fetchFamilyMembers(),
-        fetchSpendingEvolution(startDate, endDate, selectedInterval),
-        fetchSpendingByCategory(startDate, endDate),
+      // If activeDimension is 'expenses', we can use the specialized endpoints
+      // Otherwise, we might need fetchDimensionDetail
+      const promises: Promise<any>[] = [
         fetchAnnualStatements(selectedYear)
-      ]);
+      ];
 
-      setMembers(membersData);
-      setEvolutionData(evolution);
-      setCategoryData(categories);
+      if (activeDimension === 'expenses') {
+        promises.push(fetchSpendingEvolution(startDate, endDate, selectedInterval));
+        promises.push(fetchSpendingByCategory(startDate, endDate));
+      } else {
+        // For other dimensions, we fetch the detail and transform it for the charts
+        promises.push(fetchDimensionDetail(activeDimension, selectedYear));
+        // Evolution for other dimensions is not directly supported by current specialized endpoint
+        // but we can pass a dimension to it if we refactor backend later.
+        // For now, we'll try to use the general detail.
+      }
+
+      const results = await Promise.all(promises);
+      const annual = results[0];
       setStatements(annual);
+
+      if (activeDimension === 'expenses') {
+        setEvolutionData(results[1]);
+        setCategoryData(results[2]);
+      } else {
+        const dimensionDetail = results[1];
+        // Transform dimensionDetail for Pie Chart
+        setCategoryData(dimensionDetail.line_items.map((item: any) => ({
+          category: item.name,
+          amount: Math.abs(item.balance)
+        })));
+        // Evolution data for non-expenses is currently limited in this view
+        setEvolutionData([]); 
+      }
+
     } catch (err: any) {
       if (err.message === "Unauthorized") {
          navigate('/login');
@@ -84,25 +99,14 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const handleMemberModalSubmit = async (formData: any) => {
-    if (editingMember) {
-      await updateFamilyMember(editingMember.id, formData);
-    } else {
-      await createFamilyMember(formData);
-    }
-    await loadAllData();
-  };
-
-  const handleDeleteMember = async (id: number) => {
-    if (window.confirm("Are you sure you want to remove this family member?")) {
-      try {
-        await deleteFamilyMember(id);
-        await loadAllData();
-      } catch (err: any) {
-        alert(err.message || 'Failed to delete member.');
-      }
-    }
-  };
+  const dimensionConfig = useMemo(() => ({
+    revenue: { color: 'border-l-green-500', icon: TrendingUp, label: 'Revenue', iconColor: 'text-green-500' },
+    expenses: { color: 'border-l-orange-500', icon: TrendingDown, label: 'Expenses', iconColor: 'text-orange-500' },
+    'net-income': { color: 'border-l-blue-500', icon: TrendingUp, label: 'Net Income', iconColor: 'text-blue-500' },
+    assets: { color: 'border-l-emerald-600', icon: Wallet, label: 'Total Assets', iconColor: 'text-emerald-600' },
+    liabilities: { color: 'border-l-red-500', icon: Receipt, label: 'Liabilities', iconColor: 'text-red-600' },
+    'net-worth': { color: 'bg-slate-900 text-white', icon: Wallet, label: 'Net Worth', iconColor: 'text-blue-400' },
+  }), []);
 
   if (loading && !statements) {
     return (
@@ -113,176 +117,141 @@ export const Dashboard: React.FC = () => {
     );
   }
 
+  const renderSummaryCard = (dim: Dimension, amount: number) => {
+    const config = dimensionConfig[dim];
+    const isActive = activeDimension === dim;
+    const isNetWorth = dim === 'net-worth';
+
+    return (
+      <Card 
+        key={dim}
+        className={`cursor-pointer transition-all duration-200 border-l-4 ${config.color} ${
+          isActive 
+            ? 'shadow-lg ring-2 ring-blue-400 ring-offset-2 scale-[1.02]' 
+            : 'hover:bg-slate-50 hover:shadow-md'
+        } ${isNetWorth && !isActive ? 'bg-slate-900 text-white border-none' : ''} ${isNetWorth && isActive ? 'bg-slate-800 text-white ring-offset-slate-900' : ''}`}
+        onClick={() => setActiveDimension(dim)}
+      >
+        <CardHeader className="pb-2">
+          <CardDescription className={`text-[10px] uppercase font-bold tracking-widest ${isNetWorth ? 'text-slate-400' : ''}`}>
+            {config.label}
+          </CardDescription>
+          <CardTitle className="text-xl flex items-center gap-2">
+            <config.icon className={`h-4 w-4 ${config.iconColor}`} />
+            ${Math.abs(amount).toLocaleString()}
+          </CardTitle>
+        </CardHeader>
+      </Card>
+    );
+  };
+
   return (
     <div className="space-y-8 pb-12">
-      {/* Global Controls */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-lg shadow-sm border border-slate-200">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Financial Command Center</h1>
-          <p className="text-sm text-slate-500">Real-time spending and net worth tracking</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex bg-slate-100 p-1 rounded-md">
-            <button 
-              className={`px-3 py-1 text-sm rounded ${selectedInterval === 'monthly' ? 'bg-white shadow-sm font-medium' : 'text-slate-600'}`}
-              onClick={() => setSelectedInterval('monthly')}
-            >
-              Monthly
-            </button>
-            <button 
-              className={`px-3 py-1 text-sm rounded ${selectedInterval === 'bi-weekly' ? 'bg-white shadow-sm font-medium' : 'text-slate-600'}`}
-              onClick={() => setSelectedInterval('bi-weekly')}
-            >
-              Bi-Weekly
-            </button>
+      {/* Sticky Dashboard Header */}
+      <div className="sticky top-0 z-30 space-y-4 bg-gray-50/95 backdrop-blur-sm py-4">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+          <div>
+            <h1 className="text-2xl font-black tracking-tight text-slate-900 uppercase">Command Center</h1>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-tighter">Real-time Financial Oversight</p>
           </div>
-          <select 
-            value={selectedYear}
-            onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-            className="bg-white border border-slate-200 rounded-md px-3 py-1.5 text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
-          >
-            {[currentYear, currentYear - 1, currentYear - 2].map(y => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-          <Button onClick={loadAllData} variant="outline" size="sm" className="h-9">
-            Refresh
-          </Button>
+          <div className="flex items-center gap-3">
+            <div className="flex bg-slate-100 p-1 rounded-lg">
+              <button 
+                className={`px-3 py-1 text-xs rounded-md transition-all ${selectedInterval === 'monthly' ? 'bg-white shadow-sm font-bold text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                onClick={() => setSelectedInterval('monthly')}
+              >
+                Monthly
+              </button>
+              <button 
+                className={`px-3 py-1 text-xs rounded-md transition-all ${selectedInterval === 'bi-weekly' ? 'bg-white shadow-sm font-bold text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                onClick={() => setSelectedInterval('bi-weekly')}
+              >
+                Bi-Weekly
+              </button>
+            </div>
+            <select 
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+              className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-black text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
+            >
+              {[currentYear, currentYear - 1, currentYear - 2].map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+            <Button onClick={loadAllData} variant="ghost" size="icon" className="h-9 w-9 rounded-lg text-slate-400 hover:text-blue-600">
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
         </div>
+
+        {/* Annual Summary Cards as Tabs */}
+        {statements && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            {renderSummaryCard('revenue', statements.income_statement.revenue)}
+            {renderSummaryCard('expenses', statements.income_statement.expenses)}
+            {renderSummaryCard('net-income', statements.income_statement.net_income)}
+            {renderSummaryCard('assets', statements.balance_sheet.assets)}
+            {renderSummaryCard('liabilities', statements.balance_sheet.liabilities)}
+            {renderSummaryCard('net-worth', statements.balance_sheet.equity)}
+          </div>
+        )}
       </div>
 
       {error && (
         <Card className="bg-red-50 border-red-200">
           <CardContent className="pt-6">
-            <p className="text-red-600 font-medium">{error}</p>
+            <p className="text-red-600 font-medium text-center">{error}</p>
           </CardContent>
         </Card>
       )}
 
-      {/* Annual Summary Cards */}
-      {statements && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-          <Card 
-            className="bg-white border-l-4 border-l-green-500 cursor-pointer hover:bg-slate-50 transition-all hover:shadow-md"
-            onClick={() => navigate(`/dashboard/dimension/revenue?year=${selectedYear}`)}
-          >
-            <CardHeader className="pb-2">
-              <CardDescription className="text-xs uppercase font-bold tracking-wider">Revenue</CardDescription>
-              <CardTitle className="text-xl flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-green-500" />
-                ${statements.income_statement.revenue.toLocaleString()}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-          <Card 
-            className="bg-white border-l-4 border-l-orange-500 cursor-pointer hover:bg-slate-50 transition-all hover:shadow-md"
-            onClick={() => navigate(`/dashboard/dimension/expenses?year=${selectedYear}`)}
-          >
-            <CardHeader className="pb-2">
-              <CardDescription className="text-xs uppercase font-bold tracking-wider">Expenses</CardDescription>
-              <CardTitle className="text-xl flex items-center gap-2">
-                <TrendingDown className="h-4 w-4 text-orange-500" />
-                ${statements.income_statement.expenses.toLocaleString()}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-          <Card 
-            className="bg-white border-l-4 border-l-blue-500 cursor-pointer hover:bg-slate-50 transition-all hover:shadow-md"
-            onClick={() => navigate(`/dashboard/dimension/net-income?year=${selectedYear}`)}
-          >
-            <CardHeader className="pb-2">
-              <CardDescription className="text-xs uppercase font-bold tracking-wider">Net Income</CardDescription>
-              <CardTitle className={`text-xl ${statements.income_statement.net_income >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                ${statements.income_statement.net_income.toLocaleString()}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-          <Card 
-            className="bg-white border-l-4 border-l-emerald-600 cursor-pointer hover:bg-slate-50 transition-all hover:shadow-md"
-            onClick={() => navigate(`/dashboard/dimension/assets?year=${selectedYear}`)}
-          >
-            <CardHeader className="pb-2">
-              <CardDescription className="text-xs uppercase font-bold tracking-wider">Total Assets</CardDescription>
-              <CardTitle className="text-xl flex items-center gap-2">
-                <Wallet className="h-4 w-4 text-emerald-600" />
-                ${statements.balance_sheet.assets.toLocaleString()}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-          <Card 
-            className="bg-white border-l-4 border-l-red-500 cursor-pointer hover:bg-slate-50 transition-all hover:shadow-md"
-            onClick={() => navigate(`/dashboard/dimension/liabilities?year=${selectedYear}`)}
-          >
-            <CardHeader className="pb-2">
-              <CardDescription className="text-xs uppercase font-bold tracking-wider">Liabilities</CardDescription>
-              <CardTitle className="text-xl flex items-center gap-2 text-red-600">
-                <Receipt className="h-4 w-4" />
-                ${statements.balance_sheet.liabilities.toLocaleString()}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-          <Card 
-            className="bg-slate-900 text-white border-none shadow-lg transform scale-105 z-10 cursor-pointer hover:bg-slate-800 transition-all hover:shadow-2xl"
-            onClick={() => navigate(`/dashboard/dimension/net-worth?year=${selectedYear}`)}
-          >
-            <CardHeader className="pb-2">
-              <CardDescription className="text-xs uppercase font-bold tracking-wider text-slate-400">Net Worth</CardDescription>
-              <CardTitle className="text-xl text-blue-400">
-                ${statements.balance_sheet.equity.toLocaleString()}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-        </div>
-      )}
-
+      {/* Dynamic Chart Zone */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Spending Evolution Chart */}
-        <Card className="shadow-md overflow-hidden">
-          <CardHeader className="bg-slate-50 border-b border-slate-100">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <TrendingDown className="h-5 w-5 text-orange-500" />
-              Spending Evolution
-            </CardTitle>
-            <CardDescription>Chronological trend of expenses ({selectedInterval})</CardDescription>
+        {/* Detail Chart (Evolution or Waterfall soon) */}
+        <Card className="shadow-sm border-slate-200 overflow-hidden">
+          <CardHeader className="bg-slate-50/50 border-b border-slate-100">
+            <div className="flex justify-between items-center">
+              <div>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-blue-600" />
+                  {activeDimension.replace('-', ' ').toUpperCase()} Trend
+                </CardTitle>
+                <CardDescription>Chronological performance oversight</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => navigate(`/dashboard/dimension/${activeDimension}?year=${selectedYear}`)}>
+                Full Report
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="pt-6">
-            <div className="h-[350px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={evolutionData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis 
-                    dataKey="period" 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{fontSize: 12, fill: '#64748b'}}
-                    dy={10}
-                  />
-                  <YAxis 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{fontSize: 12, fill: '#64748b'}}
-                    tickFormatter={(value) => `$${value}`}
-                  />
-                  <Tooltip 
-                    cursor={{fill: '#f8fafc'}}
-                    contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
-                    formatter={(value: any) => [`$${value.toLocaleString()}`, 'Expenses']}
-                  />
-                  <Bar dataKey="amount" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            {evolutionData.length > 0 ? (
+              <div className="h-[350px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={evolutionData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} dy={10} />
+                    <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} tickFormatter={(v) => `$${v}`} />
+                    <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
+                    <Bar dataKey="amount" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-[350px] flex items-center justify-center text-slate-400 italic text-sm">
+                Trend data for this dimension is currently available in the Full Report.
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        {/* CPI Category Breakdown Chart */}
-        <Card className="shadow-md overflow-hidden">
-          <CardHeader className="bg-slate-50 border-b border-slate-100">
+        {/* Composition Chart */}
+        <Card className="shadow-sm border-slate-200 overflow-hidden">
+          <CardHeader className="bg-slate-50/50 border-b border-slate-100">
             <CardTitle className="text-lg flex items-center gap-2">
-              <PieChart className="h-5 w-5 text-blue-500" />
-              Category Breakdown
+              <PieIcon className="h-5 w-5 text-blue-500" />
+              {activeDimension.replace('-', ' ').toUpperCase()} Composition
             </CardTitle>
-            <CardDescription>Proportion of spending across StatCan categories</CardDescription>
+            <CardDescription>Allocation across sub-categories</CardDescription>
           </CardHeader>
           <CardContent className="pt-6">
             <div className="h-[350px] w-full flex items-center">
@@ -302,15 +271,9 @@ export const Dashboard: React.FC = () => {
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip 
-                    formatter={(value: any) => `$${value.toLocaleString()}`}
-                  />
-                  <Legend 
-                    layout="vertical" 
-                    align="right" 
-                    verticalAlign="middle"
-                    iconType="circle"
-                    formatter={(value) => <span className="text-xs text-slate-600 font-medium">{value}</span>}
+                  <Tooltip formatter={(value: any) => `$${value.toLocaleString()}`} />
+                  <Legend layout="vertical" align="right" verticalAlign="middle" iconType="circle"
+                    formatter={(value) => <span className="text-[10px] text-slate-600 font-bold uppercase">{value}</span>}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -318,88 +281,6 @@ export const Dashboard: React.FC = () => {
           </CardContent>
         </Card>
       </div>
-
-      {/* Household Roster Section */}
-      <Card className="shadow-md">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4 border-b border-slate-100">
-          <div>
-            <CardTitle className="text-xl flex items-center gap-2">
-              <Users className="h-5 w-5 text-blue-600" />
-              Household Roster
-            </CardTitle>
-            <CardDescription>Manage your family members and their bank accounts</CardDescription>
-          </div>
-          <Button onClick={() => { setEditingMember(null); setIsMemberModalOpen(true); }} size="sm">
-            + Add Person
-          </Button>
-        </CardHeader>
-        <CardContent className="pt-6">
-          {members.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-slate-500 font-medium">No family members found.</p>
-              <Button variant="link" onClick={() => setIsMemberModalOpen(true)}>Add your first person</Button>
-            </div>
-          ) : (
-            <div className="relative w-full overflow-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 text-slate-500">
-                    <th className="h-10 px-4 text-left font-medium">Name</th>
-                    <th className="h-10 px-4 text-left font-medium">Role</th>
-                    <th className="h-10 px-4 text-left font-medium">Age</th>
-                    <th className="h-10 px-4 text-right font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {members.map((member) => (
-                    <tr key={member.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="p-4 font-semibold text-slate-900">
-                        <Link to={`/dashboard/member/${member.id}`} className="hover:text-blue-600 hover:underline">
-                          {member.first_name} {member.last_name}
-                        </Link>
-                      </td>
-                      <td className="p-4">
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          member.role === 'PARENT' ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'
-                        }`}>
-                          {member.role}
-                        </span>
-                      </td>
-                      <td className="p-4 text-slate-500 font-mono">{member.current_age} yrs</td>
-                      <td className="p-4 text-right space-x-2">
-                        <Button variant="outline" size="sm" onClick={() => { setSelectedMemberIdForProduct(member.id); setIsProductModalOpen(true); }}>
-                          <CreditCard className="h-3.5 w-3.5 mr-1" />
-                          Add Product
-                        </Button>
-                        <Button variant="ghost" size="sm" className="text-blue-600" onClick={() => { setEditingMember(member); setIsMemberModalOpen(true); }}>
-                          Edit
-                        </Button>
-                        <Button variant="ghost" size="sm" className="text-red-500" onClick={() => handleDeleteMember(member.id)}>
-                          Delete
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <FamilyMemberModal 
-        isOpen={isMemberModalOpen}
-        onClose={() => setIsMemberModalOpen(false)}
-        onSubmit={handleMemberModalSubmit}
-        initialData={editingMember}
-      />
-      
-      <AddProductModal 
-        isOpen={isProductModalOpen}
-        onClose={() => setIsProductModalOpen(false)}
-        memberId={selectedMemberIdForProduct}
-        onSuccess={() => {}}
-      />
     </div>
   );
 };

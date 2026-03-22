@@ -3,6 +3,7 @@ import { Navbar } from './components/Navbar';
 import { OnboardingForm } from './components/OnboardingForm';
 import { LoginForm } from './components/LoginForm';
 import { Dashboard } from './pages/Dashboard';
+import { FamilyManager } from './pages/FamilyManager';
 import { InstitutionManager } from './components/InstitutionManager';
 import { MemberProfile } from './pages/MemberProfile';
 import { ProductDetail } from './pages/ProductDetail';
@@ -25,6 +26,7 @@ function App() {
               <Route path="/register" element={<OnboardingForm />} />
               <Route path="/login" element={<LoginForm />} />
               <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/dashboard/family" element={<FamilyManager />} />
               <Route path="/dashboard/member/:id" element={<MemberProfile />} />
               <Route path="/dashboard/product/:id" element={<ProductDetail />} />
               <Route path="/dashboard/merchants" element={<MerchantManager />} />
