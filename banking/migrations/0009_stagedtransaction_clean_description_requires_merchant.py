@@ -14,6 +14,6 @@ class Migration(migrations.Migration):
     operations = [
         migrations.AddConstraint(
             model_name='stagedtransaction',
-            constraint=models.CheckConstraint(condition=models.Q(('clean_description__isnull', True), ('merchant__isnull', False), _connector='OR'), name='clean_description_requires_merchant', violation_error_message='If clean_description is set, merchant_id must not be NULL. Enforcing strict FK linkage.'),
+            constraint=models.CheckConstraint(check=models.Q(('clean_description__isnull', True), ('merchant__isnull', False), _connector='OR'), name='clean_description_requires_merchant', violation_error_message='If clean_description is set, merchant_id must not be NULL. Enforcing strict FK linkage.'),
         ),
     ]

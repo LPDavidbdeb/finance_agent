@@ -73,11 +73,18 @@ def extract_transactions_from_statement(import_id: int, user):
             statement_import.save(update_fields=['document_date'])
             statement_year = pdf_year
             statement_month = pdf_month
+        elif statement_import.document_date:
+            statement_year = statement_import.document_date.year
+            statement_month = statement_import.document_date.month
         else:
-            # Fallback to current date or existing document_date
-            fallback_date = statement_import.document_date or datetime.now().date()
-            statement_year = fallback_date.year
-            statement_month = fallback_date.month
+            # FATAL: Cannot determine the statement period
+            statement_import.status = BankStatementImport.Status.VALIDATION_FAILED
+            statement_import.validation_errors = {
+                'error': "Could not determine the statement date from the PDF content. Please re-upload and provide an explicit Document Date.",
+                'timestamp': datetime.now().isoformat()
+            }
+            statement_import.save(update_fields=['status', 'validation_errors'])
+            return
 
         product = statement_import.financial_product
         extractor = PDFExtractorFactory.get_extractor(product.institution.name, product.product_type)

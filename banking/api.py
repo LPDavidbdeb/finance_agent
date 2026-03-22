@@ -103,9 +103,8 @@ def create_product(request, payload: FinancialProductIn):
 
 @router.post("/products/{product_id}/statements/upload", response=StatementUploadOut)
 def upload_statement(request, product_id: int, file: File[UploadedFile], document_date: Optional[date] = Form(None)):
-    """Stores a bank statement and triggers Python extraction pipeline."""
-    import logging
-    from banking.extraction import extract_transactions_from_statement
+    """Stores a bank statement and triggers Celery extraction pipeline."""
+    from banking.tasks import extract_transactions_task
 
     user = request.auth
     product = get_object_or_404(FinancialProduct, id=product_id, family=user.family)
@@ -119,13 +118,8 @@ def upload_statement(request, product_id: int, file: File[UploadedFile], documen
         processed_by_python=False,
     )
 
-    # Trigger extraction in a try/except so HTTP response is not disrupted
-    try:
-        extract_transactions_from_statement(statement.id, user)
-    except Exception as e:
-        logger = logging.getLogger(__name__)
-        logger.exception(f"Extraction failed for statement {statement.id}: {str(e)}")
-        # Error is already persisted in the statement_import record by extract_transactions_from_statement
+    # Queue extraction task
+    extract_transactions_task.delay(statement.id, user.id)
 
     return statement
 

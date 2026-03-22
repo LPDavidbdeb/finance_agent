@@ -50,6 +50,7 @@ class BankStatementImport(models.Model):
     processed_by_python = models.BooleanField(default=False)
     
     status = models.CharField(max_length=50, choices=Status.choices, default=Status.STAGED)
+    shadow_mode_mismatch = models.BooleanField(default=False)
     
     raw_ai_extraction = models.JSONField(null=True, blank=True)
     validation_errors = models.JSONField(null=True, blank=True)
