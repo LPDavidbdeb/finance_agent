@@ -10,6 +10,7 @@ class RuleCreateAndApplyIn(Schema):
     min_amount: Optional[float] = None
     max_amount: Optional[float] = None
 
+
 class MerchantOut(Schema):
     id: int
     name: str
