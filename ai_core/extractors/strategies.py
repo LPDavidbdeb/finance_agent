@@ -45,10 +45,22 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
         )
 
         df_clean['description'] = df_clean[desc_col].astype(str).str[12:].str.strip()
-        df_clean['amount'] = df_clean[amount_col].astype(str).str.replace('%', '', regex=False).str.replace(' ', '',
-                                                                                                            regex=False).str.replace(
-            ',', '.', regex=False).str.replace('CR', '', regex=False)
-        df_clean['amount'] = pd.to_numeric(df_clean['amount'], errors='coerce')
+
+        raw_amount = df_clean[amount_col].astype(str)
+        has_cr = raw_amount.str.contains(r'\bCR\b', case=False, regex=True)
+        has_minus = raw_amount.str.contains('-', regex=False)
+
+        amount_magnitude = (
+            raw_amount
+            .str.replace('%', '', regex=False)
+            .str.replace(' ', '', regex=False)
+            .str.replace(',', '.', regex=False)
+            .str.replace('CR', '', case=False, regex=True)
+            .str.replace('-', '', regex=False)
+            .str.strip()
+        )
+        parsed_amount = pd.to_numeric(amount_magnitude, errors='coerce')
+        df_clean['amount'] = parsed_amount * np.where(has_cr | has_minus, -1, 1)
         df_clean['account_identifier'] = 'CREDIT_CARD'
 
         return df_clean[['date', 'description', 'amount', 'account_identifier']].dropna(subset=['date', 'amount'])

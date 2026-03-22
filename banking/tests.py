@@ -112,3 +112,63 @@ class ApproveStagedTransactionTest(TestCase):
                 user=self.user_a
             )
         self.assertIn("already processed", str(cm.exception))
+
+    def test_liability_negative_reduces_liability(self):
+        liability_account = Account.objects.create(
+            name="Visa", account_type=Account.AccountType.LIABILITY, family=self.family_a
+        )
+        cc_product = FinancialProduct.objects.create(
+            institution=self.institution,
+            family=self.family_a,
+            owner=self.member_a,
+            account=liability_account,
+            product_type=FinancialProduct.ProductType.CREDIT_CARD,
+        )
+        cc_import = BankStatementImport.objects.create(financial_product=cc_product)
+        staged = StagedTransaction.objects.create(
+            statement_import=cc_import,
+            bank_date=date(2026, 3, 10),
+            raw_description="Paiement carte",
+            amount=Decimal("-775.00"),
+            status=StagedTransaction.Status.UNPROCESSED,
+        )
+        payment_source = Account.objects.create(
+            name="Checking", account_type=Account.AccountType.ASSET, family=self.family_a
+        )
+
+        je = approve_staged_transaction(staged.id, payment_source.id, self.user_a)
+        debit_line = je.lines.get(amount=Decimal("775.00"))
+        credit_line = je.lines.get(amount=Decimal("-775.00"))
+
+        self.assertEqual(debit_line.account, liability_account)
+        self.assertEqual(credit_line.account, payment_source)
+
+    def test_liability_positive_increases_liability(self):
+        liability_account = Account.objects.create(
+            name="Visa 2", account_type=Account.AccountType.LIABILITY, family=self.family_a
+        )
+        cc_product = FinancialProduct.objects.create(
+            institution=self.institution,
+            family=self.family_a,
+            owner=self.member_a,
+            account=liability_account,
+            product_type=FinancialProduct.ProductType.CREDIT_CARD,
+        )
+        cc_import = BankStatementImport.objects.create(financial_product=cc_product)
+        staged = StagedTransaction.objects.create(
+            statement_import=cc_import,
+            bank_date=date(2026, 3, 11),
+            raw_description="Restaurant",
+            amount=Decimal("45.00"),
+            status=StagedTransaction.Status.UNPROCESSED,
+        )
+        expense_account = Account.objects.create(
+            name="Dining", account_type=Account.AccountType.EXPENSE, family=self.family_a
+        )
+
+        je = approve_staged_transaction(staged.id, expense_account.id, self.user_a)
+        debit_line = je.lines.get(amount=Decimal("45.00"))
+        credit_line = je.lines.get(amount=Decimal("-45.00"))
+
+        self.assertEqual(debit_line.account, expense_account)
+        self.assertEqual(credit_line.account, liability_account)
