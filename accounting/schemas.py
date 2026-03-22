@@ -25,6 +25,33 @@ class AccountMerchantOut(Schema):
     name: str
     balance: float = 0.0
 
+class CFAInsightsOut(Schema):
+    # Universal context
+    amount_current: float
+    amount_previous: float
+    yoy_growth: Optional[float] = None
+    share_of_parent: float
+    share_of_total_inflow: float
+    volatility_score: float # Std Dev of last 12 months
+    concentration_top_1: float # % of branch held by top merchant/child
+    
+    # Specific Lenses (Conditional)
+    drift_spread: Optional[float] = None # Growth of this node - Growth of Revenue Root
+    optimization_headroom: Optional[float] = None # 5% of top vendor
+    burn_coverage_days: Optional[float] = None # Total Assets / (Branch Amount / 365)
+    
+    # Flags
+    health_tag: str # 'sturdy' | 'volatile' | 'drifting' | 'concentrated'
+    red_flag: Optional[dict] = None
+    green_flag: Optional[dict] = None
+    strategic_action: Optional[dict] = None
+
+class YearlyTrendOut(Schema):
+    year: int
+    total: float
+    monthly_avg: float
+    breakdown: dict = {} # Map of child_name -> amount
+
 class AccountDetailOut(Schema):
     id: int
     name: str
@@ -32,6 +59,10 @@ class AccountDetailOut(Schema):
     parent_id: Optional[int] = None
     children: List[AccountChildOut]
     merchants: List[AccountMerchantOut]
+    insights: CFAInsightsOut
+    historical_trends: List[YearlyTrendOut] = []
+    avg_yearly_total: float = 0.0
+    avg_monthly_avg: float = 0.0
 
 class DimensionLineItemOut(Schema):
     id: Optional[int] = None
