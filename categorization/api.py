@@ -64,15 +64,29 @@ def create_and_apply_mapping_rule(request, payload: RuleCreateAndApplyIn):
     if payload.institution_id:
         queryset = queryset.filter(statement_import__financial_product__institution_id=payload.institution_id)
     
-    # 6. Filter transactions by the new rule's search_text (case-insensitive)
-    matching_transactions = queryset.filter(raw_description__icontains=clean_search_text)
+    # 6. Filter transactions by the new rule's search_text (case-insensitive) for performance
+    candidate_transactions = queryset.filter(raw_description__icontains=clean_search_text)
 
-    # 7. Apply and Auto-Approve (only if unique provider and has category)
+    # 7. Apply and Auto-Approve using the canonical matching engine
     updated_count = 0
     can_auto_approve = bool(merchant.is_unique_provider and merchant.default_account)
+    family_id = user.family.id
     
-    for tx in matching_transactions:
+    for tx in candidate_transactions:
+        # Verify that the canonical engine actually selects the NEW rule for this transaction
+        # (This handles amount bounds and prioritization vs existing rules)
+        matched_rule = find_matching_rule(
+            tx.raw_description, 
+            tx.statement_import.financial_product.institution_id,
+            family_id,
+            transaction_amount=tx.amount
+        )
+        
+        if not matched_rule or matched_rule.id != rule.id:
+            continue
+
         tx.merchant = merchant
+        tx.clean_description = merchant.name
 
         if can_auto_approve:
             target_account = merchant.default_account
