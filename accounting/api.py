@@ -353,6 +353,7 @@ def get_dimension_drill_down(request, dimension_slug: str, period: str):
 def get_account_detail(request, account_id: int, year: Optional[int] = None):
     """
     Returns full details for an account with CFA-grade analytical insights and monthly stacked breakdown.
+    Supports cumulative (Stock) and period-isolated (Flow) calculations.
     """
     if year is None:
         year = date.today().year
@@ -361,33 +362,43 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
     family = user.family
     account = get_object_or_404(Account, id=account_id, family=family)
 
+    # Determine if this account requires cumulative (Stock) math
+    is_cumulative = account.account_type in [Account.AccountType.ASSET, Account.AccountType.LIABILITY, Account.AccountType.EQUITY]
+
     # 1. Branch Data Context
     descendants = account.get_descendants(include_self=True)
     direct_children = account.get_children()
     
     # 2. Universal Sum Helper
-    def get_sum(branch_qs, target_year, month=None):
-        q = Q(journal_entry__family=family, account__in=branch_qs, journal_entry__date__year=target_year)
-        if month:
-            q &= Q(journal_entry__date__month=month)
+    def get_sum(branch_qs, target_year, month=None, is_cumulative=False):
+        if is_cumulative:
+            # Stock Logic: Cumulative sum up to the end of the period
+            if month:
+                # Last day of month
+                end_date = date(target_year, month, 1) + relativedelta(months=1) - relativedelta(days=1)
+            else:
+                end_date = date(target_year, 12, 31)
+            q = Q(journal_entry__family=family, account__in=branch_qs, journal_entry__date__lte=end_date)
+        else:
+            # Flow Logic: Strictly the period
+            q = Q(journal_entry__family=family, account__in=branch_qs, journal_entry__date__year=target_year)
+            if month:
+                q &= Q(journal_entry__date__month=month)
+        
         val = TransactionLine.objects.filter(q).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
         return abs(float(val))
 
-    amt_current = get_sum(descendants, year)
-    amt_previous = get_sum(descendants, year - 1)
+    amt_current = get_sum(descendants, year, is_cumulative=is_cumulative)
+    amt_previous = get_sum(descendants, year - 1, is_cumulative=is_cumulative)
     
     # 3. Denominators for Share calculations
-    parent_amt = get_sum(account.parent.get_descendants(include_self=True) if account.parent else descendants, year)
+    parent_amt = get_sum(account.parent.get_descendants(include_self=True) if account.parent else descendants, year, is_cumulative=is_cumulative)
     root_revenue = Account.objects.filter(name='Revenue', parent=None, family=family).first()
-    total_revenue_curr = get_sum(root_revenue.get_descendants(include_self=True) if root_revenue else Account.objects.none(), year)
-    total_revenue_prev = get_sum(root_revenue.get_descendants(include_self=True) if root_revenue else Account.objects.none(), year - 1)
+    total_revenue_curr = get_sum(root_revenue.get_descendants(include_self=True) if root_revenue else Account.objects.none(), year, is_cumulative=False)
+    total_revenue_prev = get_sum(root_revenue.get_descendants(include_self=True) if root_revenue else Account.objects.none(), year - 1, is_cumulative=False)
     
     total_assets_ids = Account.objects.filter(name='Assets', parent=None, family=family).first()
-    total_assets = abs(float(TransactionLine.objects.filter(
-        journal_entry__family=family,
-        account__in=total_assets_ids.get_descendants(include_self=True) if total_assets_ids else Account.objects.none(),
-        journal_entry__date__lte=date(year, 12, 31)
-    ).aggregate(total=Sum('amount'))['total'] or 0.0))
+    total_assets = get_sum(total_assets_ids.get_descendants(include_self=True) if total_assets_ids else Account.objects.none(), year, is_cumulative=True)
 
     # 4. Refactored Child List (with computed branch balances)
     children_list = []
@@ -397,11 +408,13 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
             "id": child.id,
             "name": child.name,
             "account_type": child.account_type,
-            "balance": get_sum(child_branch, year)
+            "balance": get_sum(child_branch, year, is_cumulative=is_cumulative)
         })
     children_list.sort(key=lambda x: x['balance'], reverse=True)
 
     # 5. Refactored Direct Merchants (ONLY transactions posted directly to this ID)
+    # Merchant balances in this specific drill-down are still usually treated as flow-impact for the period
+    # even for stock accounts, to see WHAT moved the needle this year.
     direct_merchants_sums = TransactionLine.objects.filter(
         journal_entry__family=family,
         account=account,
@@ -422,14 +435,21 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
         month_total = 0.0
         
         for child in direct_children:
-            child_amt = get_sum(child.get_descendants(include_self=True), year, month=month_idx)
+            child_amt = get_sum(child.get_descendants(include_self=True), year, month=month_idx, is_cumulative=is_cumulative)
             by_child.append({
                 "child_id": child.id,
                 "child_name": child.name,
                 "amount": child_amt
             })
+            # Note: For stock accounts, month_total is the aggregate snapshot, not sum of child snapshots
+            # We'll re-calculate or sum depending on desired UI behavior. 
+            # Usually, for stacked charts, sum of snapshots is the branch total at that time.
             month_total += child_amt
             
+        if not direct_children:
+            # If leaf node, month total is the node total at that time
+            month_total = get_sum(descendants, year, month=month_idx, is_cumulative=is_cumulative)
+
         monthly_breakdown.append({
             "month": month_str,
             "total": month_total,
@@ -441,11 +461,11 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
     revenue_growth = (total_revenue_curr - total_revenue_prev) / total_revenue_prev if total_revenue_prev > 0 else 0
     drift = (yoy_growth - revenue_growth) if yoy_growth is not None else 0
     
-    # Volatility
+    # Volatility (Monthly variance)
     monthly_totals = [m['total'] for m in monthly_breakdown]
     volatility = float(np.std(monthly_totals)) if monthly_totals else 0.0
     
-    # Concentration (Using children as primary driver of concentration in this refactor)
+    # Concentration
     top_driver_bal = children_list[0]['balance'] if children_list else amt_current
     concentration = (top_driver_bal / amt_current) if amt_current > 0 else 0.0
 
@@ -466,16 +486,13 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
 
     # Historical trends (5 year high level)
     historical_trends = []
-    total_sum_all_years = 0.0
-    valid_years_count = 0
     for y in range(year - 4, year + 1):
-        y_total = get_sum(descendants, y)
+        y_total = get_sum(descendants, y, is_cumulative=is_cumulative)
         historical_trends.append({"year": y, "total": y_total, "monthly_avg": y_total / 12})
-        if y_total > 0:
-            total_sum_all_years += y_total
-            valid_years_count += 1
     
-    avg_yearly = total_sum_all_years / valid_years_count if valid_years_count > 0 else 0.0
+    # avg_yearly_total for reference lines
+    total_valid = [t['total'] for t in historical_trends if t['total'] > 0]
+    avg_yearly = sum(total_valid) / len(total_valid) if total_valid else 0.0
 
     return {
         "id": account.id,
