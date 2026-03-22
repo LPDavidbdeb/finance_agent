@@ -160,3 +160,73 @@ class AccountingApiTest(TestCase):
         self.assertEqual(data['income_statement']['expenses'], 1200.00)
         self.assertEqual(data['income_statement']['net_income'], 3800.00)
         self.assertEqual(data['balance_sheet']['assets'], 3800.00) # 5000 - 1200
+
+class AccountManagementTest(TestCase):
+    def setUp(self):
+        self.client = TestClient(api)
+        self.family1 = Family.objects.create(name="Family 1")
+        self.family2 = Family.objects.create(name="Family 2")
+        
+        self.user1 = User.objects.create_user(email="u1@test.com", password="password", family=self.family1)
+        self.user2 = User.objects.create_user(email="u2@test.com", password="password", family=self.family2)
+        
+        self.token1 = str(AccessToken.for_user(self.user1))
+        self.headers1 = {"Authorization": f"Bearer {self.token1}"}
+        
+        # Root accounts for family 1
+        self.root_asset = Account.objects.create(
+            name="Assets", account_type=Account.AccountType.ASSET, family=self.family1
+        )
+        
+        # Root for family 2
+        self.root_asset_f2 = Account.objects.create(
+            name="Assets F2", account_type=Account.AccountType.ASSET, family=self.family2
+        )
+
+    def test_create_account_success(self):
+        payload = {"name": "Bank Account", "parent_id": self.root_asset.id}
+        response = self.client.post("/accounting/accounts", json=payload, headers=self.headers1)
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        # Note: Model normalizes name to UPPERCASE
+        self.assertEqual(data["name"], "BANK ACCOUNT")
+        self.assertEqual(data["account_type"], "ASSET")
+        
+        new_acc = Account.objects.get(id=data["id"])
+        self.assertEqual(new_acc.family, self.family1)
+
+    def test_create_account_cross_family_rejected(self):
+        # User 1 tries to create child under User 2's root
+        payload = {"name": "Evil Hack", "parent_id": self.root_asset_f2.id}
+        response = self.client.post("/accounting/accounts", json=payload, headers=self.headers1)
+        self.assertEqual(response.status_code, 404)
+
+    def test_create_account_duplicate_rejected(self):
+        Account.objects.create(name="DUPLICATE", parent=self.root_asset, account_type="ASSET", family=self.family1)
+        payload = {"name": "Duplicate", "parent_id": self.root_asset.id}
+        response = self.client.post("/accounting/accounts", json=payload, headers=self.headers1)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("already exists", response.json()["detail"])
+
+    def test_delete_account_success(self):
+        acc = Account.objects.create(name="To Delete", parent=self.root_asset, account_type="ASSET", family=self.family1)
+        response = self.client.delete(f"/accounting/accounts/{acc.id}", headers=self.headers1)
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Account.objects.filter(id=acc.id).exists())
+
+    def test_delete_account_with_history_rejected(self):
+        acc = Account.objects.create(name="Protected", parent=self.root_asset, account_type="ASSET", family=self.family1)
+        je = JournalEntry.objects.create(family=self.family1, date="2025-01-01", description="Test")
+        TransactionLine.objects.create(journal_entry=je, account=acc, amount=Decimal("100.00"))
+        
+        response = self.client.delete(f"/accounting/accounts/{acc.id}", headers=self.headers1)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("transaction history", response.json()["detail"])
+
+    def test_delete_non_leaf_rejected(self):
+        parent = Account.objects.create(name="Parent", parent=self.root_asset, account_type="ASSET", family=self.family1)
+        Account.objects.create(name="Child", parent=parent, account_type="ASSET", family=self.family1)
+        
+        response = self.client.delete(f"/accounting/accounts/{parent.id}", headers=self.headers1)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("has sub-accounts", response.json()["detail"])

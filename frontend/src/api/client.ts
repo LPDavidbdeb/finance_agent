@@ -63,13 +63,29 @@ export async function fetchAccountTree() {
   return res.json();
 }
 
+export async function createAccount(data: { name: string; parent_id: number }) {
+  const res = await fetch(`${API_URL}/accounting/accounts`, {
+    method: "POST",
+    headers: getAuthHeader(),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.detail || "Failed to create account");
+  }
+  return res.json();
+}
+
 export async function deleteAccount(id: number) {
-  const res = await fetch(`${API_URL}/accounts/${id}`, {
+  const res = await fetch(`${API_URL}/accounting/accounts/${id}`, {
     method: "DELETE",
     headers: getAuthHeader(),
   });
-  if (!res.ok) throw new Error("Failed to delete account");
-  return res.json();
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.detail || "Failed to delete account");
+  }
+  return res;
 }
 
 export async function moveAccount(accountId: number, targetParentId: number) {

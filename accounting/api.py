@@ -8,10 +8,55 @@ from typing import List, Literal, Optional
 from decimal import Decimal
 
 from .models import Account, TransactionLine, JournalEntry
-from .schemas import AccountDetailOut, DimensionBreakdownOut
+from .schemas import AccountDetailOut, DimensionBreakdownOut, AccountCreateIn, AccountOut
 from categorization.models import Merchant
 
 router = Router(auth=JWTAuth())
+
+@router.post("/accounts", response={201: AccountOut})
+def create_account(request, payload: AccountCreateIn):
+    """
+    Creates a new sub-account under an existing parent for the user's family.
+    """
+    user = request.auth
+    parent = get_object_or_404(Account, id=payload.parent_id, family=user.family)
+    
+    clean_name = payload.name.strip()
+    if not clean_name:
+        raise errors.HttpError(400, "Account name cannot be empty.")
+
+    # Prevent duplicates under same parent
+    if Account.objects.filter(parent=parent, name__iexact=clean_name, family=user.family).exists():
+        raise errors.HttpError(400, f"An account named '{clean_name}' already exists under this parent.")
+
+    # Enforce type inheritance and name normalization
+    account = Account.objects.create(
+        name=clean_name.upper(),
+        parent=parent,
+        account_type=parent.account_type,
+        family=user.family
+    )
+    return 201, account
+
+@router.delete("/accounts/{account_id}", response={204: None})
+def delete_account(request, account_id: int):
+    """
+    Deletes an account if it belongs to the family and has no transaction history.
+    Blocks deletion of non-leaf nodes.
+    """
+    user = request.auth
+    account = get_object_or_404(Account, id=account_id, family=user.family)
+
+    # Check for transaction history
+    if TransactionLine.objects.filter(account=account).exists():
+        raise errors.HttpError(400, "This account cannot be deleted because it has transaction history.")
+
+    # Block deletion of non-leaf nodes (nodes with children)
+    if not account.is_leaf_node():
+        raise errors.HttpError(400, "Cannot delete account because it has sub-accounts. Delete the children first.")
+
+    account.delete()
+    return 204, None
 
 @router.get("/reports/dimension/{dimension_slug}", response=DimensionBreakdownOut)
 def get_dimension_breakdown(request, dimension_slug: str, year: int):

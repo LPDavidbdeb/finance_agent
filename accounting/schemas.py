@@ -6,6 +6,20 @@ class AccountChildOut(Schema):
     name: str
     account_type: str
 
+class AccountOut(Schema):
+    id: int
+    name: str
+    account_type: str
+    parent_id: Optional[int] = None
+    children: List['AccountOut'] = []
+
+class AccountCreateIn(Schema):
+    name: str
+    parent_id: int
+    account_type: Optional[str] = None
+
+AccountOut.update_forward_refs()
+
 class AccountMerchantOut(Schema):
     id: int
     name: str
