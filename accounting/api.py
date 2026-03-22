@@ -405,6 +405,144 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
         "avg_monthly_avg": avg_yearly / 12
     }
 
+from dateutil.relativedelta import relativedelta
+
+@router.get("/dimension-evolution")
+def get_dimension_evolution(
+    request, 
+    dimension: Literal['revenue', 'expenses', 'net-income', 'assets', 'liabilities', 'net-worth'],
+    start_date: date, 
+    end_date: date, 
+    interval: Literal['bi-weekly', 'monthly'] = 'monthly'
+):
+    """
+    Returns time-series data for any financial dimension.
+    """
+    user = request.auth
+    family = user.family
+
+    # Flow dimensions use period sums
+    if dimension in ['revenue', 'expenses', 'net-income']:
+        root_revenue = Account.objects.filter(family=family, name='Revenue', parent=None).first()
+        root_expenses = Account.objects.filter(family=family, name='Expenses', parent=None).first()
+        
+        rev_ids = root_revenue.get_descendants(include_self=True).values_list('id', flat=True) if root_revenue else []
+        exp_ids = root_expenses.get_descendants(include_self=True).values_list('id', flat=True) if root_expenses else []
+        
+        target_ids = []
+        if dimension == 'revenue':
+            target_ids = list(rev_ids)
+        elif dimension == 'expenses':
+            target_ids = list(exp_ids)
+        else: # net-income
+            target_ids = list(rev_ids) + list(exp_ids)
+
+        queryset = TransactionLine.objects.filter(
+            journal_entry__family=family,
+            account_id__in=target_ids,
+            journal_entry__date__range=[start_date, end_date]
+        )
+
+        trunc_func = TruncMonth('journal_entry__date') if interval == 'monthly' else TruncWeek('journal_entry__date')
+        
+        # Group by period and account type to handle net-income calculation correctly
+        # or just sum and handle signs.
+        # Revenue is negative, Expenses is positive.
+        # Display Revenue as positive: -sum
+        # Display Expenses as positive: sum
+        # Display Net Income as -rev - exp
+        
+        if dimension == 'net-income':
+            # We need to distinguish between rev and exp lines
+            results = queryset.annotate(period=trunc_func).values('period', 'account__account_type').annotate(total=Sum('amount')).order_by('period')
+            # Post-process to group by period
+            period_map = {}
+            for r in results:
+                p = r['period']
+                if p not in period_map: period_map[p] = 0.0
+                val = float(r['total'])
+                # Net income display = -Revenue (credits) - Expenses (debits)
+                # Since Revenue is stored as negative, -val adds it.
+                period_map[p] += -val
+            
+            final_results = [{"period": p, "total": v} for p, v in period_map.items()]
+            final_results.sort(key=lambda x: x['period'])
+        else:
+            results = queryset.annotate(period=trunc_func).values('period').annotate(total=Sum('amount')).order_by('period')
+            final_results = []
+            for r in results:
+                val = float(r['total'])
+                display_val = -val if dimension == 'revenue' else val
+                final_results.append({"period": r['period'], "total": display_val})
+
+        # Bi-weekly post-processing
+        if interval == 'bi-weekly':
+            bi_weekly = []
+            for i in range(0, len(final_results), 2):
+                item = final_results[i]
+                amount = item['total']
+                if i + 1 < len(final_results):
+                    amount += final_results[i+1]['total']
+                bi_weekly.append({
+                    "period": item['period'].strftime("%Y-%m-%d"),
+                    "amount": float(amount)
+                })
+            return bi_weekly
+
+        return [
+            {
+                "period": r['period'].strftime("%Y-%m" if interval == 'monthly' else "%Y-%m-%d"),
+                "amount": float(r['total'])
+            }
+            for r in final_results
+        ]
+
+    # Stock dimensions use cumulative ending balances
+    else:
+        root_assets = Account.objects.filter(family=family, name='Assets', parent=None).first()
+        root_liabilities = Account.objects.filter(family=family, name='Liabilities', parent=None).first()
+        
+        ast_ids = list(root_assets.get_descendants(include_self=True).values_list('id', flat=True)) if root_assets else []
+        lib_ids = list(root_liabilities.get_descendants(include_self=True).values_list('id', flat=True)) if root_liabilities else []
+        
+        all_ids = []
+        if dimension == 'assets': all_ids = ast_ids
+        elif dimension == 'liabilities': all_ids = lib_ids
+        else: all_ids = ast_ids + lib_ids # net-worth
+
+        # Iterate through periods to get ending balances
+        # We start from start_date and move to end_date
+        current_p = start_date.replace(day=1) # start of month
+        results = []
+        
+        while current_p <= end_date:
+            # End of month
+            end_of_p = current_p + relativedelta(months=1) - relativedelta(days=1)
+            
+            # Cumulative sum
+            total = TransactionLine.objects.filter(
+                journal_entry__family=family,
+                account_id__in=all_ids,
+                journal_entry__date__lte=end_of_p
+            ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
+            
+            display_val = float(total)
+            if dimension == 'liabilities': display_val = -display_val
+            # Net worth is already Assets + Liabilities (where lib is negative)
+            
+            results.append({
+                "period": current_p.strftime("%Y-%m"),
+                "amount": float(display_val)
+            })
+            
+            current_p += relativedelta(months=1) if interval == 'monthly' else relativedelta(weeks=2)
+            if interval == 'bi-weekly':
+                # Bi-weekly implementation for stock is tricky if we want exact 14 day snapshots.
+                # For now, let's keep it simple.
+                pass
+
+        return results
+
 @router.get("/spending-evolution")
 def get_spending_evolution(
     request, 

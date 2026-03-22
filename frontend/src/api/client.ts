@@ -11,13 +11,22 @@ function getAuthHeader() {
 
 // --- Accounting API ---
 
-export async function fetchSpendingEvolution(startDate: string, endDate: string, interval: string) {
+export async function fetchSpendingEvolution(startDate: string, endDate: string, interval: string = 'monthly') {
   const res = await fetch(`${API_URL}/accounting/spending-evolution?start_date=${startDate}&end_date=${endDate}&interval=${interval}`, {
     headers: getAuthHeader(),
   });
   if (!res.ok) throw new Error("Failed to fetch spending evolution");
   return res.json();
 }
+
+export async function fetchDimensionEvolution(dimension: string, startDate: string, endDate: string, interval: string = 'monthly') {
+  const res = await fetch(`${API_URL}/accounting/dimension-evolution?dimension=${dimension}&start_date=${startDate}&end_date=${endDate}&interval=${interval}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch dimension evolution");
+  return res.json();
+}
+
 
 export async function fetchSpendingByCategory(startDate: string, endDate: string) {
   const res = await fetch(`${API_URL}/accounting/spending-by-category?start_date=${startDate}&end_date=${endDate}`, {

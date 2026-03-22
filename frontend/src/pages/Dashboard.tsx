@@ -2,10 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { 
-  fetchSpendingEvolution,
   fetchSpendingByCategory,
   fetchAnnualStatements,
-  fetchDimensionDetail
+  fetchDimensionDetail,
+  fetchDimensionEvolution
 } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -53,39 +53,32 @@ export const Dashboard: React.FC = () => {
       const startDate = `${selectedYear}-01-01`;
       const endDate = `${selectedYear}-12-31`;
 
-      // If activeDimension is 'expenses', we can use the specialized endpoints
-      // Otherwise, we might need fetchDimensionDetail
       const promises: Promise<any>[] = [
-        fetchAnnualStatements(selectedYear)
+        fetchAnnualStatements(selectedYear),
+        fetchDimensionEvolution(activeDimension, startDate, endDate, selectedInterval)
       ];
 
       if (activeDimension === 'expenses') {
-        promises.push(fetchSpendingEvolution(startDate, endDate, selectedInterval));
         promises.push(fetchSpendingByCategory(startDate, endDate));
       } else {
-        // For other dimensions, we fetch the detail and transform it for the charts
         promises.push(fetchDimensionDetail(activeDimension, selectedYear));
-        // Evolution for other dimensions is not directly supported by current specialized endpoint
-        // but we can pass a dimension to it if we refactor backend later.
-        // For now, we'll try to use the general detail.
       }
 
       const results = await Promise.all(promises);
       const annual = results[0];
+      const evolution = results[1];
+      
       setStatements(annual);
+      setEvolutionData(evolution);
 
       if (activeDimension === 'expenses') {
-        setEvolutionData(results[1]);
         setCategoryData(results[2]);
       } else {
-        const dimensionDetail = results[1];
-        // Transform dimensionDetail for Pie Chart
+        const dimensionDetail = results[2];
         setCategoryData(dimensionDetail.line_items.map((item: any) => ({
           category: item.name,
           amount: Math.abs(item.balance)
         })));
-        // Evolution data for non-expenses is currently limited in this view
-        setEvolutionData([]); 
       }
 
     } catch (err: any) {
@@ -231,7 +224,11 @@ export const Dashboard: React.FC = () => {
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                     <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} dy={10} />
                     <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} tickFormatter={(v) => `$${v}`} />
-                    <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
+                    <Tooltip 
+                    cursor={{fill: '#f8fafc'}} 
+                    contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} 
+                    formatter={(value: any) => [`$${value.toLocaleString()}`, activeDimension.replace('-', ' ').toUpperCase()]}
+                  />
                     <Bar dataKey="amount" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
