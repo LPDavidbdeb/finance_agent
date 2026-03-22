@@ -17,6 +17,7 @@ export default defineConfig({
           'vendor-charts': ['recharts'],
           'vendor-icons': ['lucide-react'],
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'maintenance': ['./src/pages/MaintenancePage'],
         }
       }
     }

@@ -60,6 +60,20 @@ export async function fetchDrillDown(slug: string, period: string) {
   return res.json();
 }
 
+export async function runMaintenanceCommand(command: string, args: string[] = []) {
+  const res = await fetch(`${API_URL}/maintenance/run-command`, {
+    method: "POST",
+    headers: getAuthHeader(),
+    body: JSON.stringify({ command, args }),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || "Maintenance command failed");
+  }
+  return res.json();
+}
+
 export async function fetchAccountDetail(id: number, year?: number) {
   const url = `${API_URL}/accounting/accounts/${id}${year ? `?year=${year}` : ''}`;
   const res = await fetch(url, {

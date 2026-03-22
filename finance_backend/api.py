@@ -19,6 +19,7 @@ api.add_router("/users/", "users.api.router")
 api.add_router("/banking/", "banking.api.router")
 api.add_router("/categorization/", "categorization.api.router")
 api.add_router("/accounting/", "accounting.api.router")
+api.add_router("/maintenance/", "finance_backend.maintenance_api.router")
 
 @api.get("/accounts/tree", response=List[AccountSchema])
 def get_account_tree(request):
