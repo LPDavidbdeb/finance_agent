@@ -40,46 +40,52 @@ class Command(BaseCommand):
                 rule = find_matching_rule(tx.raw_description, institution_id, family.id, transaction_amount=tx.amount)
                 
                 if rule:
-                    tx.clean_description = rule.merchant.name
                     tx.merchant = rule.merchant
                     
-                    # 1. Grab the target account
-                    target_account = rule.merchant.default_account
-                    
-                    if target_account:
-                        # Resolve family-specific account if the default is global
-                        if target_account.family_id != family.id:
-                            resolved_account = Account.objects.filter(name=target_account.name, family=family).first()
-                            if not resolved_account:
-                                parent = None
-                                if target_account.parent:
-                                    parent = Account.objects.filter(name=target_account.parent.name, family=family).first()
-                                resolved_account = Account.objects.create(
-                                    name=target_account.name,
-                                    account_type=target_account.account_type,
-                                    family=family,
-                                    parent=parent
-                                )
-                            target_account = resolved_account
+                    # 1. ONLY grab the target account if the merchant is a unique provider
+                    if rule.merchant.is_unique_provider:
+                        target_account = rule.merchant.default_account
                         
-                        # Save prediction
-                        tx.predicted_account = target_account
-                        tx.save()
-                        total_categorized += 1
-                        
-                        # 2. AUTO-APPROVE based on the existence of the target_account
-                        try:
-                            approve_staged_transaction(
-                                transaction_id=tx.id,
-                                target_account_id=target_account.id,
-                                user=user
-                            )
-                            total_approved += 1
-                        except Exception as e:
-                            self.stdout.write(self.style.ERROR(f"Failed to approve tx {tx.id}: {e}"))
+                        if target_account:
+                            # Resolve family-specific account if the default is global
+                            if target_account.family_id != family.id:
+                                resolved_account = Account.objects.filter(name=target_account.name, family=family).first()
+                                if not resolved_account:
+                                    parent = None
+                                    if target_account.parent:
+                                        parent = Account.objects.filter(name=target_account.parent.name, family=family).first()
+                                    resolved_account = Account.objects.create(
+                                        name=target_account.name,
+                                        account_type=target_account.account_type,
+                                        family=family,
+                                        parent=parent
+                                    )
+                                target_account = resolved_account
                             
+                            # Save prediction
+                            tx.predicted_account = target_account
+                            tx.save()
+                            total_categorized += 1
+                            
+                            # 2. AUTO-APPROVE based on the existence of the target_account
+                            try:
+                                approve_staged_transaction(
+                                    transaction_id=tx.id,
+                                    target_account_id=target_account.id,
+                                    user=user
+                                )
+                                total_approved += 1
+                            except Exception as e:
+                                self.stdout.write(self.style.ERROR(f"Failed to approve tx {tx.id}: {e}"))
+                                
+                        else:
+                            # Unique provider, but no default account exists. Leave in Inbox.
+                            tx.predicted_account = None
+                            tx.save()
+                            total_categorized += 1
                     else:
-                        # 3. No default account exists. Leave in Inbox.
+                        # NOT a unique provider (e.g. Walmart, Amazon). 
+                        # We identify the merchant, but leave it in the inbox for manual review.
                         tx.predicted_account = None
                         tx.save()
                         total_categorized += 1

@@ -86,7 +86,6 @@ def create_and_apply_mapping_rule(request, payload: RuleCreateAndApplyIn):
             continue
 
         tx.merchant = merchant
-        tx.clean_description = merchant.name
 
         if can_auto_approve:
             target_account = merchant.default_account
@@ -169,7 +168,7 @@ def merge_merchants_endpoint(request, payload: MerchantMergeIn):
     TransactionMappingRule.objects.filter(merchant_id__in=payload.source_ids).update(merchant=target_merchant)
     
     # 2. Historical Cleanup (StagedTransactions)
-    StagedTransaction.objects.filter(clean_description__in=source_names).update(clean_description=target_merchant.name)
+    StagedTransaction.objects.filter(merchant_id__in=payload.source_ids).update(merchant=target_merchant)
     
     # 3. Delete sources
     source_merchants.delete()
@@ -213,7 +212,7 @@ def get_merchant_stats(request, merchant_id: int):
     
     # Base queryset for reconciled transactions
     qs = StagedTransaction.objects.filter(
-        clean_description=merchant.name,
+        merchant=merchant,
         status='RECONCILED',
         statement_import__financial_product__family=user.family
     )

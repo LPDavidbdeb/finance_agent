@@ -87,6 +87,10 @@ class StagedTransactionOut(Schema):
     reconciled_account_name: Optional[str] = None
 
     @staticmethod
+    def resolve_clean_description(obj):
+        return obj.merchant.name if obj.merchant else obj.raw_description
+
+    @staticmethod
     def resolve_merchant_name(obj):
         return obj.merchant.name if obj.merchant else None
 

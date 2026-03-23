@@ -1,11 +1,14 @@
 from django.test import TestCase
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
+from unittest.mock import patch
 from decimal import Decimal
 from datetime import date
 from users.models import Family, FamilyMember
 from accounting.models import Account, JournalEntry, TransactionLine
 from banking.models import FinancialInstitution, FinancialProduct, BankStatementImport, StagedTransaction
 from banking.services import approve_staged_transaction
+from finance_backend.api import api
 
 User = get_user_model()
 
@@ -172,3 +175,60 @@ class ApproveStagedTransactionTest(TestCase):
 
         self.assertEqual(debit_line.account, expense_account)
         self.assertEqual(credit_line.account, liability_account)
+
+class UploadStatementDeduplicationTest(TestCase):
+    def setUp(self):
+        self.client = api.client
+        self.family = Family.objects.create(name="Upload Family")
+        self.user = User.objects.create_user(email="upload@example.com", password="password", family=self.family)
+        self.member = FamilyMember.objects.create(
+            family=self.family,
+            first_name="Uploader",
+            last_name="User",
+            date_of_birth="1985-01-01",
+            sex="M",
+            role="PARENT"
+        )
+        self.institution = FinancialInstitution.objects.create(name="Test Bank")
+        self.account = Account.objects.create(
+            name="Checking Upload",
+            account_type=Account.AccountType.ASSET,
+            family=self.family,
+        )
+        self.product = FinancialProduct.objects.create(
+            institution=self.institution,
+            family=self.family,
+            owner=self.member,
+            account=self.account,
+            product_type=FinancialProduct.ProductType.CHECKING,
+        )
+
+    @patch("banking.tasks.extract_transactions_task.delay")
+    def test_duplicate_pdf_upload_returns_409(self, mock_delay):
+        payload_bytes = b"%PDF-1.4 fake statement bytes for duplicate test"
+        file_one = SimpleUploadedFile("statement.pdf", payload_bytes, content_type="application/pdf")
+
+        first_response = self.client.post(
+            f"/api/banking/products/{self.product.id}/statements/upload",
+            FILES={"file": file_one},
+            data={"document_date": "2026-03-22"},
+            user=self.user,
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(BankStatementImport.objects.count(), 1)
+        self.assertEqual(mock_delay.call_count, 1)
+
+        file_two = SimpleUploadedFile("same-content-different-name.pdf", payload_bytes, content_type="application/pdf")
+        second_response = self.client.post(
+            f"/api/banking/products/{self.product.id}/statements/upload",
+            FILES={"file": file_two},
+            data={"document_date": "2026-03-22"},
+            user=self.user,
+        )
+
+        self.assertEqual(second_response.status_code, 409)
+        self.assertIn("already been uploaded", second_response.json()["detail"])
+        self.assertEqual(BankStatementImport.objects.count(), 1)
+        self.assertEqual(mock_delay.call_count, 1)
+

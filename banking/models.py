@@ -42,7 +42,8 @@ class BankStatementImport(models.Model):
 
     financial_product = models.ForeignKey('FinancialProduct', on_delete=models.CASCADE, related_name='statement_imports')
     file = models.FileField(upload_to='statements/%Y/%m/', null=True, blank=True)
-    
+    file_hash = models.CharField(max_length=64, unique=True, null=True, blank=True)
+
     upload_date = models.DateTimeField(auto_now_add=True)
     document_date = models.DateField(null=True, blank=True)
     
@@ -67,7 +68,6 @@ class StagedTransaction(models.Model):
     statement_import = models.ForeignKey(BankStatementImport, on_delete=models.CASCADE, related_name='staged_transactions')
     bank_date = models.DateField()
     raw_description = models.CharField(max_length=1024)
-    clean_description = models.CharField(max_length=1024, null=True, blank=True)
     amount = models.DecimalField(max_digits=15, decimal_places=2)
     unique_bank_id = models.CharField(max_length=255, null=True, blank=True)
     status = models.CharField(max_length=50, choices=Status.choices, default=Status.UNPROCESSED)

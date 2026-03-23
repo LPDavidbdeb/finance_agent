@@ -11,37 +11,64 @@ import re
 
 logger = logging.getLogger(__name__)
 
-FRENCH_MONTHS = {
-    'janvier': 1, 'février': 2, 'mars': 3, 'avril': 4, 'mai': 5, 'juin': 6,
-    'juillet': 7, 'août': 8, 'septembre': 9, 'octobre': 10, 'novembre': 11, 'décembre': 12
+MONTH_MAP = {
+    'janvier': 1, 'février': 2, 'fevrier': 2, 'mars': 3, 'avril': 4, 'mai': 5, 'juin': 6,
+    'juillet': 7, 'août': 8, 'aout': 8, 'septembre': 9, 'octobre': 10, 'novembre': 11, 'décembre': 12, 'decembre': 12,
+    'jan': 1, 'fév': 2, 'fev': 2, 'mar': 3, 'avr': 4, 'mai': 5, 'jun': 6, 'jul': 7, 'aoû': 8, 'aou': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'déc': 12, 'dec': 12,
+    # English months
+    'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
+    'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12,
+    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6, 'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+    'sept': 9,
 }
 
 def get_statement_date_from_pdf(pdf_path: str) -> tuple[int, int]:
     """
     Extracts the statement year and month from the PDF text using regex.
-    Supports Visa Desjardins and Compte Desjardins formats.
+    Supports Visa Desjardins, Compte Desjardins, and Wealthsimple formats.
+    Checks the first 3 pages to find the header.
     """
     try:
         with pdfplumber.open(pdf_path) as pdf:
-            first_page = pdf.pages[0]
-            text = first_page.extract_text()
-            
-            # Pattern 1: Visa Desjardins (DATE DU RELEVÉ Jour DD Mois MM Année YYYY)
-            pattern1 = r'DATE DU RELEVÉ\s+Jour\s+\d{2}\s+Mois\s+(\d{2})\s+Année\s+(\d{4})'
-            match1 = re.search(pattern1, text)
-            if match1:
-                return int(match1.group(2)), int(match1.group(1))
-            
-            # Pattern 2: Compte Desjardins (au DD [Mois] YYYY)
-            pattern2 = r'au\s+\d{1,2}\s+([a-zA-Zûé]+)\s+(\d{4})'
-            match2 = re.search(pattern2, text, re.IGNORECASE)
-            if match2:
-                month_name = match2.group(1).lower()
-                month = FRENCH_MONTHS.get(month_name)
-                year = int(match2.group(2))
-                if month:
-                    return year, month
-                    
+            # Check the first 3 pages
+            for i in range(min(3, len(pdf.pages))):
+                page = pdf.pages[i]
+                text = page.extract_text()
+                if not text:
+                    continue
+                
+                # Pattern 1: Visa Desjardins (DATE DU RELEVÉ Jour DD Mois MM Année YYYY)
+                pattern1 = r'DATE DU RELEVÉ\s+Jour\s+\d{2}\s+Mois\s+(\d{2})\s+Année\s+(\d{4})'
+                match1 = re.search(pattern1, text)
+                if match1:
+                    return int(match1.group(2)), int(match1.group(1))
+                
+                # Pattern 2: Compte Desjardins (au DD [Mois] YYYY)
+                # Support abbreviations with dots (e.g., déc.) and more accents
+                pattern2 = r'au\s+\d{1,2}\s+([a-zA-ZûéÉÀàâÂêÊîÎôÔûÛëËïÏüÜ\.]+)\s+(\d{4})'
+                match2 = re.search(pattern2, text, re.IGNORECASE)
+                if match2:
+                    month_name = match2.group(1).lower().rstrip('.')
+                    month = MONTH_MAP.get(month_name)
+                    year = int(match2.group(2))
+                    if month:
+                        return year, month
+
+                # Pattern 3: Wealthsimple (Month DD - Month DD, YYYY)
+                pattern3 = r'([a-zA-Z]+)\s+\d{1,2}\s+-\s+[a-zA-Z]+\s+\d{1,2},\s+(\d{4})'
+                match3 = re.search(pattern3, text)
+                if match3:
+                    month_name = match3.group(1).lower()
+                    month = MONTH_MAP.get(month_name)
+                    year = int(match3.group(2))
+                    if month:
+                        return year, month
+
+                # Pattern 4: Wealthsimple Alternative (YYYY-MM-DD - YYYY-MM-DD)
+                pattern4 = r'(\d{4})-(\d{2})-\d{2}\s+-\s+\d{4}-\d{2}-\d{2}'
+                match4 = re.search(pattern4, text)
+                if match4:
+                    return int(match4.group(1)), int(match4.group(2))
     except Exception as e:
         logger.warning(f"Failed to extract date from PDF {pdf_path}: {e}")
     
@@ -90,8 +117,11 @@ def extract_transactions_from_statement(import_id: int, user):
         extractor = PDFExtractorFactory.get_extractor(product.institution.name, product.product_type)
         
         # 2. Extract with year/month context
-        df = extractor.extract(statement_import.file.path, statement_year, statement_month)
+        df, shadow_mismatch = extractor.extract(statement_import.file.path, statement_year, statement_month)
         
+        statement_import.shadow_mode_mismatch = shadow_mismatch
+        statement_import.save(update_fields=['shadow_mode_mismatch'])
+
         transactions_data = df.to_dict('records')
         institution_id = statement_import.financial_product.institution_id
         family_id = statement_import.financial_product.family_id
@@ -127,7 +157,6 @@ def extract_transactions_from_statement(import_id: int, user):
                     statement_import=statement_import,
                     bank_date=tx_data.get('date'),
                     raw_description=raw_description,
-                    clean_description=clean_desc,
                     predicted_account=predicted_acc,
                     merchant=merchant_obj,
                     amount=clean_amount,

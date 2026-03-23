@@ -1,4 +1,16 @@
+import re
+import unicodedata
 from django.db import models
+
+def normalize_search_text(text: str) -> str:
+    """Utility to normalize search text: strip accents, flatten whitespace, and lowercase."""
+    if not text:
+        return ""
+    # Normalize unicode and drop accents
+    text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('utf-8')
+    # Flatten whitespace
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip().lower()
 
 class Merchant(models.Model):
     family = models.ForeignKey('users.Family', on_delete=models.CASCADE, related_name='merchants')
@@ -27,7 +39,7 @@ class TransactionMappingRule(models.Model):
 
     def save(self, *args, **kwargs):
         if self.search_text:
-            self.search_text = self.search_text.strip().lower()
+            self.search_text = normalize_search_text(self.search_text)
         super().save(*args, **kwargs)
 
     def __str__(self):

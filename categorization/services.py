@@ -7,15 +7,26 @@ from django.db import transaction
 from .models import TransactionMappingRule, Merchant
 from banking.models import StagedTransaction
 from accounting.models import Account, TransactionLine
-
+import re
+import unicodedata
 
 def normalize_text(text: str) -> str:
-    """Standardize dashes, normalize unicode, and remove surrounding whitespace."""
+    """Standardize dashes, strip accents, and flatten all whitespace."""
     if not text:
         return ""
-    text = unicodedata.normalize('NFKC', text)
+    
+    # 1. Normalize unicode and drop accents (e.g., É -> E)
+    # Using NFKD to decompose characters and then ignoring non-ASCII characters
+    text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('utf-8')
+    
+    # 2. Standardize dashes
     text = text.replace('–', '-').replace('—', '-')
+    
+    # 3. Flatten any sequence of whitespace
+    text = re.sub(r'\s+', ' ', text)
+    
     return text.strip().lower()
+
 
 
 def find_matching_rule(
@@ -24,66 +35,64 @@ def find_matching_rule(
     family_id: int,
     transaction_amount: Decimal = None,
 ) -> Optional[TransactionMappingRule]:
+    """
+    Finds the first matching rule for a given transaction description.
+    Ensures both the incoming string and the database rules are normalized for comparison.
+    Priority: Institution-specific rules first, then global rules. Within each, longest match first.
+    """
     if not raw_description:
         return None
 
-    description = normalize_text(raw_description)
-    if not description:
+    # 1. Normalize the incoming raw string from the PDF
+    clean_raw_desc = normalize_text(raw_description)
+    if not clean_raw_desc:
         return None
 
-    amount_filter = Q()
-    if transaction_amount is not None:
-        abs_amount = abs(Decimal(str(transaction_amount)))
-        amount_filter = (
-            (Q(min_amount__isnull=True) | Q(min_amount__lte=abs_amount))
-            & (Q(max_amount__isnull=True) | Q(max_amount__gte=abs_amount))
-        )
+    abs_amount = abs(Decimal(str(transaction_amount))) if transaction_amount is not None else None
 
-    institution_match = (
-        TransactionMappingRule.objects.filter(
-            institution_id=institution_id,
-            merchant__family_id=family_id
-        )
-        .filter(amount_filter)
-        .select_related('merchant', 'merchant__default_account')
-        .annotate(
-            desc=Value(description, output_field=CharField()),
-            clean_search_text=Trim('search_text'),
-            search_len=Length('clean_search_text'),
+    def get_match(rules_queryset):
+        # Prioritize by length of search text and presence of amount bounds
+        rules = rules_queryset.annotate(
+            search_len=Length('search_text'),
             has_amount_bounds=Case(
                 When(Q(min_amount__isnull=False) | Q(max_amount__isnull=False), then=Value(1)),
                 default=Value(0),
                 output_field=IntegerField(),
             ),
-        )
-        .filter(desc__icontains=F('clean_search_text'))
-        .order_by('-search_len', '-has_amount_bounds', '-clean_search_text')
-        .first()
-    )
-    if institution_match:
-        return institution_match
+        ).order_by('-search_len', '-has_amount_bounds', '-search_text')
 
-    return (
-        TransactionMappingRule.objects.filter(
-            institution__isnull=True,
-            merchant__family_id=family_id
-        )
-        .filter(amount_filter)
-        .select_related('merchant', 'merchant__default_account')
-        .annotate(
-            desc=Value(description, output_field=CharField()),
-            clean_search_text=Trim('search_text'),
-            search_len=Length('clean_search_text'),
-            has_amount_bounds=Case(
-                When(Q(min_amount__isnull=False) | Q(max_amount__isnull=False), then=Value(1)),
-                default=Value(0),
-                output_field=IntegerField(),
-            ),
-        )
-        .filter(desc__icontains=F('clean_search_text'))
-        .order_by('-search_len', '-has_amount_bounds', '-clean_search_text')
-        .first()
-    )
+        for rule in rules:
+            if not rule.search_text:
+                continue
+            
+            # DB search_text is already normalized via save(), but we lower() for safety
+            if rule.search_text.lower() in clean_raw_desc:
+                # Verify amount bounds if present
+                if abs_amount is not None:
+                    if rule.min_amount is not None and abs_amount < rule.min_amount:
+                        continue
+                    if rule.max_amount is not None and abs_amount > rule.max_amount:
+                        continue
+                return rule
+        return None
+
+    # 2. Try institution-specific rules first
+    institution_rules = TransactionMappingRule.objects.filter(
+        institution_id=institution_id,
+        merchant__family_id=family_id
+    ).select_related('merchant', 'merchant__default_account')
+    
+    match = get_match(institution_rules)
+    if match:
+        return match
+
+    # 3. Fallback to global rules
+    global_rules = TransactionMappingRule.objects.filter(
+        institution__isnull=True,
+        merchant__family_id=family_id
+    ).select_related('merchant', 'merchant__default_account')
+    
+    return get_match(global_rules)
 
 class SyncMerchantHistoryService:
     @staticmethod

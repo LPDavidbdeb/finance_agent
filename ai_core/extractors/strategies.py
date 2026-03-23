@@ -7,7 +7,7 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
     def tabula_parameters(self) -> dict:
         return {'pages': 'all', 'stream': True}
 
-    def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> pd.DataFrame:
+    def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> tuple[pd.DataFrame, bool]:
         df.columns = [str(x).upper() for x in df.columns]
 
         header_found = False
@@ -23,7 +23,7 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
                     break
 
         if not header_found:
-            return pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier'])
+            return pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier']), False
 
         df_clean = df.copy()
         date_pattern = r'^(\d{2})\s(\d{2})'
@@ -63,7 +63,7 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
         df_clean['amount'] = parsed_amount * np.where(has_cr | has_minus, -1, 1)
         df_clean['account_identifier'] = 'CREDIT_CARD'
 
-        return df_clean[['date', 'description', 'amount', 'account_identifier']].dropna(subset=['date', 'amount'])
+        return df_clean[['date', 'description', 'amount', 'account_identifier']].dropna(subset=['date', 'amount']), False
 
 
 class MasterCardWealthSimpleExtractor(BasePDFExtractor):
@@ -101,7 +101,7 @@ class MasterCardWealthSimpleExtractor(BasePDFExtractor):
             df[col_name] = amount_list
         return df
 
-    def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> pd.DataFrame:
+    def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> tuple[pd.DataFrame, bool]:
         if len(df.columns) == 4:
             if df.columns.to_list() == ['Activity - Current period', 'Unnamed: 0', 'Unnamed: 1', 'Unnamed: 2']:
                 date_operation_desc_execution_list = df['Activity - Current period'][1:].to_list()
@@ -125,7 +125,7 @@ class MasterCardWealthSimpleExtractor(BasePDFExtractor):
                 temp_df['amount'] = temp_df['Credit ($)'] - temp_df['Charged ($)']
                 temp_df['description'] = temp_df['Description']
                 temp_df['account_identifier'] = 'SAVINGS'
-                return temp_df[['date', 'description', 'amount', 'account_identifier']].dropna(subset=['date'])
+                return temp_df[['date', 'description', 'amount', 'account_identifier']].dropna(subset=['date']), False
             else:
                 col_name = ["DATE", "DESCRIPTION", "AMOUNT", "BALANCE"]
                 first = pd.DataFrame({k: [v] for k, v in zip(col_name, df.columns.to_list())})
@@ -140,7 +140,7 @@ class MasterCardWealthSimpleExtractor(BasePDFExtractor):
                 stacked_df['description'] = stacked_df['DESCRIPTION']
                 stacked_df['date'] = stacked_df['DATE']
                 stacked_df['account_identifier'] = 'SAVINGS'
-                return stacked_df[['date', 'description', 'amount', 'account_identifier']].dropna(subset=['date'])
+                return stacked_df[['date', 'description', 'amount', 'account_identifier']].dropna(subset=['date']), False
 
         elif len(df.columns) == 5:
             col_name = ["DATE", "POSTED DATE", "DESCRIPTION", "AMOUNT", "BALANCE"]
@@ -156,9 +156,9 @@ class MasterCardWealthSimpleExtractor(BasePDFExtractor):
             df['amount'] = df['CREDIT'] - df['DEBIT']
             df['description'] = df['DESCRIPTION']
             df['account_identifier'] = 'SAVINGS'
-            return df[['date', 'description', 'amount', 'account_identifier']].dropna(subset=['date'])
+            return df[['date', 'description', 'amount', 'account_identifier']].dropna(subset=['date']), False
 
-        return pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier'])
+        return pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier']), False
 
 
 class CompteDesjardinsExtractor(BasePDFExtractor):
@@ -167,8 +167,11 @@ class CompteDesjardinsExtractor(BasePDFExtractor):
 
     def to_date(self, date_str, statement_year, statement_month):
         from datetime import datetime
-        date_dict = {"MAI": 5, 'JUN': 6, 'JUL': 7, 'AOU': 8, 'SEP': 9, 'OCT': 10,
-                     'NOV': 11, 'DEC': 12, 'JAN': 1, "FEV": 2, "MAR": 3, "AVR": 4}
+        date_dict = {
+            "MAI": 5, 'JUN': 6, 'JUL': 7, 'AOU': 8, 'SEP': 9, 'OCT': 10,
+            'NOV': 11, 'DEC': 12, 'JAN': 1, "FEV": 2, "MAR": 3, "AVR": 4,
+            "JUIN": 6, "JUIL": 7, "AOÛT": 8, "SEPT": 9, "FÉV": 2
+        }
 
         if isinstance(date_str, str) and date_str != "":
             d_m = date_str.split()
@@ -315,7 +318,7 @@ class CompteDesjardinsExtractor(BasePDFExtractor):
         )
         return df_dyn[['date', 'description', 'amount', 'account_identifier']]
 
-    def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> pd.DataFrame:
+    def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> tuple[pd.DataFrame, bool]:
         import logging
         logger = logging.getLogger(__name__)
 
@@ -335,9 +338,11 @@ class CompteDesjardinsExtractor(BasePDFExtractor):
         legacy_sum = df_legacy['amount'].sum() if not df_legacy.empty else 0
         dynamic_sum = df_dynamic['amount'].sum() if not df_dynamic.empty else 0
 
+        mismatch = False
         if legacy_count != dynamic_count or abs(legacy_sum - dynamic_sum) > 0.01:
             logger.warning(f"SHADOW MODE MISMATCH: Legacy found {legacy_count} rows (Sum: {legacy_sum}), Dynamic found {dynamic_count} rows (Sum: {dynamic_sum}).")
+            mismatch = True
         else:
             logger.info("SHADOW MODE MATCH: Both extractors yielded identical high-level results.")
 
-        return df_legacy
+        return df_legacy, mismatch

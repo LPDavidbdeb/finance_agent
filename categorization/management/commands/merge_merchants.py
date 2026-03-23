@@ -47,10 +47,10 @@ class Command(BaseCommand):
             rules.update(merchant=target_merchant)
 
             # 3. Historical Cleanup (StagedTransactions)
-            # Find transactions where clean_description exactly matches the names of the source merchants
-            txs = StagedTransaction.objects.filter(clean_description__in=source_names)
+            # Find transactions linked to the source merchants
+            txs = StagedTransaction.objects.filter(merchant_id__in=source_ids)
             tx_count = txs.count()
-            txs.update(clean_description=target_merchant.name)
+            txs.update(merchant=target_merchant)
 
             # 4. Deletion
             deleted_count = source_merchants.count()

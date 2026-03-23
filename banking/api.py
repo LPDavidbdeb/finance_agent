@@ -4,6 +4,7 @@ from ninja.files import UploadedFile
 from ninja_jwt.authentication import JWTAuth
 from typing import List, Optional
 from datetime import date
+import hashlib
 from django.shortcuts import get_object_or_404
 from django.db.models import ProtectedError, Count
 from django.db.models.functions import TruncMonth
@@ -103,15 +104,23 @@ def create_product(request, payload: FinancialProductIn):
 
 @router.post("/products/{product_id}/statements/upload", response=StatementUploadOut)
 def upload_statement(request, product_id: int, file: File[UploadedFile], document_date: Optional[date] = Form(None)):
-    """Stores a bank statement and triggers Celery extraction pipeline."""
+    """Stores a bank statement, blocks duplicate files, and triggers Celery extraction pipeline."""
     from banking.tasks import extract_transactions_task
 
     user = request.auth
     product = get_object_or_404(FinancialProduct, id=product_id, family=user.family)
 
+    file_content = file.read()
+    file_hash = hashlib.sha256(file_content).hexdigest()
+    file.seek(0)
+
+    if BankStatementImport.objects.filter(file_hash=file_hash).exists():
+        raise HttpError(409, "This specific PDF has already been uploaded to the system.")
+
     statement = BankStatementImport.objects.create(
         financial_product=product,
         file=file,
+        file_hash=file_hash,
         document_date=document_date,
         status=BankStatementImport.Status.STAGED,
         processed_by_ai=False,
