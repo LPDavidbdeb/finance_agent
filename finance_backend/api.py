@@ -2,6 +2,7 @@ from ninja import NinjaAPI, Router, errors
 from ninja_jwt.controller import NinjaJWTDefaultController
 from ninja_jwt.routers.obtain import obtain_pair_router
 from ninja_jwt.authentication import JWTAuth
+from django.conf import settings
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
 from django.shortcuts import get_object_or_404
@@ -12,7 +13,11 @@ from .schemas import AccountSchema, AccountMoveIn, StagedTransactionSchema, Jour
 from accounting.models import Account, JournalEntry, TransactionLine
 from banking.models import StagedTransaction
 
-api = NinjaAPI(title="Finance Headless API", auth=JWTAuth())
+api = NinjaAPI(
+    title="Finance Headless API",
+    auth=JWTAuth(),
+    docs_url="/docs" if settings.DEBUG else None,
+)
 
 api.add_router("/auth/", obtain_pair_router, auth=None)
 api.add_router("/users/", "users.api.router")

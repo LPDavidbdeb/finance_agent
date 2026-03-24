@@ -95,8 +95,8 @@ class Command(BaseCommand):
             
             # Reset statement statuses to allow re-processing
             with transaction.atomic():
-                stmt_reset = BankStatementImport.objects.filter(financial_product__family=family).update(status='PENDING', validation_errors=None)
-                self.stdout.write(f"    - Reset {stmt_reset} BankStatementImports to PENDING")
+                stmt_reset = BankStatementImport.objects.filter(financial_product__family=family).update(status=BankStatementImport.Status.STAGED, validation_errors=None)
+                self.stdout.write(f"    - Reset {stmt_reset} BankStatementImports to STAGED")
 
         elapsed = time.time() - start_time
         self.stdout.write(self.style.SUCCESS(f"\nRESET COMPLETE in {elapsed:.2f}s"))

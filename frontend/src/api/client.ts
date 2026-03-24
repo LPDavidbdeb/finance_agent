@@ -36,6 +36,14 @@ export async function fetchSpendingByCategory(startDate: string, endDate: string
   return res.json();
 }
 
+export async function fetchAvailableYears() {
+  const res = await fetch(`${API_URL}/accounting/available-years`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch available years");
+  return res.json();
+}
+
 export async function fetchAnnualStatements(year: number) {
   const res = await fetch(`${API_URL}/accounting/annual-statements?year=${year}`, {
     headers: getAuthHeader(),

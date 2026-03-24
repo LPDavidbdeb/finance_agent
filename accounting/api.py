@@ -812,3 +812,23 @@ def get_annual_statements(request, year: int):
             "check": float(assets + liabilities + equity) # Should be zero
         }
     }
+
+@router.get("/available-years")
+def get_available_years(request):
+    """
+    Returns a list of years that have transaction data.
+    Dynamically sources from the transaction dates in the database.
+    """
+    user = request.auth
+    family = user.family
+
+    # Get all years from JournalEntry table for this family
+    years = JournalEntry.objects.filter(family=family).dates('date', 'year')
+    available_years = sorted(set([year.year for year in years]), reverse=True)
+
+    # If no data, return current year as default
+    if not available_years:
+        from datetime import date as date_class
+        available_years = [date_class.today().year]
+
+    return {"available_years": available_years}

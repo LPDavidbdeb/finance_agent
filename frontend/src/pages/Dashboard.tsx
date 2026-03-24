@@ -5,7 +5,8 @@ import {
   fetchSpendingByCategory,
   fetchAnnualStatements,
   fetchDimensionDetail,
-  fetchDimensionEvolution
+  fetchDimensionEvolution,
+  fetchAvailableYears
 } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -26,6 +27,7 @@ export const Dashboard: React.FC = () => {
 
   // Global Controls
   const currentYear = new Date().getFullYear();
+  const [availableYears, setAvailableYears] = useState<number[]>([currentYear]);
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [selectedInterval, setSelectedInterval] = useState<'monthly' | 'bi-weekly'>('monthly');
   const [activeDimension, setActiveDimension] = useState<Dimension>('expenses');
@@ -41,6 +43,31 @@ export const Dashboard: React.FC = () => {
   // Drill-down State
   const [isDrillDownOpen, setIsDrillDownOpen] = useState(false);
   const [drillDownPeriod, setDrillDownPeriod] = useState('');
+
+  // Load available years on mount
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigate('/login');
+      return;
+    }
+
+    const loadYears = async () => {
+      try {
+        const data = await fetchAvailableYears();
+        setAvailableYears(data.available_years);
+        // Set selected year to the most recent year with data
+        if (data.available_years.length > 0) {
+          setSelectedYear(data.available_years[0]);
+        }
+      } catch (err) {
+        console.error('Failed to load available years:', err);
+        // Fall back to current year
+        setAvailableYears([currentYear]);
+      }
+    };
+
+    loadYears();
+  }, [isAuthenticated, navigate]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -179,7 +206,7 @@ export const Dashboard: React.FC = () => {
               onChange={(e) => setSelectedYear(parseInt(e.target.value))}
               className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-black text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
             >
-              {[currentYear, currentYear - 1, currentYear - 2].map(y => (
+              {availableYears.map(y => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>

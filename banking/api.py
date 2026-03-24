@@ -110,7 +110,10 @@ def upload_statement(request, product_id: int, file: File[UploadedFile], documen
     user = request.auth
     product = get_object_or_404(FinancialProduct, id=product_id, family=user.family)
 
+    # Validate the file is a PDF by checking its magic bytes
     file_content = file.read()
+    if not file_content.startswith(b'%PDF'):
+        raise HttpError(400, "Only PDF files are accepted.")
     file_hash = hashlib.sha256(file_content).hexdigest()
     file.seek(0)
 
