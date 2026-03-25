@@ -119,6 +119,16 @@ class BannerTransactionOut(Schema):
     routed_to_id: int
     statement_id: Optional[int] = None
 
+class AccountTransactionOut(Schema):
+    journal_entry_id: int
+    date: date
+    description: str
+    amount: float
+    source_account: str
+    routed_to: str
+    routed_to_id: int
+    institution_id: Optional[int] = None
+
 class RerouteIn(Schema):
     new_account_id: int
 

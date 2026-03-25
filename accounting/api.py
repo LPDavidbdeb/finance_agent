@@ -12,7 +12,8 @@ import numpy as np
 from .models import Account, TransactionLine, JournalEntry
 from .schemas import (
     AccountDetailOut, DimensionBreakdownOut, AccountCreateIn, AccountOut,
-    DrillDownOut, DrillDownBannerOut, BannerTransactionOut, RerouteIn, FlatAccountOut
+    DrillDownOut, DrillDownBannerOut, BannerTransactionOut, RerouteIn, FlatAccountOut,
+    AccountTransactionOut
 )
 from categorization.models import Merchant
 
@@ -443,6 +444,56 @@ def reroute_journal_entry(request, entry_id: int, payload: RerouteIn):
         'routed_to_id': new_account.id,
         'statement_id': statement_id,
     }
+
+
+@router.get("/accounts/{account_id}/journal-entries", response=List[AccountTransactionOut])
+def get_account_transactions(request, account_id: int, year: Optional[int] = None):
+    """
+    Returns all journal entries where any line touches this account or its descendants.
+    Used to power the transaction review section on the account detail page.
+    """
+    from banking.models import FinancialProduct
+
+    user = request.auth
+    family = user.family
+    account = get_object_or_404(Account, id=account_id, family=family)
+    descendants = account.get_descendants(include_self=True)
+
+    qs = JournalEntry.objects.filter(
+        family=family,
+        lines__account__in=descendants,
+    )
+    if year:
+        qs = qs.filter(date__year=year)
+
+    entries = qs.distinct().prefetch_related('lines__account').order_by('-date')[:500]
+
+    fp_account_map = {
+        fp.account_id: fp.institution_id
+        for fp in FinancialProduct.objects.filter(family=family)
+    }
+    fp_account_ids = set(fp_account_map.keys())
+    descendant_ids = set(descendants.values_list('id', flat=True))
+
+    results = []
+    for entry in entries:
+        lines = list(entry.lines.all())
+        source_line = next((l for l in lines if l.account_id in fp_account_ids), None)
+        category_line = next((l for l in lines if l.account_id in descendant_ids), None)
+        if not category_line:
+            continue
+        results.append({
+            'journal_entry_id': entry.id,
+            'date': entry.date,
+            'description': entry.description or '—',
+            'amount': abs(float(category_line.amount)),
+            'source_account': source_line.account.name if source_line else '—',
+            'routed_to': category_line.account.name,
+            'routed_to_id': category_line.account_id,
+            'institution_id': fp_account_map.get(source_line.account_id) if source_line else None,
+        })
+
+    return results
 
 
 @router.get("/accounts-flat", response=List[FlatAccountOut])

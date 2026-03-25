@@ -118,9 +118,14 @@ class SyncMerchantHistoryService:
             reconciled_txs = txs.filter(status='RECONCILED', journal_entry__isnull=False).select_related('journal_entry')
             
             for tx in reconciled_txs:
-                # Durable Anchoring: We search for lines in the JE that belong to the family 
+                je = tx.journal_entry
+                # Update JE description to reflect the merchant name
+                if je.description != merchant.name:
+                    je.description = merchant.name
+                    je.save(update_fields=['description'])
+                # Durable Anchoring: We search for lines in the JE that belong to the family
                 # and are NOT bank accounts (REVENUE/EXPENSE)
-                lines = tx.journal_entry.lines.all()
+                lines = je.lines.all()
                 for line in lines:
                     # We check if it's a category line (not linked to a financial product)
                     if not hasattr(line.account, 'financial_product'):

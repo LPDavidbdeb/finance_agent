@@ -1,6 +1,6 @@
 import time
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
+from django.db import transaction, connection
 from users.models import Family
 from banking.models import StagedTransaction, BankStatementImport
 from accounting.models import JournalEntry, TransactionLine
@@ -97,6 +97,20 @@ class Command(BaseCommand):
             with transaction.atomic():
                 stmt_reset = BankStatementImport.objects.filter(financial_product__family=family).update(status=BankStatementImport.Status.STAGED, validation_errors=None)
                 self.stdout.write(f"    - Reset {stmt_reset} BankStatementImports to STAGED")
+
+        # Reset primary key sequences so IDs start from 1 on the next insert
+        sequences = [
+            ('accounting_journalentry', 'id'),
+            ('accounting_transactionline', 'id'),
+            ('banking_stagedtransaction', 'id'),
+        ]
+        with connection.cursor() as cursor:
+            for table, col in sequences:
+                cursor.execute(
+                    f"SELECT setval(pg_get_serial_sequence(%s, %s), 1, false)",
+                    [table, col]
+                )
+        self.stdout.write("  - Reset PK sequences for JournalEntry, TransactionLine, StagedTransaction")
 
         elapsed = time.time() - start_time
         self.stdout.write(self.style.SUCCESS(f"\nRESET COMPLETE in {elapsed:.2f}s"))

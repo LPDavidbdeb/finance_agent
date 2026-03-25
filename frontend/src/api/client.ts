@@ -68,6 +68,13 @@ export async function fetchDrillDown(slug: string, period: string) {
   return res.json();
 }
 
+export async function fetchAccountTransactions(accountId: number, year?: number) {
+  const url = `${API_URL}/accounting/accounts/${accountId}/journal-entries${year ? `?year=${year}` : ''}`;
+  const res = await fetch(url, { headers: getAuthHeader() });
+  if (!res.ok) throw new Error("Failed to fetch account transactions");
+  return res.json();
+}
+
 export async function fetchAccountsFlat() {
   const res = await fetch(`${API_URL}/accounting/accounts-flat`, {
     headers: getAuthHeader(),
@@ -540,6 +547,26 @@ export async function createAndApplyRule(data: {
   }
 
   return res.json();
+}
+
+export async function deleteRule(ruleId: number) {
+  const res = await fetch(`${API_URL}/categorization/rules/${ruleId}`, {
+    method: "DELETE",
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to delete rule");
+  }
+  return res.json();
+}
+
+export async function fetchRuleStats(ruleId: number) {
+  const res = await fetch(`${API_URL}/categorization/rules/${ruleId}/stats`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch rule stats");
+  return res.json() as Promise<{ yearly: { year: number; total: number; count: number }[] }>;
 }
 
 export async function fetchStagedTransactions(productId: number) {

@@ -7,7 +7,7 @@ from ninja_jwt.authentication import JWTAuth
 from typing import List
 from datetime import date
 
-from .schemas import RuleCreateAndApplyIn, MerchantOut, MerchantUpdateIn, MerchantDetailOut, MerchantMergeIn, MerchantStatsOut
+from .schemas import RuleCreateAndApplyIn, MerchantOut, MerchantUpdateIn, MerchantDetailOut, MerchantMergeIn, MerchantStatsOut, RuleStatsOut
 from .models import TransactionMappingRule, Merchant
 from .services import find_matching_rule, update_merchant_category
 from banking.models import StagedTransaction
@@ -121,12 +121,209 @@ def create_and_apply_mapping_rule(request, payload: RuleCreateAndApplyIn):
             tx.save()
             updated_count += 1 # We still "updated" it with metadata
         
+    # 8. Retrofit already-RECONCILED transactions matching the search text
+    if can_auto_approve:
+        reconciled_qs = StagedTransaction.objects.filter(
+            statement_import__financial_product__family=user.family,
+            status=StagedTransaction.Status.RECONCILED,
+            journal_entry__isnull=False,
+            raw_description__icontains=clean_search_text
+        )
+        if payload.institution_id:
+            reconciled_qs = reconciled_qs.filter(
+                statement_import__financial_product__institution_id=payload.institution_id
+            )
+
+        # Resolve target account to a family-owned one
+        target_account = merchant.default_account
+        if target_account.family_id != user.family_id:
+            resolved = Account.objects.filter(name=target_account.name, family=user.family).first()
+            if resolved:
+                target_account = resolved
+
+        reconciled_list = reconciled_qs.select_related('journal_entry').prefetch_related(
+            'journal_entry__lines__account'
+        )
+        for staged_tx in reconciled_list:
+            # Verify the canonical engine selects this rule for this tx too
+            matched = find_matching_rule(
+                staged_tx.raw_description,
+                staged_tx.statement_import.financial_product.institution_id,
+                family_id,
+                transaction_amount=staged_tx.amount
+            )
+            if not matched or matched.id != rule.id:
+                continue
+
+            # Link the staged tx to this merchant so history stays consistent
+            staged_tx.merchant = merchant
+            staged_tx.predicted_account = target_account
+            staged_tx.save(update_fields=['merchant', 'predicted_account'])
+
+            # Re-route the category leg + update JE description to merchant name
+            je = staged_tx.journal_entry
+            if je.description != merchant.name:
+                je.description = merchant.name
+                je.save(update_fields=['description'])
+            for line in je.lines.all():
+                if not hasattr(line.account, 'financial_product'):
+                    if line.account_id != target_account.id:
+                        line.account = target_account
+                        line.save()
+                        updated_count += 1
+                    break
+
     return {
-        "success": True, 
+        "success": True,
         "updated_count": updated_count,
         "rule_id": rule.id,
         "auto_approved": can_auto_approve
     }
+
+@router.delete("/rules/{rule_id}")
+@transaction.atomic
+def delete_mapping_rule(request, rule_id: int):
+    """
+    Deletes a mapping rule and reverts any transactions that were matched by it
+    back to Uncategorized Expenses.
+    """
+    user = request.auth
+    family = user.family
+
+    rule = get_object_or_404(
+        TransactionMappingRule,
+        id=rule_id,
+        merchant__family=family
+    )
+
+    search_text = rule.search_text
+    institution_id = rule.institution_id
+    min_amount = rule.min_amount
+    max_amount = rule.max_amount
+
+    # Find the family's Uncategorized Expenses account
+    uncategorized = Account.objects.filter(
+        family=family, name__iexact='Uncategorized Expenses'
+    ).first()
+
+    # Base queryset: staged transactions whose raw description matches this rule
+    base_qs = StagedTransaction.objects.filter(
+        statement_import__financial_product__family=family,
+        raw_description__icontains=search_text
+    )
+    if institution_id:
+        base_qs = base_qs.filter(
+            statement_import__financial_product__institution_id=institution_id
+        )
+    if min_amount is not None:
+        from django.db.models.functions import Abs as DbAbs
+        base_qs = base_qs.filter(amount__isnull=False)
+    # Amount filtering is done in Python below (mirrors find_matching_rule logic)
+
+    # 1. Revert UNPROCESSED staged transactions — clear merchant + predicted_account
+    unprocessed = base_qs.filter(status=StagedTransaction.Status.UNPROCESSED)
+    for tx in unprocessed:
+        # Only revert if this rule would have been the one to match
+        from decimal import Decimal as Dec
+        abs_amt = abs(Dec(str(tx.amount))) if tx.amount is not None else None
+        if min_amount is not None and abs_amt is not None and abs_amt < min_amount:
+            continue
+        if max_amount is not None and abs_amt is not None and abs_amt > max_amount:
+            continue
+        tx.merchant = None
+        tx.predicted_account = None
+        tx.save(update_fields=['merchant', 'predicted_account'])
+
+    # 2. Revert RECONCILED staged transactions — re-route JournalEntry to Uncategorized
+    if uncategorized:
+        reconciled = base_qs.filter(
+            status=StagedTransaction.Status.RECONCILED,
+            journal_entry__isnull=False
+        ).select_related('journal_entry').prefetch_related('journal_entry__lines__account')
+
+        for tx in reconciled:
+            from decimal import Decimal as Dec
+            abs_amt = abs(Dec(str(tx.amount))) if tx.amount is not None else None
+            if min_amount is not None and abs_amt is not None and abs_amt < min_amount:
+                continue
+            if max_amount is not None and abs_amt is not None and abs_amt > max_amount:
+                continue
+            for line in tx.journal_entry.lines.all():
+                if not hasattr(line.account, 'financial_product'):
+                    if line.account_id != uncategorized.id:
+                        line.account = uncategorized
+                        line.save()
+                    break
+
+    rule.delete()
+    return {"success": True}
+
+
+@router.get("/rules/{rule_id}/stats", response=RuleStatsOut)
+def get_rule_stats(request, rule_id: int):
+    """
+    Returns yearly totals for RECONCILED transactions matched by a specific rule.
+    Uses the merchant FK as the primary anchor (same as total-volume stat), then
+    narrows down by institution and amount bounds so multi-rule merchants show
+    per-rule breakdowns correctly.
+    """
+    from django.db.models import Sum, Count
+    from django.db.models.functions import ExtractYear, Abs as DbAbs
+    from decimal import Decimal as Dec
+    user = request.auth
+    family = user.family
+
+    rule = get_object_or_404(
+        TransactionMappingRule,
+        id=rule_id,
+        merchant__family=family
+    )
+
+    # Primary filter: merchant FK — reliable even when raw_description has accents/encoding variants
+    qs = StagedTransaction.objects.filter(
+        merchant=rule.merchant,
+        statement_import__financial_product__family=family,
+        status=StagedTransaction.Status.RECONCILED,
+    )
+    if rule.institution_id:
+        qs = qs.filter(statement_import__financial_product__institution_id=rule.institution_id)
+
+    # If no amount bounds and only one rule for this merchant, aggregate directly in the DB
+    merchant_rule_count = TransactionMappingRule.objects.filter(merchant=rule.merchant).count()
+    has_bounds = rule.min_amount is not None or rule.max_amount is not None
+
+    if not has_bounds and merchant_rule_count == 1:
+        rows = qs.annotate(year=ExtractYear('bank_date')).values('year').annotate(
+            total=Sum(DbAbs('amount')),
+            count=Count('id')
+        ).order_by('year')
+        return {'yearly': [
+            {'year': r['year'], 'total': float(r['total']), 'count': r['count']}
+            for r in rows
+        ]}
+
+    # Multi-rule merchant or amount-bounded rule: filter in Python via canonical engine
+    by_year: dict = {}
+    for tx in qs.order_by('bank_date'):
+        matched = find_matching_rule(
+            tx.raw_description,
+            tx.statement_import.financial_product.institution_id,
+            family.id,
+            transaction_amount=tx.amount,
+        )
+        if not matched or matched.id != rule.id:
+            continue
+        yr = tx.bank_date.year
+        if yr not in by_year:
+            by_year[yr] = {'total': Dec('0'), 'count': 0}
+        by_year[yr]['total'] += abs(tx.amount)
+        by_year[yr]['count'] += 1
+
+    return {'yearly': [
+        {'year': yr, 'total': float(data['total']), 'count': data['count']}
+        for yr, data in sorted(by_year.items())
+    ]}
+
 
 @router.get("/merchants", response=List[MerchantOut])
 def list_merchants(request):

@@ -5,24 +5,28 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
-import { 
-  fetchMerchantDetail, 
-  updateMerchant, 
-  mergeMerchants, 
-  fetchMerchants, 
-  fetchMerchantStats 
+import {
+  fetchMerchantDetail,
+  updateMerchant,
+  mergeMerchants,
+  fetchMerchants,
+  fetchMerchantStats,
+  deleteRule,
+  fetchRuleStats,
 } from '../api/client';
 import { AccountTree } from '../components/AccountTree';
 import { useToast } from '../components/ui/use-toast';
-import { 
-  Loader2, Edit2, Check, X, ArrowLeft, Merge, Trash2, Tag, 
-  History, DollarSign, TrendingUp, Calendar 
+import {
+  Loader2, Edit2, Check, X, ArrowLeft, Merge, Trash2, Tag,
+  History, DollarSign, TrendingUp, Calendar, ChevronRight
 } from 'lucide-react';
 
 interface MappingRule {
   id: number;
   search_text: string;
   institution_name: string;
+  min_amount?: number;
+  max_amount?: number;
 }
 
 interface MerchantDetail {
@@ -49,6 +53,15 @@ export const MerchantDetail: React.FC = () => {
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Rule deletion state
+  const [deletingRuleId, setDeletingRuleId] = useState<number | null>(null);
+
+  // Rule stats state
+  const [expandedRuleId, setExpandedRuleId] = useState<number | null>(null);
+  const [ruleStats, setRuleStats] = useState<Record<number, { year: number; total: number; count: number }[] | null>>({});
+  const [ruleStatsError, setRuleStatsError] = useState<Record<number, string>>({});
+  const [loadingRuleStats, setLoadingRuleStats] = useState<number | null>(null);
 
   // Rename state
   const [isRenaming, setIsRenaming] = useState(false);
@@ -133,6 +146,42 @@ export const MerchantDetail: React.FC = () => {
       toast({ variant: "destructive", title: "Update failed", description: err.message });
     } finally {
       setCategoryLoading(false);
+    }
+  };
+
+  const handleToggleRuleStats = async (ruleId: number) => {
+    if (expandedRuleId === ruleId) {
+      setExpandedRuleId(null);
+      return;
+    }
+    setExpandedRuleId(ruleId);
+    // Only fetch if not already loaded (null = never fetched, undefined key = never fetched)
+    if (ruleStats[ruleId] === undefined) {
+      setLoadingRuleStats(ruleId);
+      try {
+        const data = await fetchRuleStats(ruleId);
+        setRuleStats(prev => ({ ...prev, [ruleId]: data.yearly }));
+      } catch (err: any) {
+        console.error(`Failed to load stats for rule ${ruleId}:`, err);
+        setRuleStatsError(prev => ({ ...prev, [ruleId]: err.message || 'Failed to load' }));
+        setRuleStats(prev => ({ ...prev, [ruleId]: null }));
+      } finally {
+        setLoadingRuleStats(null);
+      }
+    }
+  };
+
+  const handleDeleteRule = async (ruleId: number) => {
+    if (!window.confirm('Delete this rule? All transactions matched by it will be re-routed to Uncategorized Expenses.')) return;
+    setDeletingRuleId(ruleId);
+    try {
+      await deleteRule(ruleId);
+      toast({ title: "Rule deleted", description: "Matched transactions have been moved to Uncategorized Expenses." });
+      if (merchant) loadData(merchant.id);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Delete failed", description: err.message });
+    } finally {
+      setDeletingRuleId(null);
     }
   };
 
@@ -348,17 +397,92 @@ export const MerchantDetail: React.FC = () => {
                 <tr>
                   <th className="px-6 py-3 text-left font-medium text-slate-500 uppercase tracking-wider">Search Pattern</th>
                   <th className="px-6 py-3 text-left font-medium text-slate-500 uppercase tracking-wider">Institution</th>
+                  <th className="px-6 py-3 text-left font-medium text-slate-500 uppercase tracking-wider">Amount Range</th>
+                  <th className="px-6 py-3"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {merchant.mapping_rules.length === 0 && (
-                  <tr><td colSpan={2} className="px-6 py-10 text-center text-slate-400 italic">No rules defined.</td></tr>
+                  <tr><td colSpan={4} className="px-6 py-10 text-center text-slate-400 italic">No rules defined.</td></tr>
                 )}
                 {merchant.mapping_rules.map(rule => (
-                  <tr key={rule.id}>
-                    <td className="px-6 py-4 font-mono text-xs text-slate-700">{rule.search_text}</td>
-                    <td className="px-6 py-4 text-slate-600">{rule.institution_name}</td>
-                  </tr>
+                  <React.Fragment key={rule.id}>
+                    <tr
+                      className="hover:bg-blue-50/30 cursor-pointer group transition-colors"
+                      onClick={() => handleToggleRuleStats(rule.id)}
+                    >
+                      <td className="px-6 py-4 font-mono text-xs text-slate-700 flex items-center gap-2">
+                        <ChevronRight className={`h-3 w-3 text-slate-400 transition-transform ${expandedRuleId === rule.id ? 'rotate-90' : ''}`} />
+                        {rule.search_text}
+                      </td>
+                      <td className="px-6 py-4 text-slate-600">{rule.institution_name}</td>
+                      <td className="px-6 py-4 font-mono text-xs text-slate-500">
+                        {rule.min_amount != null || rule.max_amount != null ? (
+                          <span>
+                            {rule.min_amount != null ? `$${rule.min_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
+                            {' → '}
+                            {rule.max_amount != null ? `$${rule.max_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300 italic">any</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-4 text-right">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteRule(rule.id); }}
+                          disabled={deletingRuleId === rule.id}
+                          className="p-1.5 rounded hover:bg-red-50 text-slate-300 hover:text-red-500 transition-colors disabled:opacity-50"
+                          title="Delete rule"
+                        >
+                          {deletingRuleId === rule.id
+                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            : <Trash2 className="h-3.5 w-3.5" />}
+                        </button>
+                      </td>
+                    </tr>
+                    {expandedRuleId === rule.id && (
+                      <tr>
+                        <td colSpan={4} className="px-0 py-0 bg-slate-50 border-b border-blue-100">
+                          {loadingRuleStats === rule.id ? (
+                            <div className="flex items-center gap-2 px-10 py-4 text-slate-400 text-xs">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading...
+                            </div>
+                          ) : ruleStats[rule.id] === null ? (
+                            <p className="px-10 py-4 text-xs text-red-400 italic">
+                              {ruleStatsError[rule.id] || 'Failed to load stats.'}
+                            </p>
+                          ) : ruleStats[rule.id] === undefined ? (
+                            <div className="flex items-center gap-2 px-10 py-4 text-slate-400 text-xs">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading...
+                            </div>
+                          ) : (ruleStats[rule.id]!).length === 0 ? (
+                            <p className="px-10 py-4 text-xs text-slate-400 italic">No reconciled transactions found for this rule.</p>
+                          ) : (
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-slate-400 border-b border-slate-200">
+                                  <th className="px-10 py-2 text-left font-bold uppercase tracking-wider">Year</th>
+                                  <th className="px-4 py-2 text-center font-bold uppercase tracking-wider">Transactions</th>
+                                  <th className="px-6 py-2 text-right font-bold uppercase tracking-wider">Total</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {(ruleStats[rule.id]!).slice().sort((a, b) => b.year - a.year).map(row => (
+                                  <tr key={row.year} className="hover:bg-white transition-colors">
+                                    <td className="px-10 py-2.5 font-black text-slate-700">{row.year}</td>
+                                    <td className="px-4 py-2.5 text-center text-slate-500">{row.count}</td>
+                                    <td className="px-6 py-2.5 text-right font-mono font-black text-slate-900">
+                                      ${row.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>

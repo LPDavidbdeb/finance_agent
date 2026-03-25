@@ -28,6 +28,8 @@ class MappingRuleOut(Schema):
     id: int
     search_text: str
     institution_name: Optional[str] = None
+    min_amount: Optional[float] = None
+    max_amount: Optional[float] = None
 
     @staticmethod
     def resolve_institution_name(obj):
@@ -52,6 +54,14 @@ class MerchantDetailOut(Schema):
 class MerchantMergeIn(Schema):
     target_id: int
     source_ids: List[int]
+
+class RuleYearlyStatOut(Schema):
+    year: int
+    total: float
+    count: int
+
+class RuleStatsOut(Schema):
+    yearly: List[RuleYearlyStatOut]
 
 class MerchantStatsOut(Schema):
     total_amount: float
