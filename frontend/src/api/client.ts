@@ -68,6 +68,36 @@ export async function fetchDrillDown(slug: string, period: string) {
   return res.json();
 }
 
+export async function fetchAccountsFlat() {
+  const res = await fetch(`${API_URL}/accounting/accounts-flat`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch accounts");
+  return res.json();
+}
+
+export async function rerouteJournalEntry(entryId: number, newAccountId: number) {
+  const res = await fetch(`${API_URL}/accounting/journal-entries/${entryId}/reroute`, {
+    method: "PATCH",
+    headers: getAuthHeader(),
+    body: JSON.stringify({ new_account_id: newAccountId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to reroute transaction");
+  }
+  return res.json();
+}
+
+export async function fetchBannerTransactions(slug: string, period: string, banner: string) {
+  const res = await fetch(
+    `${API_URL}/accounting/reports/dimension/${slug}/banner-transactions?period=${period}&banner=${encodeURIComponent(banner)}`,
+    { headers: getAuthHeader() }
+  );
+  if (!res.ok) throw new Error("Failed to fetch banner transactions");
+  return res.json();
+}
+
 export async function runMaintenanceCommand(command: string, args: string[] = []) {
   const res = await fetch(`${API_URL}/maintenance/run-command`, {
     method: "POST",
@@ -356,6 +386,22 @@ export async function fetchProductStatements(productId: number) {
     throw new Error('Failed to fetch statements');
   }
 
+  return res.json();
+}
+
+export async function fetchStatementImport(importId: number) {
+  const res = await fetch(`${API_URL}/banking/statements/${importId}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch statement import");
+  return res.json();
+}
+
+export async function fetchStatementImportTransactions(importId: number) {
+  const res = await fetch(`${API_URL}/banking/statements/${importId}/transactions`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch statement transactions");
   return res.json();
 }
 

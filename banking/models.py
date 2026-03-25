@@ -71,7 +71,7 @@ class StagedTransaction(models.Model):
     amount = models.DecimalField(max_digits=15, decimal_places=2)
     unique_bank_id = models.CharField(max_length=255, null=True, blank=True)
     status = models.CharField(max_length=50, choices=Status.choices, default=Status.UNPROCESSED)
-    journal_entry = models.ForeignKey(JournalEntry, on_delete=models.SET_NULL, null=True, blank=True, related_name='staged_transactions')
+    journal_entry = models.ForeignKey(JournalEntry, on_delete=models.CASCADE, null=True, blank=True, related_name='staged_transactions')
     predicted_account = models.ForeignKey(
         'accounting.Account',
         on_delete=models.SET_NULL,

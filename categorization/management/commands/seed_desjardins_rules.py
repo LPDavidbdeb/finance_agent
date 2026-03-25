@@ -17,13 +17,13 @@ try:
 except ImportError:
     # Handle the file with space by using importlib
     import importlib.util
-    spec = importlib.util.spec_from_file_location("vd_categories", "vd categories.py")
+    spec = importlib.util.spec_from_file_location("vd_categories", "vd_categories.py")
     vd_cat_mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(vd_cat_mod)
     banniere_dict_vd_categories = vd_cat_mod.banniere_dict_vd_categories
 
 class Command(BaseCommand):
-    help = 'Seeds Desjardins-specific mapping rules from vd categories.py.'
+    help = 'Seeds Desjardins-specific mapping rules from vd_categories.py.'
 
     def handle(self, *args, **options):
         with transaction.atomic():

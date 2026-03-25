@@ -144,9 +144,26 @@ def list_product_statements(request, product_id: int):
     return BankStatementImport.objects.filter(financial_product=product).order_by("-upload_date")
 
 
+@router.get("/statements/{import_id}", response=StatementImportOut)
+def get_statement_import(request, import_id: int):
+    """Returns a specific statement import."""
+    user = request.auth
+    return get_object_or_404(BankStatementImport, id=import_id, financial_product__family=user.family)
+
+
+@router.get("/statements/{import_id}/transactions", response=List[StagedTransactionOut])
+def get_statement_import_transactions(request, import_id: int):
+    """Returns all transactions for a specific statement import."""
+    user = request.auth
+    statement = get_object_or_404(BankStatementImport, id=import_id, financial_product__family=user.family)
+    return StagedTransaction.objects.filter(
+        statement_import=statement
+    ).select_related('predicted_account', 'journal_entry').prefetch_related('journal_entry__lines__account').order_by("bank_date")
+
+
 @router.delete("/imports/{import_id}")
 def delete_statement_import(request, import_id: int):
-    """Deletes a statement import and all its staged transactions (via CASCADE)."""
+    """Deletes a statement import, its staged transactions, and its journal entries via CASCADE."""
     user = request.auth
     statement = get_object_or_404(BankStatementImport, id=import_id, financial_product__family=user.family)
     statement.delete()

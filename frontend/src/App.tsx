@@ -17,6 +17,7 @@ const MerchantManager = lazy(() => import('./pages/MerchantManager').then(module
 const MerchantDetail = lazy(() => import('./pages/MerchantDetail').then(module => ({ default: module.MerchantDetail })));
 const AccountDetail = lazy(() => import('./pages/AccountDetail').then(module => ({ default: module.AccountDetail })));
 const DimensionDetail = lazy(() => import('./pages/DimensionDetail').then(module => ({ default: module.DimensionDetail })));
+const StatementDetail = lazy(() => import('./pages/StatementDetail').then(module => ({ default: module.StatementDetail })));
 const MaintenancePage = lazy(() => import('./pages/MaintenancePage').then(module => ({ default: module.MaintenancePage })));
 
 // Lazy-load complex shared components
@@ -50,6 +51,7 @@ function App() {
                 <Route path="/dashboard/merchants/:id" element={<MerchantDetail />} />
                 <Route path="/dashboard/accounts/:id" element={<AccountDetail />} />
                 <Route path="/dashboard/dimension/:slug" element={<DimensionDetail />} />
+                <Route path="/dashboard/statements/:id" element={<StatementDetail />} />
                 <Route path="/maintenance" element={<MaintenancePage />} />
                 <Route path="/settings/banks" element={<InstitutionManager />} />
                 <Route path="/ledger" element={<AccountTree />} />

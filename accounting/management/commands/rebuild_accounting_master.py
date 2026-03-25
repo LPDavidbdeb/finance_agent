@@ -57,7 +57,8 @@ class Command(BaseCommand):
                 },
                 'Expenses': {
                     'Essential': ['Groceries', 'Utilities', 'Rent/Mortgage'],
-                    'Discretionary': ['Restaurant Meals', 'Entertainment', 'Clothing']
+                    'Discretionary': ['Restaurant Meals', 'Entertainment', 'Clothing'],
+                    'Uncategorized Expenses': [],
                 }
             }
 

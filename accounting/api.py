@@ -12,7 +12,7 @@ import numpy as np
 from .models import Account, TransactionLine, JournalEntry
 from .schemas import (
     AccountDetailOut, DimensionBreakdownOut, AccountCreateIn, AccountOut,
-    DrillDownOut, DrillDownBannerOut
+    DrillDownOut, DrillDownBannerOut, BannerTransactionOut, RerouteIn, FlatAccountOut
 )
 from categorization.models import Merchant
 
@@ -349,6 +349,116 @@ def get_dimension_drill_down(request, dimension_slug: str, period: str):
         "banners": sorted(banners, key=lambda x: abs(x['amount']), reverse=True)
     }
 
+@router.get("/reports/dimension/{dimension_slug}/banner-transactions", response=List[BannerTransactionOut])
+def get_banner_transactions(request, dimension_slug: str, period: str, banner: str):
+    """
+    Returns individual journal entries for a specific banner within a period.
+    Each entry includes the source account (which financial product) and the routed-to account.
+    """
+    from banking.models import FinancialProduct
+
+    user = request.auth
+    family = user.family
+
+    try:
+        year, month = map(int, period.split('-'))
+        start_date = date(year, month, 1)
+        end_date = start_date + relativedelta(months=1) - relativedelta(days=1)
+    except (ValueError, TypeError):
+        raise errors.HttpError(400, "Invalid period format. Use YYYY-MM.")
+
+    fp_account_ids = set(
+        FinancialProduct.objects.filter(family=family).values_list('account_id', flat=True)
+    )
+
+    entries = JournalEntry.objects.filter(
+        family=family,
+        description=banner,
+        date__range=[start_date, end_date]
+    ).prefetch_related('lines__account', 'staged_transactions')
+
+    results = []
+    for entry in entries:
+        lines = list(entry.lines.all())
+        source_line = next((l for l in lines if l.account_id in fp_account_ids), None)
+        category_line = next((l for l in lines if l.account_id not in fp_account_ids), None)
+        
+        # Link back to statement if available
+        staged_tx = entry.staged_transactions.first()
+        statement_id = staged_tx.statement_import_id if staged_tx else None
+
+        results.append({
+            'journal_entry_id': entry.id,
+            'date': entry.date,
+            'amount': abs(float(category_line.amount)) if category_line else abs(float(lines[0].amount)),
+            'source_account': source_line.account.name if source_line else '—',
+            'routed_to': category_line.account.name if category_line else '—',
+            'routed_to_id': category_line.account_id if category_line else 0,
+            'statement_id': statement_id,
+        })
+
+    return sorted(results, key=lambda x: x['date'], reverse=True)
+
+
+@router.patch("/journal-entries/{entry_id}/reroute", response={200: BannerTransactionOut})
+def reroute_journal_entry(request, entry_id: int, payload: RerouteIn):
+    """
+    Swaps the category leg of a journal entry to a different account.
+    The source (financial product) leg is left untouched to preserve double-entry balance.
+    """
+    from banking.models import FinancialProduct
+    from django.db import transaction as db_transaction
+
+    user = request.auth
+    family = user.family
+
+    entry = get_object_or_404(JournalEntry, id=entry_id, family=family)
+    new_account = get_object_or_404(Account, id=payload.new_account_id, family=family)
+
+    fp_account_ids = set(
+        FinancialProduct.objects.filter(family=family).values_list('account_id', flat=True)
+    )
+
+    lines = list(entry.lines.select_related('account').all())
+    source_line = next((l for l in lines if l.account_id in fp_account_ids), None)
+    category_line = next((l for l in lines if l.account_id not in fp_account_ids), None)
+
+    if not category_line:
+        raise errors.HttpError(400, "Could not identify the category leg of this journal entry.")
+
+    with db_transaction.atomic():
+        category_line.account = new_account
+        category_line.save(update_fields=['account'])
+
+    # Link back to statement if available
+    staged_tx = entry.staged_transactions.first()
+    statement_id = staged_tx.statement_import_id if staged_tx else None
+
+    return {
+        'journal_entry_id': entry.id,
+        'date': entry.date,
+        'amount': abs(float(category_line.amount)),
+        'source_account': source_line.account.name if source_line else '—',
+        'routed_to': new_account.name,
+        'routed_to_id': new_account.id,
+        'statement_id': statement_id,
+    }
+
+
+@router.get("/accounts-flat", response=List[FlatAccountOut])
+def list_accounts_flat(request):
+    """
+    Returns all accounts for the family as a flat list with depth info,
+    suitable for a searchable select/combobox.
+    """
+    user = request.auth
+    accounts = Account.objects.filter(family=user.family).order_by('tree_id', 'lft')
+    return [
+        {'id': a.id, 'name': a.name, 'account_type': a.account_type, 'depth': a.level}
+        for a in accounts
+    ]
+
+
 @router.get("/accounts/{account_id}", response=AccountDetailOut)
 def get_account_detail(request, account_id: int, year: Optional[int] = None):
     """
@@ -484,11 +594,20 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
     if yoy_growth is not None and yoy_growth < -0.1 and account.account_type == 'EXPENSE':
         green_flag = {"title": "Efficiency Gain", "detail": "Category spend reduced by >10% YoY."}
 
-    # Historical trends (5 year high level)
+    # Historical trends — always anchored to today so the chart is a fixed map.
+    # The selected `year` only controls the monthly detail; the map never shifts.
+    today_year = date.today().year
+    revenue_descendants = root_revenue.get_descendants(include_self=True) if root_revenue else Account.objects.none()
     historical_trends = []
-    for y in range(year - 4, year + 1):
+    for y in range(today_year - 5, today_year + 1):
         y_total = get_sum(descendants, y, is_cumulative=is_cumulative)
-        historical_trends.append({"year": y, "total": y_total, "monthly_avg": y_total / 12})
+        y_income = get_sum(revenue_descendants, y, is_cumulative=False)
+        historical_trends.append({
+            "year": y,
+            "total": y_total,
+            "monthly_avg": y_total / 12,
+            "pct_of_income": round((y_total / y_income) * 100, 2) if y_income > 0 else 0.0,
+        })
     
     # avg_yearly_total for reference lines
     total_valid = [t['total'] for t in historical_trends if t['total'] > 0]
@@ -809,6 +928,7 @@ def get_annual_statements(request, year: int):
             "assets": float(assets),
             "liabilities": float(-liabilities),
             "equity": float(-equity),
+            "net_worth": float(assets) - abs(float(liabilities)),
             "check": float(assets + liabilities + equity) # Should be zero
         }
     }

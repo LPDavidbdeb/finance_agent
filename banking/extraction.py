@@ -1,8 +1,10 @@
 from .models import BankStatementImport, StagedTransaction
 from .services import approve_staged_transaction
 from ai_core.extractors.factory import PDFExtractorFactory
+from accounting.models import Account
 from decimal import Decimal
 from datetime import datetime, date
+from dateutil.relativedelta import relativedelta
 from categorization.services import find_matching_rule
 import logging
 import pandas as pd
@@ -187,6 +189,46 @@ def extract_transactions_from_statement(import_id: int, user):
                 logger.warning(f"Auto-approval skipped for transaction {tx.id}: {str(e)}")
             except Exception as e:
                 logger.exception(f"Unexpected error during auto-approval for transaction {tx.id}: {str(e)}")
+
+        # Historical auto-routing: for statements older than 3 months, route all
+        # remaining unprocessed transactions rather than leaving them in staging.
+        # Payments go to Internal Transfers (balance sheet movement, not an expense).
+        # Everything else goes to Uncategorized Expenses (expense is real, category unknown).
+        cutoff_date = date.today() - relativedelta(months=3)
+        statement_date = statement_import.document_date
+
+        if statement_date and statement_date < cutoff_date:
+            family = statement_import.financial_product.family
+            uncategorized = Account.objects.filter(
+                family=family, name__iexact='Uncategorized Expenses'
+            ).first()
+            internal_transfer = Account.objects.filter(
+                family=family, name__iexact='Internal Transfers'
+            ).first()
+
+            if not uncategorized:
+                logger.warning(
+                    f"'Uncategorized Expenses' account not found for family {family.id}. "
+                    "Skipping historical auto-routing. Run rebuild_accounting_master to create it."
+                )
+            else:
+                remaining = StagedTransaction.objects.filter(
+                    statement_import=statement_import,
+                    status=StagedTransaction.Status.UNPROCESSED
+                )
+                for tx in remaining:
+                    is_payment = 'PAIEMENT' in tx.raw_description.upper()
+                    target = internal_transfer if (is_payment and internal_transfer) else uncategorized
+                    try:
+                        approve_staged_transaction(
+                            transaction_id=tx.id,
+                            target_account_id=target.id,
+                            user=user
+                        )
+                    except (PermissionError, ValueError) as e:
+                        logger.warning(f"Historical auto-routing skipped for tx {tx.id}: {str(e)}")
+                    except Exception as e:
+                        logger.exception(f"Unexpected error during historical auto-routing for tx {tx.id}: {str(e)}")
 
         statement_import.processed_by_python = True
         statement_import.status = BankStatementImport.Status.COMPLETED

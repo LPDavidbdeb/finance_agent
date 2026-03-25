@@ -38,59 +38,10 @@ banniere_dict_vd = {
     'CONCORDIA - RECREATION MONTREAL QC': ['CONCORDIA - RECREATION MONTREAL QC'],
 
 
-    'PAYPAL': ['PAYPAL *FORMEDUC 4188427523 QC'],
-    'Amazon': ['AMZ*PremiumpartsWhosal WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*0L0WZ4IS3 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*156UA1NW3 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*1F3HO5IV3 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*4984K8R43 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*4L5L22N53 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*5002Y9IQ3 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*AS0TR8WS3 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*CO1SM78J3 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*CR18X5CT3 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*EN6CD3NE3 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*I489R6693 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*NQ5PS64O3 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*ON08X2F93 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*ON15U9843 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*R02NV4N72 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*R02XQ7LA2 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*RB7W18NK2 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*RT11H5NE0 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*RU2TG6OY0 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*RX99W7CZ3 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*T10UZ0KR0 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*T16F392L0 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*T188C8AS2 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*T35OE2JH2 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*T66HU1NV3 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*T98OL3ZE1 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*TA84J1ZZ1 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*TK9R88SO2 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*TQ0828ME2 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*TQ5FP7010 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*TQ7D69XB2 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*TX0II8Z91 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*TX9DD0OD0 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*TX9JK69D0 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*TY0SP8963 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*VW5AP2J43 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*XL4LQ88Z3 WWW.AMAZON.CAON',
-                                            'AMZN Mktp CA*YM9MP41Y3 WWW.AMAZON.CAON',
-                                            'Amazon.ca*KP8828J23 AMAZON.CA ON',
-                                            'Amazon.ca*SD6270PY3 AMAZON.CA ON',
-                                            'Amazon.ca*W24QU6FL3 AMAZON.CA ON',
-                                           ],
-    'aliexpress': ['aliexpress Vancouver BC'],
-    'WAL-MART': ['WAL-MART STORE#1169 POINTE-AUX-TRQC', 'WALMART.CA MISSISSAUGA ON'],
-    'WINNERS': ['WINNERS 474 MONTREAL QC'],
-    'TEMU': ['TEMU.COM VICTORIA BC', 'TEMU.COM WWW.TEMU.COM BC'],
-    'TUANGO': ['TUANGO INC/#LD-0063868 MONTREAL QC', 'TUANGO INC/#LD-0068960 MONTREAL QC', 'TUANGO INC/#LD-0079190 MONTREAL QC',],
 
 
-'AVANT-GARDE MONTREAL QC': ['AVANT-GARDE MONTREAL QC'],
+
+    'AVANT-GARDE MONTREAL QC': ['AVANT-GARDE MONTREAL QC'],
 
      'CDNCANCERSOC-DR 888-955-5455 ON': ['CDNCANCERSOC-DR 888-955-5455 ON'],
 
@@ -200,9 +151,8 @@ banniere_dict_vd = {
      'STOCK AND ROW Bloomfield ON': ['SQ *STOCK AND ROW Bloomfield ON'],
 
 
-'YELLOW': ['SP YELLOW SHOES ECOM MONTREAL QC'],
-
-     "THE CHILDREN'S PLACE": ["THE CHILDREN'S PLACE #300ANJOU QC"],
+    'YELLOW': ['SP YELLOW SHOES ECOM MONTREAL QC'],
+    "THE CHILDREN'S PLACE": ["THE CHILDREN'S PLACE #300ANJOU QC"],
 
 
      'UNARBREPOURMONQUARTIER MONTREAL QC': ['UNARBREPOURMONQUARTIER MONTREAL QC'],
@@ -404,4 +354,16 @@ banniere_dict_vd_categories = {
         'PATRICK MORIN': ['PATRICK MORIN 11 POINTE-AUX-TRQC'],
         'CANADIAN TIRES': ['MAGASIN CDN TIRE #00009 ST LEONARD QC', 'MAGASIN CDN TIRE #0303 MONTREAL QC']
     }
+}
+
+vd_not_unique_provider_dict = {
+    'PAYPAL': ['PAYPAL *FORMEDUC 4188427523 QC'],
+    'AMAZON': ['AMZN Mktp',
+                'AMAZON.CA',
+               ],
+    'aliexpress': ['aliexpress Vancouver BC'],
+    'WALMART': ['WAL-MART STORE#1169 POINTE-AUX-TRQC', 'WALMART.CA MISSISSAUGA ON'],
+    'WINNERS': ['WINNERS 474 MONTREAL QC'],
+    'TEMU': ['TEMU.COM VICTORIA BC', 'TEMU.COM WWW.TEMU.COM BC'],
+    'TUANGO': ['TUANGO INC/#LD-0063868 MONTREAL QC', 'TUANGO INC/#LD-0068960 MONTREAL QC', 'TUANGO INC/#LD-0079190 MONTREAL QC',],
 }

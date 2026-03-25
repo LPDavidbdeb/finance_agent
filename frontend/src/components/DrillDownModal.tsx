@@ -1,28 +1,70 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { fetchDrillDown } from '../api/client';
-import { Loader2, X, FileText, List, ArrowRight, Store, ArrowUpRight, ArrowDownRight } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { fetchDrillDown, fetchBannerTransactions, fetchAccountsFlat, rerouteJournalEntry } from '../api/client';
+import { Loader2, X, FileText, List, ArrowRight, Store, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronRight, ArrowRightLeft, Check, Eye } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 
 interface DrillDownModalProps {
   isOpen: boolean;
   onClose: () => void;
   dimension: string;
-  period: string; // YYYY-MM
+  period: string;
+}
+
+interface FlatAccount {
+  id: number;
+  name: string;
+  account_type: string;
+  depth: number;
+}
+
+interface BannerTx {
+  journal_entry_id: number;
+  date: string;
+  amount: number;
+  source_account: string;
+  routed_to: string;
+  routed_to_id: number;
+  statement_id?: number;
 }
 
 export const DrillDownModal: React.FC<DrillDownModalProps> = ({ isOpen, onClose, dimension, period }) => {
+  const navigate = useNavigate();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [expandedBanner, setExpandedBanner] = useState<string | null>(null);
+  const [bannerTxs, setBannerTxs] = useState<Record<string, BannerTx[]>>({});
+  const [loadingBanner, setLoadingBanner] = useState<string | null>(null);
+
+  // Re-route state
+  const [flatAccounts, setFlatAccounts] = useState<FlatAccount[]>([]);
+  const [reroutingEntry, setReroutingEntry] = useState<number | null>(null); // entry id being rerouted
+  const [rerouteSearch, setRerouteSearch] = useState('');
+  const [savingEntry, setSavingEntry] = useState<number | null>(null);
+  const [selectedAccount, setSelectedAccount] = useState<FlatAccount | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (isOpen && dimension && period) {
+      setExpandedBanner(null);
+      setBannerTxs({});
+      setReroutingEntry(null);
       loadDrillDown();
+      loadFlatAccounts();
     }
   }, [isOpen, dimension, period]);
+
+  useEffect(() => {
+    if (reroutingEntry !== null) {
+      setRerouteSearch('');
+      setSelectedAccount(null);
+      setTimeout(() => searchRef.current?.focus(), 50);
+    }
+  }, [reroutingEntry]);
 
   const loadDrillDown = async () => {
     try {
@@ -37,6 +79,57 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({ isOpen, onClose,
     }
   };
 
+  const loadFlatAccounts = async () => {
+    try {
+      const accounts = await fetchAccountsFlat();
+      setFlatAccounts(accounts);
+    } catch {
+      // non-fatal
+    }
+  };
+
+  const handleBannerClick = async (bannerName: string) => {
+    if (expandedBanner === bannerName) {
+      setExpandedBanner(null);
+      return;
+    }
+    setExpandedBanner(bannerName);
+    if (bannerTxs[bannerName]) return;
+
+    try {
+      setLoadingBanner(bannerName);
+      const txs = await fetchBannerTransactions(dimension, period, bannerName);
+      setBannerTxs(prev => ({ ...prev, [bannerName]: txs }));
+    } catch {
+      setBannerTxs(prev => ({ ...prev, [bannerName]: [] }));
+    } finally {
+      setLoadingBanner(null);
+    }
+  };
+
+  const handleReroute = async (bannerName: string, entryId: number) => {
+    if (!selectedAccount) return;
+    try {
+      setSavingEntry(entryId);
+      const updated = await rerouteJournalEntry(entryId, selectedAccount.id);
+      setBannerTxs(prev => ({
+        ...prev,
+        [bannerName]: (prev[bannerName] || []).map(tx =>
+          tx.journal_entry_id === entryId ? { ...tx, routed_to: updated.routed_to, routed_to_id: updated.routed_to_id } : tx
+        ),
+      }));
+      setReroutingEntry(null);
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setSavingEntry(null);
+    }
+  };
+
+  const filteredAccounts = flatAccounts.filter(a =>
+    a.name.toLowerCase().includes(rerouteSearch.toLowerCase())
+  );
+
   if (!isOpen) return null;
 
   return (
@@ -48,7 +141,7 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({ isOpen, onClose,
               <FileText className="h-5 w-5 text-blue-600" />
               Investigation: {dimension.replace('-', ' ').toUpperCase()} ({period})
             </CardTitle>
-            <CardDescription>Deep-dive into individual categories and banners.</CardDescription>
+            <CardDescription>Click any banner row to inspect its individual transactions.</CardDescription>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full">
             <X className="h-5 w-5" />
@@ -73,8 +166,8 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({ isOpen, onClose,
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {data.category_breakdown.map((cat: any) => {
                     const diff = cat.balance - cat.average_monthly_balance;
-                    const percentDiff = cat.average_monthly_balance > 0 
-                      ? (diff / cat.average_monthly_balance) * 100 
+                    const percentDiff = cat.average_monthly_balance > 0
+                      ? (diff / cat.average_monthly_balance) * 100
                       : 0;
                     const isOver = diff > 0;
 
@@ -82,7 +175,7 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({ isOpen, onClose,
                       <div key={cat.id} className="bg-white border rounded-xl p-4 shadow-sm flex flex-col group hover:border-blue-200 transition-colors">
                         <div className="flex justify-between items-start mb-2">
                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">{cat.name}</p>
-                          <Link 
+                          <Link
                             to={`/dashboard/accounts/${cat.id}?year=${period.split('-')[0]}`}
                             className="p-1.5 bg-slate-50 rounded-full text-slate-400 group-hover:text-blue-600 group-hover:bg-blue-50 transition-all"
                           >
@@ -108,12 +201,13 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({ isOpen, onClose,
               {/* Banners Table */}
               <section className="space-y-4">
                 <h3 className="text-sm font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
-                  <Store className="h-4 w-4" /> Banners Grouped
+                  <Store className="h-4 w-4" /> Banners — click to inspect transactions
                 </h3>
                 <div className="border rounded-xl overflow-hidden shadow-sm">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 border-b text-slate-500">
                       <tr>
+                        <th className="px-4 py-3 text-left font-bold uppercase text-[10px] w-6"></th>
                         <th className="px-4 py-3 text-left font-bold uppercase text-[10px]">Merchant Banner</th>
                         <th className="px-4 py-3 text-left font-bold uppercase text-[10px]">Category</th>
                         <th className="px-4 py-3 text-center font-bold uppercase text-[10px]">Hits</th>
@@ -122,27 +216,163 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({ isOpen, onClose,
                     </thead>
                     <tbody className="divide-y bg-white">
                       {data.banners.length === 0 ? (
-                        <tr><td colSpan={4} className="p-10 text-center text-slate-400 italic">No activity found in this period.</td></tr>
+                        <tr><td colSpan={5} className="p-10 text-center text-slate-400 italic">No activity found in this period.</td></tr>
                       ) : (
                         data.banners.map((b: any, idx: number) => (
-                          <tr key={idx} className="hover:bg-slate-50/50 transition-colors group">
-                            <td className="px-4 py-3">
-                              <span className="font-black text-slate-700 uppercase tracking-tight">{b.name}</span>
-                            </td>
-                            <td className="px-4 py-3 text-slate-500">
-                              <Badge variant="outline" className="text-[10px] font-bold bg-slate-50/50 uppercase">
-                                {b.category}
-                              </Badge>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <Badge variant="secondary" className="text-[10px] rounded-full px-2">
-                                {b.count}
-                              </Badge>
-                            </td>
-                            <td className={`px-4 py-3 text-right font-mono font-black ${b.amount < 0 ? 'text-red-600' : 'text-slate-900'}`}>
-                              ${b.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                            </td>
-                          </tr>
+                          <React.Fragment key={idx}>
+                            {/* Banner row */}
+                            <tr
+                              className="hover:bg-blue-50/40 transition-colors cursor-pointer group"
+                              onClick={() => handleBannerClick(b.name)}
+                            >
+                              <td className="px-4 py-3 text-slate-400 group-hover:text-blue-500">
+                                {expandedBanner === b.name
+                                  ? <ChevronDown className="h-3.5 w-3.5" />
+                                  : <ChevronRight className="h-3.5 w-3.5" />
+                                }
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="font-black text-slate-700 uppercase tracking-tight">{b.name}</span>
+                              </td>
+                              <td className="px-4 py-3 text-slate-500">
+                                <Badge variant="outline" className="text-[10px] font-bold bg-slate-50/50 uppercase">
+                                  {b.category}
+                                </Badge>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <Badge variant="secondary" className="text-[10px] rounded-full px-2">
+                                  {b.count}
+                                </Badge>
+                              </td>
+                              <td className={`px-4 py-3 text-right font-mono font-black ${b.amount < 0 ? 'text-red-600' : 'text-slate-900'}`}>
+                                ${b.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+
+                            {/* Transaction expansion */}
+                            {expandedBanner === b.name && (
+                              <tr>
+                                <td colSpan={5} className="p-0 bg-slate-50/80 border-b-2 border-blue-100">
+                                  {loadingBanner === b.name ? (
+                                    <div className="flex items-center gap-2 px-10 py-4 text-slate-400 text-xs">
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      Loading transactions...
+                                    </div>
+                                  ) : (bannerTxs[b.name] || []).length === 0 ? (
+                                    <p className="px-10 py-4 text-xs text-slate-400 italic">No transactions found.</p>
+                                  ) : (
+                                    <table className="w-full text-xs">
+                                      <thead className="border-b border-slate-200">
+                                        <tr className="text-slate-400">
+                                          <th className="px-10 py-2 text-left font-bold uppercase tracking-wider">Date</th>
+                                          <th className="px-4 py-2 text-left font-bold uppercase tracking-wider">Source Account</th>
+                                          <th className="px-4 py-2 text-left font-bold uppercase tracking-wider">Routed To</th>
+                                          <th className="px-4 py-2 text-right font-bold uppercase tracking-wider">Amount</th>
+                                          <th className="px-4 py-2 w-8"></th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100">
+                                        {(bannerTxs[b.name] || []).map((tx: BannerTx) => (
+                                          <React.Fragment key={tx.journal_entry_id}>
+                                            <tr className="hover:bg-white transition-colors">
+                                              <td className="px-10 py-2.5 font-mono text-slate-500">{tx.date}</td>
+                                              <td className="px-4 py-2.5 font-medium text-slate-600">{tx.source_account}</td>
+                                              <td className="px-4 py-2.5">
+                                                <Badge variant="outline" className="text-[10px] font-bold uppercase bg-white">
+                                                  {tx.routed_to}
+                                                </Badge>
+                                              </td>
+                                              <td className="px-4 py-2.5 text-right font-mono font-black text-slate-900">
+                                                ${tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                              </td>
+                                              <td className="px-4 py-2.5 text-right flex items-center justify-end gap-1">
+                                                {tx.statement_id && (
+                                                  <button
+                                                    onClick={() => {
+                                                      onClose();
+                                                      navigate(`/dashboard/statements/${tx.statement_id}?highlight=${tx.journal_entry_id}`);
+                                                    }}
+                                                    className="p-1 rounded hover:bg-blue-100 text-slate-400 hover:text-blue-600 transition-colors"
+                                                    title="View Source Statement"
+                                                  >
+                                                    <Eye className="h-3 w-3" />
+                                                  </button>
+                                                )}
+                                                <button
+                                                  onClick={() => setReroutingEntry(reroutingEntry === tx.journal_entry_id ? null : tx.journal_entry_id)}
+                                                  className="p-1 rounded hover:bg-blue-100 text-slate-400 hover:text-blue-600 transition-colors"
+                                                  title="Re-route this transaction"
+                                                >
+                                                  <ArrowRightLeft className="h-3 w-3" />
+                                                </button>
+                                              </td>
+                                            </tr>
+
+                                            {/* Inline re-route picker */}
+                                            {reroutingEntry === tx.journal_entry_id && (
+                                              <tr>
+                                                <td colSpan={5} className="px-10 py-3 bg-blue-50 border-l-4 border-blue-400">
+                                                  <div className="flex items-center gap-3">
+                                                    <div className="relative flex-1 max-w-sm">
+                                                      <input
+                                                        ref={searchRef}
+                                                        type="text"
+                                                        value={rerouteSearch}
+                                                        onChange={e => { setRerouteSearch(e.target.value); setSelectedAccount(null); }}
+                                                        placeholder="Search accounts..."
+                                                        className="w-full text-xs border border-slate-300 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                                      />
+                                                      {rerouteSearch && !selectedAccount && filteredAccounts.length > 0 && (
+                                                        <div className="absolute z-20 top-full mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                                                          {filteredAccounts.map(acc => (
+                                                            <button
+                                                              key={acc.id}
+                                                              className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 flex items-center gap-2"
+                                                              onClick={() => { setSelectedAccount(acc); setRerouteSearch(acc.name); }}
+                                                            >
+                                                              <span className="text-slate-300">{'\u00a0'.repeat(acc.depth * 2)}</span>
+                                                              <span className="font-medium text-slate-700 uppercase">{acc.name}</span>
+                                                              <span className="text-slate-400 ml-auto">{acc.account_type}</span>
+                                                            </button>
+                                                          ))}
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                    <Button
+                                                      size="sm"
+                                                      disabled={!selectedAccount || savingEntry === tx.journal_entry_id}
+                                                      onClick={() => handleReroute(b.name, tx.journal_entry_id)}
+                                                      className="text-xs h-7"
+                                                    >
+                                                      {savingEntry === tx.journal_entry_id
+                                                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                                                        : <><Check className="h-3 w-3 mr-1" />Save</>
+                                                      }
+                                                    </Button>
+                                                    <button
+                                                      onClick={() => setReroutingEntry(null)}
+                                                      className="text-slate-400 hover:text-slate-600 text-xs"
+                                                    >
+                                                      Cancel
+                                                    </button>
+                                                  </div>
+                                                  {selectedAccount && (
+                                                    <p className="text-[10px] text-blue-600 mt-1.5 font-medium">
+                                                      Will move to: <span className="font-black uppercase">{selectedAccount.name}</span>
+                                                    </p>
+                                                  )}
+                                                </td>
+                                              </tr>
+                                            )}
+                                          </React.Fragment>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         ))
                       )}
                     </tbody>

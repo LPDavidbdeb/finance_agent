@@ -224,7 +224,7 @@ export const Dashboard: React.FC = () => {
             {renderSummaryCard('net-income', statements.income_statement.net_income)}
             {renderSummaryCard('assets', statements.balance_sheet.assets)}
             {renderSummaryCard('liabilities', statements.balance_sheet.liabilities)}
-            {renderSummaryCard('net-worth', statements.balance_sheet.equity)}
+            {renderSummaryCard('net-worth', statements.balance_sheet.net_worth)}
           </div>
         )}
       </div>

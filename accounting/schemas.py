@@ -62,6 +62,7 @@ class YearlyTrendOut(Schema):
     year: int
     total: float
     monthly_avg: float
+    pct_of_income: float = 0.0
     breakdown: dict = {} # Map of child_name -> amount
 
 class DrillDownBannerOut(Schema):
@@ -108,3 +109,21 @@ class DimensionBreakdownOut(Schema):
     total_amount: float
     line_items: List[DimensionLineItemOut]
     merchant_items: List[MerchantItemOut] = []
+
+class BannerTransactionOut(Schema):
+    journal_entry_id: int
+    date: date
+    amount: float
+    source_account: str
+    routed_to: str
+    routed_to_id: int
+    statement_id: Optional[int] = None
+
+class RerouteIn(Schema):
+    new_account_id: int
+
+class FlatAccountOut(Schema):
+    id: int
+    name: str
+    account_type: str
+    depth: int
