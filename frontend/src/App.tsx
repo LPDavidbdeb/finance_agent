@@ -19,6 +19,7 @@ const AccountDetail = lazy(() => import('./pages/AccountDetail').then(module => 
 const DimensionDetail = lazy(() => import('./pages/DimensionDetail').then(module => ({ default: module.DimensionDetail })));
 const StatementDetail = lazy(() => import('./pages/StatementDetail').then(module => ({ default: module.StatementDetail })));
 const MaintenancePage = lazy(() => import('./pages/MaintenancePage').then(module => ({ default: module.MaintenancePage })));
+const SimulationPage = lazy(() => import('./pages/SimulationPage').then(module => ({ default: module.SimulationPage })));
 
 // Lazy-load complex shared components
 const InstitutionManager = lazy(() => import('./components/InstitutionManager').then(module => ({ default: module.InstitutionManager })));
@@ -52,6 +53,7 @@ function App() {
                 <Route path="/dashboard/accounts/:id" element={<AccountDetail />} />
                 <Route path="/dashboard/dimension/:slug" element={<DimensionDetail />} />
                 <Route path="/dashboard/statements/:id" element={<StatementDetail />} />
+                <Route path="/dashboard/simulate" element={<SimulationPage />} />
                 <Route path="/maintenance" element={<MaintenancePage />} />
                 <Route path="/settings/banks" element={<InstitutionManager />} />
                 <Route path="/ledger" element={<AccountTree />} />

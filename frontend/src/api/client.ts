@@ -597,3 +597,50 @@ export async function approveTransaction(productId: number, transactionId: numbe
 
   return res.json();
 }
+
+// --- Planning API ---
+
+export interface ScenarioSpec {
+  name: string;
+  type: 'LOAN_AMORTIZATION' | 'SINKING_FUND';
+  principal: number;
+  annual_rate: number;
+  amortization_years: number;
+  payment_frequency: 'MONTHLY' | 'BIWEEKLY' | 'WEEKLY' | 'ANNUALLY';
+  start_date: string;
+  current_balance?: number;
+}
+
+export interface PeriodRow {
+  period_number: number;
+  payment_date: string;
+  payment_amount: number;
+  interest_portion: number;
+  principal_portion: number;
+  balance_after: number;
+}
+
+export interface ScenarioResult {
+  name: string;
+  type: 'LOAN_AMORTIZATION' | 'SINKING_FUND';
+  payment_amount: number;
+  total_interest_paid: number;
+  total_cost: number;
+  fcf_impact_monthly: number;
+  delta_vs_baseline: number | null;
+  schedule: PeriodRow[];
+}
+
+export async function simulateScenarios(scenarios: ScenarioSpec[]): Promise<ScenarioResult[]> {
+  const res = await fetch(`${API_URL}/planning/simulate`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify(scenarios),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(err.detail || 'Simulation failed');
+  }
+  return res.json();
+}
+

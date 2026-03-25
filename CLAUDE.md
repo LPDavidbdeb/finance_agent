@@ -25,6 +25,9 @@ finance_agent/
 │   └── tasks.py              # Celery async tasks
 ├── categorization/           # Merchant, TransactionMappingRule, auto-categorization
 │   └── services.py
+├── planning/                 # Stateless simulation engine (no models yet)
+│   ├── api.py                # POST /planning/simulate — N-scenario amortization/sinking fund
+│   └── schemas.py            # ScenarioSpec, ScenarioResult, PeriodRow
 ├── ai_core/                  # AI extraction strategies
 │   └── extractors/
 │       ├── factory.py
