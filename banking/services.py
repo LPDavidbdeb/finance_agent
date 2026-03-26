@@ -90,9 +90,9 @@ def approve_staged_transaction(transaction_id: int, target_account_id: int, user
     amount = staged_tx.amount
     
     if source_account.account_type == Account.AccountType.LIABILITY:
-        # Credit card purchases are usually imported as positive. 
+        # Visa extractor convention: purchases = NEGATIVE, payments/refunds = POSITIVE.
         # A purchase INCREASES liability (Credit) and INCREASES expense (Debit).
-        if amount > 0:
+        if amount < 0:
             debit_account, credit_account = target_account, source_account
         else: # A payment to the credit card or a refund
             debit_account, credit_account = source_account, target_account

@@ -4,6 +4,7 @@ from ninja.files import UploadedFile
 from ninja_jwt.authentication import JWTAuth
 from typing import List, Optional
 from datetime import date
+from dateutil.relativedelta import relativedelta
 import hashlib
 from django.shortcuts import get_object_or_404
 from django.db.models import ProtectedError, Count
@@ -20,6 +21,7 @@ from .schemas import (
     StagedTransactionOut,
     TransactionApproveIn,
     StatementMonthOut,
+    StatementCoverageOut,
 )
 from .models import FinancialInstitution, FinancialProduct, BankStatementImport, StagedTransaction
 from .services import provision_financial_product, approve_staged_transaction
@@ -263,6 +265,83 @@ def list_statement_transactions(request, product_id: int, year: int, month: int)
         bank_date__year=year,
         bank_date__month=month
     ).select_related('predicted_account', 'journal_entry').prefetch_related('journal_entry__lines__account').order_by("-bank_date")
+
+
+@router.get("/statement-coverage", response=StatementCoverageOut)
+def get_statement_coverage(request):
+    """
+    Returns a month-by-month coverage grid for all financial products.
+    Each cell shows whether a statement exists for that product/month based on document_date.
+    Months before a product's first statement are neutral; gaps after are flagged as missing.
+    """
+    user = request.auth
+    family = user.family
+
+    products = FinancialProduct.objects.filter(family=family).select_related('institution', 'account')
+    if not products.exists():
+        return {"all_months": [], "products": []}
+
+    # Build map: product_id → { "YYYY-MM": (statement_id, status) }
+    statements = (
+        BankStatementImport.objects
+        .filter(financial_product__family=family, document_date__isnull=False)
+        .values('id', 'financial_product_id', 'document_date', 'status')
+    )
+    product_map: dict = {}
+    global_min_date: Optional[date] = None
+
+    for s in statements:
+        pid = s['financial_product_id']
+        key = s['document_date'].strftime('%Y-%m')
+        if pid not in product_map:
+            product_map[pid] = {}
+        # Keep the most recent upload for a given month if duplicates exist
+        if key not in product_map[pid]:
+            product_map[pid][key] = {'statement_id': s['id'], 'status': s['status']}
+        if global_min_date is None or s['document_date'] < global_min_date:
+            global_min_date = s['document_date']
+
+    if global_min_date is None:
+        return {"all_months": [], "products": []}
+
+    # Build the full ordered list of months
+    today = date.today()
+    current = global_min_date.replace(day=1)
+    end = today.replace(day=1)
+    all_months: List[str] = []
+    while current <= end:
+        all_months.append(current.strftime('%Y-%m'))
+        current += relativedelta(months=1)
+
+    product_rows = []
+    for product in products.order_by('institution__name', 'account__name'):
+        pid = product.id
+        coverage = product_map.get(pid, {})
+
+        # Product's first known month (neutral before this)
+        product_months_present = sorted(coverage.keys())
+        product_start = product_months_present[0] if product_months_present else None
+
+        cells = []
+        for m in all_months:
+            if product_start is None or m < product_start:
+                # Before first statement — not tracked
+                cells.append({'month': m, 'statement_id': None, 'status': 'before_start'})
+            elif m in coverage:
+                cells.append({'month': m, 'statement_id': coverage[m]['statement_id'], 'status': coverage[m]['status']})
+            else:
+                # Gap — missing statement
+                cells.append({'month': m, 'statement_id': None, 'status': 'missing'})
+
+        product_rows.append({
+            'product_id': pid,
+            'product_name': product.account.name,
+            'institution_name': product.institution.name,
+            'product_type': product.product_type,
+            'months': cells,
+        })
+
+    return {'all_months': all_months, 'products': product_rows}
 
 
 @router.post("/products/{product_id}/staged-transactions/{transaction_id}/approve")

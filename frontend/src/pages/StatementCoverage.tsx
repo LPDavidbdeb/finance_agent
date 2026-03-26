@@ -1,0 +1,215 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Loader2, AlertCircle, CheckCircle2, MinusCircle } from 'lucide-react';
+import { fetchStatementCoverage, ProductCoverage, StatementCoverage as StatementCoverageData } from '../api/client';
+
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const PRODUCT_TYPE_LABEL: Record<string, string> = {
+  CHECKING: 'Chequing',
+  SAVINGS: 'Savings',
+  CREDIT_CARD: 'Credit Card',
+  LOAN: 'Loan',
+  INVESTMENT: 'Investment',
+  REGISTERED: 'Registered',
+};
+
+function groupMonthsByYear(months: string[]): { year: string; count: number }[] {
+  const map: Record<string, number> = {};
+  for (const m of months) {
+    const y = m.slice(0, 4);
+    map[y] = (map[y] || 0) + 1;
+  }
+  return Object.entries(map).map(([year, count]) => ({ year, count }));
+}
+
+function missCount(product: ProductCoverage): number {
+  return product.months.filter(c => c.status === 'missing').length;
+}
+
+function Cell({ cell, month }: { cell: ProductCoverage['months'][number]; month: string }) {
+  const [year, m] = month.split('-');
+  const label = `${MONTH_ABBR[parseInt(m) - 1]} ${year}`;
+
+  if (cell.status === 'before_start') {
+    return <td className="p-0.5"><div className="w-9 h-9 rounded bg-slate-100" title={`${label} — not tracked`} /></td>;
+  }
+
+  if (cell.status === 'missing') {
+    return (
+      <td className="p-0.5">
+        <div
+          className="w-9 h-9 rounded bg-red-100 border border-red-300 flex items-center justify-center cursor-default"
+          title={`${label} — MISSING`}
+        >
+          <span className="text-red-500 text-[10px] font-bold leading-none">{parseInt(m)}</span>
+        </div>
+      </td>
+    );
+  }
+
+  // Present — link to statement
+  const isOk = cell.status === 'COMPLETED';
+  const bg = isOk ? 'bg-emerald-100 border-emerald-300 hover:bg-emerald-200' : 'bg-amber-100 border-amber-300 hover:bg-amber-200';
+  const textColor = isOk ? 'text-emerald-700' : 'text-amber-700';
+
+  return (
+    <td className="p-0.5">
+      <Link to={`/dashboard/statements/${cell.statement_id}`}>
+        <div
+          className={`w-9 h-9 rounded border flex items-center justify-center ${bg}`}
+          title={`${label} — ${cell.status}`}
+        >
+          <span className={`text-[10px] font-bold leading-none ${textColor}`}>{parseInt(m)}</span>
+        </div>
+      </Link>
+    </td>
+  );
+}
+
+export const StatementCoverage: React.FC = () => {
+  const [data, setData] = useState<StatementCoverageData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetchStatementCoverage()
+      .then(d => setData(d))
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Scroll to current month on load
+  useEffect(() => {
+    if (!data || !scrollRef.current) return;
+    const today = new Date();
+    const currentMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const idx = data.all_months.indexOf(currentMonth);
+    if (idx >= 0) {
+      // Each cell is ~40px wide, product label col ~220px
+      scrollRef.current.scrollLeft = Math.max(0, (idx - 3) * 40);
+    }
+  }, [data]);
+
+  if (loading) return <div className="flex justify-center p-20"><Loader2 className="h-8 w-8 animate-spin text-blue-600" /></div>;
+  if (error || !data) return <div className="p-20 text-center text-red-500">{error || 'No data'}</div>;
+
+  const yearGroups = groupMonthsByYear(data.all_months);
+  const today = new Date();
+  const currentMonthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+
+  return (
+    <div className="space-y-6 max-w-full pb-20">
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Statement Coverage</h1>
+          <p className="text-sm text-slate-500 mt-1">Month-by-month coverage based on statement date, not upload date.</p>
+        </div>
+        <div className="flex gap-4 text-xs text-slate-500 items-center">
+          <span className="flex items-center gap-1.5"><span className="w-3.5 h-3.5 rounded bg-emerald-100 border border-emerald-300 inline-block" /> Present</span>
+          <span className="flex items-center gap-1.5"><span className="w-3.5 h-3.5 rounded bg-amber-100 border border-amber-300 inline-block" /> Incomplete</span>
+          <span className="flex items-center gap-1.5"><span className="w-3.5 h-3.5 rounded bg-red-100 border border-red-300 inline-block" /> Missing</span>
+          <span className="flex items-center gap-1.5"><span className="w-3.5 h-3.5 rounded bg-slate-100 inline-block" /> Not tracked</span>
+        </div>
+      </div>
+
+      {/* Coverage summary pills */}
+      <div className="flex flex-wrap gap-2">
+        {data.products.map(p => {
+          const missing = missCount(p);
+          return (
+            <div key={p.product_id} className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${missing > 0 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+              {missing > 0 ? <AlertCircle className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}
+              {p.product_name}
+              {missing > 0 && <span className="ml-1 font-bold">{missing} missing</span>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Grid */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div ref={scrollRef} className="overflow-x-auto">
+          <table className="border-collapse text-sm" style={{ minWidth: 'max-content' }}>
+            <thead>
+              {/* Year row */}
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="sticky left-0 z-10 bg-slate-50 px-4 py-2 text-left text-xs font-semibold text-slate-500 w-56 border-r border-slate-200">
+                  Product
+                </th>
+                <th className="px-2 py-2 text-xs font-medium text-slate-400 w-10 border-r border-slate-100">
+                  <MinusCircle className="h-3 w-3 mx-auto" />
+                </th>
+                {yearGroups.map(({ year, count }) => (
+                  <th
+                    key={year}
+                    colSpan={count}
+                    className="px-2 py-2 text-center text-xs font-bold text-slate-600 border-r border-slate-200"
+                  >
+                    {year}
+                  </th>
+                ))}
+              </tr>
+              {/* Month row */}
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="sticky left-0 z-10 bg-slate-50 px-4 py-1 text-left text-xs text-slate-400 border-r border-slate-200">
+                  {PRODUCT_TYPE_LABEL['CREDIT_CARD']}
+                </th>
+                <th className="px-2 py-1 text-xs text-slate-400 w-10 border-r border-slate-100 text-center">Gap</th>
+                {data.all_months.map(m => {
+                  const [, mo] = m.split('-');
+                  const isCurrent = m === currentMonthKey;
+                  return (
+                    <th
+                      key={m}
+                      className={`p-0.5 text-center ${isCurrent ? 'bg-blue-50' : ''}`}
+                      title={m}
+                    >
+                      <div className={`w-9 text-[9px] font-medium ${isCurrent ? 'text-blue-600' : 'text-slate-400'}`}>
+                        {MONTH_ABBR[parseInt(mo) - 1]}
+                      </div>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {data.products.map(product => {
+                const missing = missCount(product);
+                return (
+                  <tr key={product.product_id} className="hover:bg-slate-50/50 transition-colors">
+                    {/* Product label — sticky */}
+                    <td className="sticky left-0 z-10 bg-white px-4 py-2 border-r border-slate-200 hover:bg-slate-50">
+                      <Link to={`/dashboard/product/${product.product_id}`} className="block">
+                        <div className="font-semibold text-slate-700 text-sm leading-tight truncate max-w-[200px]">
+                          {product.product_name}
+                        </div>
+                        <div className="text-xs text-slate-400 mt-0.5">
+                          {product.institution_name} · {PRODUCT_TYPE_LABEL[product.product_type] ?? product.product_type}
+                        </div>
+                      </Link>
+                    </td>
+                    {/* Missing count */}
+                    <td className="px-2 py-2 text-center border-r border-slate-100">
+                      {missing > 0 ? (
+                        <span className="text-xs font-bold text-red-500">{missing}</span>
+                      ) : (
+                        <span className="text-xs text-emerald-500">✓</span>
+                      )}
+                    </td>
+                    {/* Month cells */}
+                    {product.months.map((cell, i) => (
+                      <Cell key={i} cell={cell} month={data.all_months[i]} />
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};

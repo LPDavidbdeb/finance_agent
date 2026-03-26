@@ -1,5 +1,5 @@
 from ninja import Schema
-from typing import Optional
+from typing import Optional, List
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -121,3 +121,19 @@ class StatementMonthOut(Schema):
 
 class TransactionApproveIn(Schema):
     target_account_id: int
+
+class StatementCellOut(Schema):
+    month: str           # "YYYY-MM"
+    statement_id: Optional[int] = None   # None = missing
+    status: Optional[str] = None
+
+class ProductCoverageOut(Schema):
+    product_id: int
+    product_name: str
+    institution_name: str
+    product_type: str
+    months: List['StatementCellOut']
+
+class StatementCoverageOut(Schema):
+    all_months: List[str]            # ordered "YYYY-MM" strings — column headers
+    products: List[ProductCoverageOut]

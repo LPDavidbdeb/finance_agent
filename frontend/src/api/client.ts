@@ -751,3 +751,30 @@ export async function deleteSchedule(scheduleId: number): Promise<void> {
   if (!res.ok) throw new Error('Failed to delete schedule');
 }
 
+// --- Statement Coverage ---
+
+export interface StatementCell {
+  month: string;              // "YYYY-MM"
+  statement_id: number | null;
+  status: string;             // present status, 'missing', or 'before_start'
+}
+
+export interface ProductCoverage {
+  product_id: number;
+  product_name: string;
+  institution_name: string;
+  product_type: string;
+  months: StatementCell[];
+}
+
+export interface StatementCoverage {
+  all_months: string[];
+  products: ProductCoverage[];
+}
+
+export async function fetchStatementCoverage(): Promise<StatementCoverage> {
+  const res = await fetch(`${API_URL}/banking/statement-coverage`, { headers: getAuthHeader() });
+  if (!res.ok) throw new Error('Failed to fetch statement coverage');
+  return res.json();
+}
+

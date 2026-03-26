@@ -140,31 +140,89 @@ def get_dimension_breakdown(request, dimension_slug: str, year: int):
         balance = get_branch_sum(family, child, jan_1, dec_31, is_cumulative)
         child_sum += balance
         display_bal = -balance if flip_sign else balance
-        
-        # SCOPING FIX: Query sub-item banners strictly inside this child's branch
-        child_descendant_ids = child.get_descendants(include_self=True).values_list('id', flat=True)
-        q_child = Q(journal_entry__family=family, account_id__in=child_descendant_ids)
-        if is_cumulative:
-            q_child &= Q(journal_entry__date__lte=dec_31)
-        else:
-            q_child &= Q(journal_entry__date__year=year)
-            
-        sums = TransactionLine.objects.filter(q_child).values('journal_entry__description').annotate(total=Sum('amount'))
-        
-        sub_items_list = []
-        for item in sums:
-            val = -item['total'] if flip_sign else item['total']
-            if abs(val) > Decimal('0.01'):
+
+        sub_children = list(child.get_children())
+
+        if sub_children:
+            # Child has sub-accounts (e.g. Food → Restaurants, Grocery Stores).
+            # Build sub_items as grouped subcategory nodes, each with their merchant list.
+            sub_items_list = []
+
+            for sub_child in sub_children:
+                sub_bal = get_branch_sum(family, sub_child, jan_1, dec_31, is_cumulative)
+                sub_display = -sub_bal if flip_sign else sub_bal
+                if abs(sub_display) < Decimal('0.01'):
+                    continue
+
+                sc_ids = sub_child.get_descendants(include_self=True).values_list('id', flat=True)
+                q_sc = Q(journal_entry__family=family, account_id__in=sc_ids)
+                if is_cumulative:
+                    q_sc &= Q(journal_entry__date__lte=dec_31)
+                else:
+                    q_sc &= Q(journal_entry__date__year=year)
+
+                sc_sums = TransactionLine.objects.filter(q_sc).values('journal_entry__description').annotate(total=Sum('amount'))
+                merchants = []
+                for item in sc_sums:
+                    val = -item['total'] if flip_sign else item['total']
+                    if abs(val) > Decimal('0.01'):
+                        merchants.append({"name": item['journal_entry__description'], "balance": float(val)})
+
                 sub_items_list.append({
-                    "name": item['journal_entry__description'],
-                    "balance": float(val)
+                    "name": sub_child.name,
+                    "balance": float(sub_display),
+                    "type": "subcategory",
+                    "merchants": sorted(merchants, key=lambda x: x['balance'], reverse=True)
                 })
-        
+
+            # Also surface any transactions posted directly to the child account itself
+            q_direct = Q(journal_entry__family=family, account_id=child.id)
+            if is_cumulative:
+                q_direct &= Q(journal_entry__date__lte=dec_31)
+            else:
+                q_direct &= Q(journal_entry__date__year=year)
+
+            direct_sums = TransactionLine.objects.filter(q_direct).values('journal_entry__description').annotate(total=Sum('amount'))
+            direct_merchants = []
+            for item in direct_sums:
+                val = -item['total'] if flip_sign else item['total']
+                if abs(val) > Decimal('0.01'):
+                    direct_merchants.append({"name": item['journal_entry__description'], "balance": float(val)})
+
+            if direct_merchants:
+                sub_items_list.append({
+                    "name": f"Directly under {child.name}",
+                    "balance": sum(m['balance'] for m in direct_merchants),
+                    "type": "subcategory",
+                    "merchants": sorted(direct_merchants, key=lambda x: x['balance'], reverse=True)
+                })
+
+            sub_items_list = sorted(sub_items_list, key=lambda x: x['balance'], reverse=True)
+        else:
+            # No sub-accounts: flat merchant list (original behaviour)
+            child_descendant_ids = child.get_descendants(include_self=True).values_list('id', flat=True)
+            q_child = Q(journal_entry__family=family, account_id__in=child_descendant_ids)
+            if is_cumulative:
+                q_child &= Q(journal_entry__date__lte=dec_31)
+            else:
+                q_child &= Q(journal_entry__date__year=year)
+
+            sums = TransactionLine.objects.filter(q_child).values('journal_entry__description').annotate(total=Sum('amount'))
+            sub_items_list = []
+            for item in sums:
+                val = -item['total'] if flip_sign else item['total']
+                if abs(val) > Decimal('0.01'):
+                    sub_items_list.append({
+                        "name": item['journal_entry__description'],
+                        "balance": float(val)
+                    })
+            sub_items_list = sorted(sub_items_list, key=lambda x: x['balance'], reverse=True)
+
         line_items.append({
             "id": child.id,
             "name": child.name,
             "balance": float(display_bal),
-            "sub_items": sorted(sub_items_list, key=lambda x: x['balance'], reverse=True)
+            "sub_items": sub_items_list
         })
 
     # Step B: Calculate the Direct Root Remainder (Transactions posted directly to the root category)
