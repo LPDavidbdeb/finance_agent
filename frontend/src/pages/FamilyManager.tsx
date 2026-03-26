@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { 
-  fetchFamilyMembers, 
-  createFamilyMember, 
-  updateFamilyMember, 
-  deleteFamilyMember 
+import {
+  fetchFamilyMembers,
+  createFamilyMember,
+  updateFamilyMember,
+  deleteFamilyMember,
+  changePassword,
 } from '../api/client';
 import { FamilyMemberModal } from '../components/FamilyMemberModal';
 import { AddProductModal } from '../components/AddProductModal';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
-import { Loader2, Users, CreditCard } from 'lucide-react';
+import { Loader2, Users, CreditCard, KeyRound, CheckCircle2 } from 'lucide-react';
 
 export const FamilyManager: React.FC = () => {
   const { isAuthenticated } = useAuth();
@@ -21,6 +22,28 @@ export const FamilyManager: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
+  // Change password state
+  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
+  const [pwLoading, setPwLoading] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwSuccess, setPwSuccess] = useState(false);
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwError(null);
+    setPwSuccess(false);
+    setPwLoading(true);
+    try {
+      await changePassword(pwForm.current, pwForm.next, pwForm.confirm);
+      setPwSuccess(true);
+      setPwForm({ current: '', next: '', confirm: '' });
+    } catch (err: any) {
+      setPwError(err.message);
+    } finally {
+      setPwLoading(false);
+    }
+  };
+
   // Modals State
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<any | null>(null);
@@ -168,7 +191,65 @@ export const FamilyManager: React.FC = () => {
         </CardContent>
       </Card>
 
-      <FamilyMemberModal 
+      {/* Change Password */}
+      <Card className="shadow-md">
+        <CardHeader className="border-b border-slate-100">
+          <CardTitle className="text-xl flex items-center gap-2">
+            <KeyRound className="h-5 w-5 text-slate-600" />
+            Change Password
+          </CardTitle>
+          <CardDescription>Update your login password. You must confirm your current password.</CardDescription>
+        </CardHeader>
+        <CardContent className="pt-6">
+          <form onSubmit={handleChangePassword} className="space-y-4 max-w-sm">
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700">Current password</label>
+              <input
+                type="password"
+                value={pwForm.current}
+                onChange={e => setPwForm(f => ({ ...f, current: e.target.value }))}
+                required
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700">New password</label>
+              <input
+                type="password"
+                value={pwForm.next}
+                onChange={e => setPwForm(f => ({ ...f, next: e.target.value }))}
+                required
+                minLength={8}
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-slate-700">Confirm new password</label>
+              <input
+                type="password"
+                value={pwForm.confirm}
+                onChange={e => setPwForm(f => ({ ...f, confirm: e.target.value }))}
+                required
+                className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            {pwError && <p className="text-sm text-red-600">{pwError}</p>}
+            {pwSuccess && (
+              <p className="text-sm text-emerald-600 flex items-center gap-1.5">
+                <CheckCircle2 className="h-4 w-4" /> Password updated successfully.
+              </p>
+            )}
+
+            <Button type="submit" disabled={pwLoading} size="sm">
+              {pwLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Update Password
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <FamilyMemberModal
         isOpen={isMemberModalOpen}
         onClose={() => setIsMemberModalOpen(false)}
         onSubmit={handleMemberModalSubmit}

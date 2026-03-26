@@ -38,3 +38,8 @@ class FamilyMemberUpdate(Schema):
     role: Optional[str] = None
     expected_age_at_retirement: Optional[int] = None
     expected_age_at_death: Optional[int] = None
+
+class ChangePasswordIn(Schema):
+    current_password: str
+    new_password: str
+    confirm_password: str

@@ -778,3 +778,25 @@ export async function fetchStatementCoverage(): Promise<StatementCoverage> {
   return res.json();
 }
 
+// --- Auth ---
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+  confirmPassword: string
+): Promise<void> {
+  const res = await fetch(`${API_URL}/users/change-password`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+      confirm_password: confirmPassword,
+    }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || 'Failed to change password');
+  }
+}
+

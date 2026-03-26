@@ -1,9 +1,10 @@
 from ninja import Router
+from ninja.errors import HttpError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from ninja_jwt.authentication import JWTAuth
 from typing import List
-from .schemas import RegisterUserIn, FamilyMemberOut, FamilyMemberIn, FamilyMemberUpdate
+from .schemas import RegisterUserIn, FamilyMemberOut, FamilyMemberIn, FamilyMemberUpdate, ChangePasswordIn
 from .models import Family, CustomUser, FamilyMember
 
 router = Router()
@@ -73,3 +74,21 @@ def delete_family_member(request, member_id: int):
     member = get_object_or_404(FamilyMember, id=member_id, family=user.family)
     member.delete()
     return {"success": True}
+
+@router.post("/change-password", auth=JWTAuth())
+def change_password(request, payload: ChangePasswordIn):
+    """Change the authenticated user's password after verifying their current password."""
+    user = request.auth
+
+    if not user.check_password(payload.current_password):
+        raise HttpError(400, "Current password is incorrect.")
+
+    if payload.new_password != payload.confirm_password:
+        raise HttpError(400, "New passwords do not match.")
+
+    if len(payload.new_password) < 8:
+        raise HttpError(400, "New password must be at least 8 characters.")
+
+    user.set_password(payload.new_password)
+    user.save()
+    return {"success": True, "message": "Password updated successfully."}
