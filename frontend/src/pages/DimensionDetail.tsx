@@ -7,7 +7,7 @@ import { fetchDimensionDetail } from '../api/client';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend
 } from 'recharts';
-import { ArrowLeft, Loader2, TrendingUp, TrendingDown, PieChart as PieIcon, List, ChevronRight, Calendar } from 'lucide-react';
+import { ArrowLeft, Loader2, TrendingUp, TrendingDown, PieChart as PieIcon, List, ChevronRight } from 'lucide-react';
 
 interface SubcategoryItem {
   name: string;

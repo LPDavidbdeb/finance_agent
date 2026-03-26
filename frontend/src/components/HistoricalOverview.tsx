@@ -80,7 +80,7 @@ const MiniMetricChart: React.FC<MiniMetricChartProps> = ({
             />
             <YAxis hide domain={['auto', 'auto']} />
             <Tooltip
-              formatter={(value: number) => [fmtFull(value), title]}
+              formatter={(value: any) => [fmtFull(value as number), title]}
               labelFormatter={(label) => `${label}`}
               contentStyle={{
                 fontSize: 12,

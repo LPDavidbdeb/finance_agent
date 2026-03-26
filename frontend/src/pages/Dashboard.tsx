@@ -289,7 +289,7 @@ export const Dashboard: React.FC = () => {
                 <XAxis dataKey="year" hide />
                 <YAxis hide domain={['auto', 'auto']} />
                 <Tooltip
-                  formatter={(v: number) => [`$${Math.abs(v).toLocaleString()}`, config.label]}
+                  formatter={(v: any) => [`$${Math.abs(v as number).toLocaleString()}`, config.label]}
                   labelFormatter={(l) => `${l}`}
                   contentStyle={{ fontSize: 11, borderRadius: 6, padding: '4px 8px' }}
                 />
@@ -421,7 +421,7 @@ export const Dashboard: React.FC = () => {
                         padding: '12px'
                       }} 
                       itemSorter={(item: any) => -item.value} // Sort tooltip by largest amount first
-                      formatter={(value: any, name: string) => [`$${value.toLocaleString()}`, name]}
+                      formatter={(value: any, name: any) => [`$${value.toLocaleString()}`, name]}
                     />
                     {categoryKeys.map((key, index) => (
                       <Bar 

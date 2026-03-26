@@ -408,7 +408,7 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({ isOpen, onClose,
         <CreateRuleModal
           isOpen={!!ruleTx}
           onClose={() => setRuleTx(null)}
-          onSuccess={(updatedCount) => {
+          onSuccess={(_updatedCount) => {
             setRuleTx(null);
             // Re-load the specific banner to reflect the new rule's categorization
             if (expandedBanner) {
