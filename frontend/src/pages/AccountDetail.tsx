@@ -76,6 +76,7 @@ interface AccountDetail {
   monthly_breakdown: MonthlyBreakdown[];
   historical_trends: YearlyTrend[];
   avg_yearly_total: number;
+  avg_monthly_avg: number;
 }
 
 const StatCard = ({ title, value, subValue, icon: Icon, color = "text-slate-900" }: any) => (
@@ -569,7 +570,7 @@ export const AccountDetail: React.FC = () => {
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart
                         data={sortedTrends}
-                        onClick={(e) => {
+                        onClick={(e: any) => {
                           if (e?.activePayload?.[0]?.payload?.year) {
                             handleYearChange(String(e.activePayload[0].payload.year));
                           }
@@ -710,7 +711,7 @@ export const AccountDetail: React.FC = () => {
                     <RechartsTooltip
                       cursor={{ fill: '#f8fafc' }}
                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
-                      formatter={(value: any, name: string) => [`$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, name]}
+                      formatter={(value: any, name: any) => [`$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, name]}
                     />
                     <ReferenceLine
                       y={monthlyAverage}

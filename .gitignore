@@ -1,10 +1,11 @@
-# Environment Variables
+# Environment Variables — machine-specific, never commit
 .env
 .env.local
+.env.remote
 
 # Project Specific
 venv/
-finance_agent/finance_backend/settings/local.py
+SYSTEM_MEMORY.md
 
 # Python #
 ##########

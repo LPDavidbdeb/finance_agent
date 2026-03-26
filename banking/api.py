@@ -102,6 +102,53 @@ def create_product(request, payload: FinancialProductIn):
     
     return product
 
+@router.post("/products/{product_id}/statements/batch-upload")
+def batch_upload_statements(request, product_id: int, files: List[UploadedFile] = File(...)):
+    """Stores multiple bank statements, skips duplicate files, and triggers Celery extraction for new ones."""
+    from banking.tasks import extract_transactions_task
+
+    user = request.auth
+    product = get_object_or_404(FinancialProduct, id=product_id, family=user.family)
+
+    results = {
+        "uploaded": [],
+        "skipped": [],
+        "failed": []
+    }
+
+    for file in files:
+        try:
+            file_content = file.read()
+            if not file_content.startswith(b'%PDF'):
+                results["failed"].append({"name": file.name, "reason": "Not a PDF file."})
+                continue
+                
+            file_hash = hashlib.sha256(file_content).hexdigest()
+            file.seek(0)
+
+            if BankStatementImport.objects.filter(file_hash=file_hash).exists():
+                results["skipped"].append({"name": file.name, "reason": "Duplicate file."})
+                continue
+
+            statement = BankStatementImport.objects.create(
+                financial_product=product,
+                file=file,
+                file_hash=file_hash,
+                status=BankStatementImport.Status.STAGED,
+                processed_by_ai=False,
+                processed_by_python=False,
+            )
+
+            # Queue extraction task
+            extract_transactions_task.delay(statement.id, user.id)
+            results["uploaded"].append({"name": file.name, "id": statement.id})
+
+        except Exception as e:
+            results["failed"].append({"name": file.name, "reason": str(e)})
+
+    return results
+
+
 @router.post("/products/{product_id}/statements/upload", response=StatementUploadOut)
 def upload_statement(request, product_id: int, file: File[UploadedFile], document_date: Optional[date] = Form(None)):
     """Stores a bank statement, blocks duplicate files, and triggers Celery extraction pipeline."""

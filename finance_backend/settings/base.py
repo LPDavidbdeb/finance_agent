@@ -1,14 +1,13 @@
 import os
 from pathlib import Path
-from dotenv import load_dotenv
 from datetime import timedelta
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 # Adjust BASE_DIR for the new settings folder structure
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-# Load environment variables
-load_dotenv(os.path.join(BASE_DIR, '.env'), override=True)
+# NOTE: load_dotenv is called in local.py / remote.py before this file is imported,
+# so environment variables are already populated by the time we read them here.
 
 # Secret key is now loaded from .env
 SECRET_KEY = os.environ.get('SECRET_KEY')

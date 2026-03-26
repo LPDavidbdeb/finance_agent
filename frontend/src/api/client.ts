@@ -1,4 +1,7 @@
-const API_URL = "http://localhost:8000/api";
+const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const API_URL = isDevelopment 
+  ? "http://localhost:8000/api" 
+  : `http://${window.location.hostname}:8000/api`;
 
 // Helper to get the auth header
 function getAuthHeader() {
@@ -355,6 +358,28 @@ export async function createFinancialProduct(data: any) {
     const errorData = await res.json().catch(() => null);
     throw new Error(errorData?.detail || "Failed to create financial product");
   }
+  return res.json();
+}
+
+export async function batchUploadStatements(productId: number, files: File[]) {
+  const formData = new FormData();
+
+  for (const file of files) {
+    formData.append('files', file);
+  }
+
+  const res = await fetch(`${API_URL}/banking/products/${productId}/statements/batch-upload`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    if (res.status === 401) throw new Error('Unauthorized');
+    throw new Error(errorData?.detail || 'Failed to upload statements');
+  }
+
   return res.json();
 }
 

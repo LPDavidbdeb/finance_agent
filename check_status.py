@@ -6,8 +6,7 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'finance_backend.settings.local'
 django.setup()
 
 from banking.models import BankStatementImport, StagedTransaction, FinancialProduct
-from accounting.models import JournalEntry
-from categorization.models import Transaction
+from accounting.models import JournalEntry, TransactionLine
 
 print("=" * 80)
 print("STATEMENT IMPORT STATUS")
@@ -36,38 +35,29 @@ print(f"Visa Desjardins statements imported: {visa_stmts.count()}")
 print(f"Visa Desjardins staged transactions: {visa_staged.count()}")
 
 # Count by status
-for status_val in [None, 'APPROVED', 'PENDING', 'REJECTED']:
-    if status_val is None:
-        count = visa_staged.filter(status__isnull=True).count()
-        label = "DEFAULT/APPROVED"
-    else:
-        count = visa_staged.filter(status=status_val).count()
-        label = status_val
-    if count > 0:
-        print(f"  - {label}: {count}")
+for status_val in ['RECONCILED', 'PENDING_REVIEW', 'UNPROCESSED']:
+    count = visa_staged.filter(status=status_val).count()
+    print(f"  - {status_val}: {count}")
 
 print("\n" + "=" * 80)
 print("VISA TRANSACTIONS IN LEDGER")
 print("=" * 80)
 
-# Check transactions created from Visa
-visa_transactions = Transaction.objects.filter(
-    journal_entry__account__product__in=visa_products
-)
-print(f"Transactions in ledger from Visa: {visa_transactions.count()}")
+# Check transaction lines created from Visa
+visa_transaction_lines = TransactionLine.objects.filter(
+    journal_entry__staged_transactions__statement_import__financial_product__in=visa_products
+).distinct()
+print(f"Transaction lines in ledger from Visa: {visa_transaction_lines.count()}")
 
 print("\n" + "=" * 80)
 print("SUMMARY")
 print("=" * 80)
-print(f"✅ 26 Visa statements imported and COMPLETED")
-print(f"✅ 775 transactions extracted and staged")
-print(f"✅ {visa_transactions.count()} transactions posted to ledger")
-
-unposted = visa_staged.count() - visa_transactions.count()
-if unposted > 0:
-    print(f"⚠️  {unposted} staged transactions NOT YET POSTED to ledger")
+if total == 0:
+    print("Empty instance: No data found.")
 else:
-    print(f"✅ All staged transactions posted to ledger!")
+    print(f"✅ {visa_stmts.filter(status='COMPLETED').count()} Visa statements imported and COMPLETED")
+    print(f"✅ {visa_staged.count()} transactions extracted and staged")
+    print(f"✅ {visa_transaction_lines.count()} lines posted to ledger")
 
 
 
