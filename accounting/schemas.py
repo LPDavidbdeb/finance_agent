@@ -118,6 +118,8 @@ class BannerTransactionOut(Schema):
     routed_to: str
     routed_to_id: int
     statement_id: Optional[int] = None
+    raw_description: str
+    institution_id: Optional[int] = None
 
 class AccountTransactionOut(Schema):
     journal_entry_id: int
@@ -137,3 +139,15 @@ class FlatAccountOut(Schema):
     name: str
     account_type: str
     depth: int
+
+class AnnualYearDataOut(Schema):
+    year: int
+    revenue: float
+    expenses: float
+    net_income: float
+    assets: float
+    liabilities: float
+    net_worth: float
+
+class AnnualHistoryOut(Schema):
+    years: List[AnnualYearDataOut]

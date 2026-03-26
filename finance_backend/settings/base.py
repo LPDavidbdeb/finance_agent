@@ -120,6 +120,10 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^http://192\.168\.\d+\.\d+:5173$",  # any LAN device on 192.168.x.x
+    r"^http://10\.\d+\.\d+\.\d+:5173$",   # any LAN device on 10.x.x.x
+]
 CORS_ALLOW_HEADERS = [
     "accept",
     "accept-encoding",

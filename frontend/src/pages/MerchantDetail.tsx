@@ -13,12 +13,14 @@ import {
   fetchMerchantStats,
   deleteRule,
   fetchRuleStats,
+  fetchUnmappedStrings,
 } from '../api/client';
 import { AccountTree } from '../components/AccountTree';
+import { CreateRuleModal } from '../components/CreateRuleModal';
 import { useToast } from '../components/ui/use-toast';
 import {
   Loader2, Edit2, Check, X, ArrowLeft, Merge, Trash2, Tag,
-  History, DollarSign, TrendingUp, Calendar, ChevronRight
+  History, DollarSign, TrendingUp, Calendar, ChevronRight, Search, Wand2
 } from 'lucide-react';
 
 interface MappingRule {
@@ -80,6 +82,13 @@ export const MerchantDetail: React.FC = () => {
   const [mergeSearch, setMergeSearch] = useState('');
   const [selectedSourceIds, setSelectedSourceIds] = useState<number[]>([]);
   const [mergeLoading, setMergeLoading] = useState(false);
+
+  // Orphaned Transactions state
+  const [orphanedSearch, setOrphanedSearch] = useState('');
+  const [orphanedResults, setOrphanedResults] = useState<any[]>([]);
+  const [orphanedLoading, setOrphanedLoading] = useState(false);
+  const [ruleModalOpen, setRuleModalOpen] = useState(false);
+  const [selectedOrphan, setSelectedOrphan] = useState<any>(null);
 
   useEffect(() => {
     if (id) {
@@ -210,6 +219,19 @@ export const MerchantDetail: React.FC = () => {
     setSelectedSourceIds(prev => 
       prev.includes(sourceId) ? prev.filter(id => id !== sourceId) : [...prev, sourceId]
     );
+  };
+
+  const handleOrphanedSearch = async () => {
+    if (orphanedSearch.length < 2) return;
+    setOrphanedLoading(true);
+    try {
+      const data = await fetchUnmappedStrings(orphanedSearch);
+      setOrphanedResults(data);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Search failed", description: err.message });
+    } finally {
+      setOrphanedLoading(false);
+    }
   };
 
   const filteredMerchants = allMerchants.filter(m => 
@@ -489,6 +511,84 @@ export const MerchantDetail: React.FC = () => {
           </CardContent>
         </Card>
 
+        {/* Orphaned Transactions Search */}
+        <Card className="lg:col-span-2 shadow-sm border-purple-100 bg-purple-50/10">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-purple-900">
+              <Search className="h-5 w-5" />
+              Orphaned Transactions
+            </CardTitle>
+            <CardDescription>
+              Find unmapped bank strings and pull them into {merchant.name}.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Input 
+                  placeholder="Search unmapped descriptions (e.g. 'tax')..." 
+                  value={orphanedSearch}
+                  onChange={(e) => setOrphanedSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleOrphanedSearch()}
+                  className="bg-white border-purple-200 focus:ring-purple-500 pl-10"
+                />
+                <Search className="absolute left-3 top-3 h-4 w-4 text-purple-400" />
+              </div>
+              <Button 
+                onClick={handleOrphanedSearch} 
+                disabled={orphanedLoading || orphanedSearch.length < 2}
+                className="bg-purple-600 hover:bg-purple-700 text-white"
+              >
+                {orphanedLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Search"}
+              </Button>
+            </div>
+
+            {orphanedResults.length > 0 && (
+              <div className="border rounded-lg overflow-hidden bg-white">
+                <table className="w-full text-sm">
+                  <thead className="bg-purple-50/50 border-b border-purple-100">
+                    <tr className="text-[10px] font-black uppercase text-purple-700">
+                      <th className="px-4 py-2 text-left">Bank String</th>
+                      <th className="px-4 py-2 text-center">Occurrences</th>
+                      <th className="px-4 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-purple-50">
+                    {orphanedResults.map((res, idx) => (
+                      <tr key={idx} className="hover:bg-purple-50/30 transition-colors group">
+                        <td className="px-4 py-3 font-mono text-xs text-slate-700">{res.raw_description}</td>
+                        <td className="px-4 py-3 text-center">
+                          <Badge variant="secondary" className="bg-purple-100 text-purple-700 rounded-full">
+                            {res.count}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-8 text-purple-600 hover:text-purple-700 hover:bg-purple-100 gap-1"
+                            onClick={() => {
+                              setSelectedOrphan(res);
+                              setRuleModalOpen(true);
+                            }}
+                          >
+                            <Wand2 className="h-3.5 w-3.5" />
+                            <span className="text-[10px] font-bold uppercase">Create Rule</span>
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {orphanedResults.length === 0 && !orphanedLoading && orphanedSearch.length >= 2 && (
+              <p className="text-center py-6 text-slate-400 text-xs italic">No unmapped transactions found matching "{orphanedSearch}".</p>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Merge Tool */}
         <div className="space-y-6">
           <Card className="shadow-md border-orange-100 bg-orange-50/20">
@@ -637,6 +737,28 @@ export const MerchantDetail: React.FC = () => {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {ruleModalOpen && selectedOrphan && (
+        <CreateRuleModal 
+          isOpen={ruleModalOpen}
+          onClose={() => {
+            setRuleModalOpen(false);
+            setSelectedOrphan(null);
+          }}
+          onSuccess={(count) => {
+            toast({ 
+              title: "Rule created", 
+              description: `Successfully mapped and auto-approved ${count} transactions.` 
+            });
+            loadData(Number(id));
+            setOrphanedSearch('');
+            setOrphanedResults([]);
+          }}
+          rawDescription={selectedOrphan.raw_description}
+          institutionId={selectedOrphan.institution_id}
+          preselectedMerchant={merchant}
+        />
       )}
     </div>
   );

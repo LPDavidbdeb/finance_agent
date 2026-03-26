@@ -29,6 +29,7 @@ interface CreateRuleModalProps {
   onSuccess: (updatedCount: number) => void;
   rawDescription: string;
   institutionId: number;
+  preselectedMerchant?: Merchant | null;
 }
 
 export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
@@ -36,7 +37,8 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
   onClose,
   onSuccess,
   rawDescription,
-  institutionId
+  institutionId,
+  preselectedMerchant
 }) => {
   const [formData, setFormData] = useState({
     search_text: '',
@@ -62,20 +64,27 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
     if (isOpen) {
       setFormData({
         search_text: rawDescription.trim(),
-        merchant_name: '',
-        target_account_id: 0,
-        is_unique_provider: true,
+        merchant_name: preselectedMerchant ? preselectedMerchant.name : '',
+        target_account_id: preselectedMerchant?.default_account_id || 0,
+        is_unique_provider: preselectedMerchant ? preselectedMerchant.is_unique_provider : true,
         institution_id: institutionId,
         min_amount: '',
         max_amount: '',
       });
-      setSelectedAccountName(null);
+
+      if (preselectedMerchant) {
+        setSelectedMerchant(preselectedMerchant);
+        setSelectedAccountName(preselectedMerchant.default_account_name || null);
+      } else {
+        setSelectedAccountName(null);
+        setSelectedMerchant(null);
+      }
+
       setIsTreeOpen(false);
-      setSelectedMerchant(null);
       loadMerchants();
     }
     setError(null);
-  }, [isOpen, rawDescription, institutionId]);
+  }, [isOpen, rawDescription, institutionId, preselectedMerchant]);
 
   const loadMerchants = async () => {
     try {

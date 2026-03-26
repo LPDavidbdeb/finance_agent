@@ -55,6 +55,24 @@ export async function fetchAnnualStatements(year: number) {
   return res.json();
 }
 
+export interface AnnualYearData {
+  year: number;
+  revenue: number;
+  expenses: number;
+  net_income: number;
+  assets: number;
+  liabilities: number;
+  net_worth: number;
+}
+
+export async function fetchAnnualStatementsHistory(): Promise<{ years: AnnualYearData[] }> {
+  const res = await fetch(`${API_URL}/accounting/annual-statements/history`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch annual history");
+  return res.json();
+}
+
 export async function fetchDimensionDetail(slug: string, year: number) {
   const res = await fetch(`${API_URL}/accounting/reports/dimension/${slug}?year=${year}`, {
     headers: getAuthHeader(),
@@ -499,6 +517,13 @@ export async function fetchMerchantDetail(id: number) {
     if (res.status === 401) throw new Error("Unauthorized");
     throw new Error("Failed to fetch merchant details");
   }
+  return res.json();
+}
+
+export async function fetchUnmappedStrings(query?: string) {
+  const url = `${API_URL}/categorization/unmapped-strings${query ? `?q=${encodeURIComponent(query)}` : ''}`;
+  const res = await fetch(url, { headers: getAuthHeader() });
+  if (!res.ok) throw new Error("Failed to fetch unmapped strings");
   return res.json();
 }
 

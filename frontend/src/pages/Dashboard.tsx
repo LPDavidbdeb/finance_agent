@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { 
+import {
   fetchSpendingByCategory,
   fetchAnnualStatements,
+  fetchAnnualStatementsHistory,
   fetchDimensionDetail,
   fetchDimensionEvolution,
-  fetchAvailableYears
+  fetchAvailableYears,
+  AnnualYearData,
 } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { 
+import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
-  PieChart, Pie, Cell
+  PieChart, Pie, Cell, AreaChart, Area, ReferenceLine,
 } from 'recharts';
 import { Loader2, TrendingDown, TrendingUp, Wallet, Receipt, PieChart as PieIcon, RefreshCw } from 'lucide-react';
 import { DrillDownModal } from '../components/DrillDownModal';
@@ -36,13 +38,76 @@ export const Dashboard: React.FC = () => {
   const [evolutionData, setEvolutionData] = useState<any[]>([]);
   const [categoryData, setCategoryData] = useState<any[]>([]);
   const [statements, setStatements] = useState<any>(null);
-  
+  const [historicalYears, setHistoricalYears] = useState<AnnualYearData[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Drill-down State
   const [isDrillDownOpen, setIsDrillDownOpen] = useState(false);
   const [drillDownPeriod, setDrillDownPeriod] = useState('');
+
+  // Process data to only show Top 4 + OTHER
+  const processedData = useMemo(() => {
+    if (evolutionData.length === 0) return [];
+    
+    // 1. Sum up all keys across the whole period
+    const totals: Record<string, number> = {};
+    evolutionData.forEach(item => {
+      Object.keys(item).forEach(key => {
+        if (key !== 'period' && key !== 'amount') {
+          totals[key] = (totals[key] || 0) + (item[key] || 0);
+        }
+      });
+    });
+
+    // 2. Sort and pick top 4
+    const sortedKeys = Object.entries(totals)
+      .sort((a, b) => b[1] - a[1])
+      .map(entry => entry[0]);
+    
+    const top4 = sortedKeys.slice(0, 4);
+    const others = sortedKeys.slice(4);
+
+    // 3. Rebuild data
+    return evolutionData.map(item => {
+      const newItem: any = { period: item.period, amount: item.amount };
+      let otherSum = 0;
+      
+      top4.forEach(key => {
+        newItem[key] = item[key] || 0;
+      });
+      
+      others.forEach(key => {
+        otherSum += (item[key] || 0);
+      });
+      
+      if (others.length > 0) {
+        newItem['OTHER'] = otherSum;
+      }
+      
+      return newItem;
+    });
+  }, [evolutionData]);
+
+  // Extract unique category keys for stacked chart (sorted by total volume)
+  const categoryKeys = useMemo(() => {
+    if (processedData.length === 0) return [];
+    
+    // Sum again on processed data to get consistent sorting
+    const totals: Record<string, number> = {};
+    processedData.forEach(item => {
+      Object.keys(item).forEach(key => {
+        if (key !== 'period' && key !== 'amount') {
+          totals[key] = (totals[key] || 0) + (item[key] || 0);
+        }
+      });
+    });
+
+    return Object.entries(totals)
+      .sort((a, b) => b[1] - a[1])
+      .map(entry => entry[0]);
+  }, [processedData]);
 
   // Load available years on mount
   useEffect(() => {
@@ -66,6 +131,14 @@ export const Dashboard: React.FC = () => {
 
     loadYears();
   }, [isAuthenticated, navigate]);
+
+  // Fetch historical data once after years are known — not re-fetched on tab/year changes
+  useEffect(() => {
+    if (!isAuthenticated || availableYears.length === 0) return;
+    fetchAnnualStatementsHistory()
+      .then(data => setHistoricalYears(data.years))
+      .catch(() => {}); // non-fatal — panel simply won't render
+  }, [isAuthenticated, availableYears.length]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -157,22 +230,43 @@ export const Dashboard: React.FC = () => {
     );
   }
 
+  const dimToHistoryKey: Record<Dimension, keyof AnnualYearData> = {
+    revenue: 'revenue',
+    expenses: 'expenses',
+    'net-income': 'net_income',
+    assets: 'assets',
+    liabilities: 'liabilities',
+    'net-worth': 'net_worth',
+  };
+
+  const dimToSparkColor: Record<Dimension, string> = {
+    revenue: '#10b981',
+    expenses: '#f97316',
+    'net-income': '#3b82f6',
+    assets: '#059669',
+    liabilities: '#ef4444',
+    'net-worth': '#818cf8',
+  };
+
   const renderSummaryCard = (dim: Dimension, amount: number) => {
     const config = dimensionConfig[dim];
     const isActive = activeDimension === dim;
     const isNetWorth = dim === 'net-worth';
+    const sparkColor = dimToSparkColor[dim];
+    const histKey = dimToHistoryKey[dim];
+    const sparkData = historicalYears.length > 1 ? historicalYears : [];
 
     return (
-      <Card 
+      <Card
         key={dim}
         className={`cursor-pointer transition-all duration-200 border-l-4 ${config.color} ${
-          isActive 
-            ? 'shadow-lg ring-2 ring-blue-400 ring-offset-2 scale-[1.02]' 
+          isActive
+            ? 'shadow-lg ring-2 ring-blue-400 ring-offset-2 scale-[1.02]'
             : 'hover:bg-slate-50 hover:shadow-md'
         } ${isNetWorth && !isActive ? 'bg-slate-900 text-white border-none' : ''} ${isNetWorth && isActive ? 'bg-slate-800 text-white ring-offset-slate-900' : ''}`}
         onClick={() => setActiveDimension(dim)}
       >
-        <CardHeader className="pb-2">
+        <CardHeader className="pb-1">
           <CardDescription className={`text-[10px] uppercase font-bold tracking-widest ${isNetWorth ? 'text-slate-400' : ''}`}>
             {config.label}
           </CardDescription>
@@ -181,6 +275,43 @@ export const Dashboard: React.FC = () => {
             ${Math.abs(amount).toLocaleString()}
           </CardTitle>
         </CardHeader>
+
+        {sparkData.length > 1 && (
+          <div className="h-[52px] w-full px-1 pb-2">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={sparkData} margin={{ top: 2, right: 4, bottom: 0, left: 4 }}>
+                <defs>
+                  <linearGradient id={`spark-${dim}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={sparkColor} stopOpacity={0.3} />
+                    <stop offset="95%" stopColor={sparkColor} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="year" hide />
+                <YAxis hide domain={['auto', 'auto']} />
+                <Tooltip
+                  formatter={(v: number) => [`$${Math.abs(v).toLocaleString()}`, config.label]}
+                  labelFormatter={(l) => `${l}`}
+                  contentStyle={{ fontSize: 11, borderRadius: 6, padding: '4px 8px' }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey={histKey as string}
+                  stroke={sparkColor}
+                  strokeWidth={1.5}
+                  fill={`url(#spark-${dim})`}
+                  dot={false}
+                  isAnimationActive={false}
+                />
+                <ReferenceLine
+                  x={selectedYear}
+                  stroke={isNetWorth ? '#94a3b8' : '#64748b'}
+                  strokeWidth={1.5}
+                  strokeDasharray="3 3"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </Card>
     );
   };
@@ -264,25 +395,56 @@ export const Dashboard: React.FC = () => {
             </div>
           </CardHeader>
           <CardContent className="pt-6">
-            {evolutionData.length > 0 ? (
+            {processedData.length > 0 ? (
               <div className="h-[350px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={evolutionData}>
+                  <BarChart data={processedData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} dy={10} />
-                    <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} tickFormatter={(v) => `$${v}`} />
+                    <XAxis 
+                      dataKey="period" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={false} // Clean up bottom of chart
+                    />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{fontSize: 10, fill: '#64748b', fontWeight: 600}} 
+                      tickFormatter={(v) => `$${v.toLocaleString()}`} 
+                    />
                     <Tooltip 
-                      cursor={{fill: '#f8fafc'}} 
-                      contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}} 
-                      formatter={(value: any) => [`$${value.toLocaleString()}`, activeDimension.replace('-', ' ').toUpperCase()]}
+                      cursor={{fill: '#f1f5f9', opacity: 0.4}} 
+                      contentStyle={{
+                        borderRadius: '12px', 
+                        border: '1px solid #e2e8f0', 
+                        boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+                        padding: '12px'
+                      }} 
+                      itemSorter={(item: any) => -item.value} // Sort tooltip by largest amount first
+                      formatter={(value: any, name: string) => [`$${value.toLocaleString()}`, name]}
                     />
-                    <Bar 
-                      dataKey="amount" 
-                      fill="#3b82f6" 
-                      radius={[4, 4, 0, 0]} 
-                      onClick={handleBarClick}
-                      className="cursor-pointer hover:opacity-80 transition-opacity"
-                    />
+                    {categoryKeys.map((key, index) => (
+                      <Bar 
+                        key={key}
+                        dataKey={key} 
+                        stackId="a"
+                        fill={COLORS[index % COLORS.length]} 
+                        radius={index === categoryKeys.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                        onClick={handleBarClick}
+                        className="cursor-pointer hover:opacity-80 transition-opacity"
+                      />
+                    ))
+                    }
+                    {/* Fallback if no breakdown available (e.g. Net Income) */}
+                    {categoryKeys.length === 0 && (
+                      <Bar 
+                        dataKey="amount" 
+                        fill="#3b82f6" 
+                        radius={[4, 4, 0, 0]} 
+                        onClick={handleBarClick}
+                        className="cursor-pointer hover:opacity-80 transition-opacity"
+                      />
+                    )}
                   </BarChart>
                 </ResponsiveContainer>
               </div>

@@ -13,6 +13,7 @@ from .models import Account, TransactionLine, JournalEntry
 from .schemas import (
     AccountDetailOut, DimensionBreakdownOut, AccountCreateIn, AccountOut,
     DrillDownOut, DrillDownBannerOut, BannerTransactionOut, RerouteIn, FlatAccountOut,
+    AnnualHistoryOut,
     AccountTransactionOut
 )
 from categorization.models import Merchant
@@ -368,9 +369,12 @@ def get_banner_transactions(request, dimension_slug: str, period: str, banner: s
     except (ValueError, TypeError):
         raise errors.HttpError(400, "Invalid period format. Use YYYY-MM.")
 
-    fp_account_ids = set(
-        FinancialProduct.objects.filter(family=family).values_list('account_id', flat=True)
-    )
+    # Create a map to easily grab the institution_id
+    fp_map = {
+        fp.account_id: fp.institution_id
+        for fp in FinancialProduct.objects.filter(family=family)
+    }
+    fp_account_ids = set(fp_map.keys())
 
     entries = JournalEntry.objects.filter(
         family=family,
@@ -384,9 +388,17 @@ def get_banner_transactions(request, dimension_slug: str, period: str, banner: s
         source_line = next((l for l in lines if l.account_id in fp_account_ids), None)
         category_line = next((l for l in lines if l.account_id not in fp_account_ids), None)
         
+        # Fallback if self-routed (both legs are FP accounts, e.g. credit card payment)
+        if not category_line and len(lines) >= 2:
+            category_line = next((l for l in lines if l != source_line), lines[1])
+
         # Link back to statement if available
         staged_tx = entry.staged_transactions.first()
         statement_id = staged_tx.statement_import_id if staged_tx else None
+        
+        # Grab raw description and institution ID for rule creation
+        raw_description = staged_tx.raw_description if staged_tx else entry.description
+        institution_id = fp_map.get(source_line.account_id) if source_line else None
 
         results.append({
             'journal_entry_id': entry.id,
@@ -396,6 +408,8 @@ def get_banner_transactions(request, dimension_slug: str, period: str, banner: s
             'routed_to': category_line.account.name if category_line else '—',
             'routed_to_id': category_line.account_id if category_line else 0,
             'statement_id': statement_id,
+            'raw_description': raw_description,
+            'institution_id': institution_id,
         })
 
     return sorted(results, key=lambda x: x['date'], reverse=True)
@@ -416,9 +430,11 @@ def reroute_journal_entry(request, entry_id: int, payload: RerouteIn):
     entry = get_object_or_404(JournalEntry, id=entry_id, family=family)
     new_account = get_object_or_404(Account, id=payload.new_account_id, family=family)
 
-    fp_account_ids = set(
-        FinancialProduct.objects.filter(family=family).values_list('account_id', flat=True)
-    )
+    fp_map = {
+        fp.account_id: fp.institution_id
+        for fp in FinancialProduct.objects.filter(family=family)
+    }
+    fp_account_ids = set(fp_map.keys())
 
     lines = list(entry.lines.select_related('account').all())
     source_line = next((l for l in lines if l.account_id in fp_account_ids), None)
@@ -434,6 +450,10 @@ def reroute_journal_entry(request, entry_id: int, payload: RerouteIn):
     # Link back to statement if available
     staged_tx = entry.staged_transactions.first()
     statement_id = staged_tx.statement_import_id if staged_tx else None
+    
+    # Grab raw description and institution ID for rule creation compatibility
+    raw_description = staged_tx.raw_description if staged_tx else entry.description
+    institution_id = fp_map.get(source_line.account_id) if source_line else None
 
     return {
         'journal_entry_id': entry.id,
@@ -443,6 +463,8 @@ def reroute_journal_entry(request, entry_id: int, payload: RerouteIn):
         'routed_to': new_account.name,
         'routed_to_id': new_account.id,
         'statement_id': statement_id,
+        'raw_description': raw_description,
+        'institution_id': institution_id,
     }
 
 
@@ -706,7 +728,7 @@ def get_dimension_evolution(
     interval: Literal['bi-weekly', 'monthly'] = 'monthly'
 ):
     """
-    Returns time-series data for any financial dimension.
+    Returns time-series data for any financial dimension with category-level breakdown.
     """
     user = request.auth
     family = user.family
@@ -716,16 +738,27 @@ def get_dimension_evolution(
         root_revenue = Account.objects.filter(family=family, name='Revenue', parent=None).first()
         root_expenses = Account.objects.filter(family=family, name='Expenses', parent=None).first()
         
-        rev_ids = root_revenue.get_descendants(include_self=True).values_list('id', flat=True) if root_revenue else []
-        exp_ids = root_expenses.get_descendants(include_self=True).values_list('id', flat=True) if root_expenses else []
+        rev_ids = list(root_revenue.get_descendants(include_self=True).values_list('id', flat=True)) if root_revenue else []
+        exp_ids = list(root_expenses.get_descendants(include_self=True).values_list('id', flat=True)) if root_expenses else []
         
         target_ids = []
+        root = None
         if dimension == 'revenue':
-            target_ids = list(rev_ids)
+            target_ids = rev_ids
+            root = root_revenue
         elif dimension == 'expenses':
-            target_ids = list(exp_ids)
+            target_ids = exp_ids
+            root = root_expenses
         else: # net-income
-            target_ids = list(rev_ids) + list(exp_ids)
+            target_ids = rev_ids + exp_ids
+
+        # Build account-to-category mapping for breakdown
+        account_to_cat = {}
+        if root and dimension != 'net-income':
+            for child in root.get_children():
+                d_ids = child.get_descendants(include_self=True).values_list('id', flat=True)
+                for d_id in d_ids:
+                    account_to_cat[d_id] = child.name
 
         queryset = TransactionLine.objects.filter(
             journal_entry__family=family,
@@ -735,55 +768,55 @@ def get_dimension_evolution(
 
         trunc_func = TruncMonth('journal_entry__date') if interval == 'monthly' else TruncWeek('journal_entry__date')
         
-        # Group by period and account type to handle net-income calculation correctly
-        # or just sum and handle signs.
-        # Revenue is negative, Expenses is positive.
-        # Display Revenue as positive: -sum
-        # Display Expenses as positive: sum
-        # Display Net Income as -rev - exp
-        
         if dimension == 'net-income':
-            # We need to distinguish between rev and exp lines
             results = queryset.annotate(period=trunc_func).values('period', 'account__account_type').annotate(total=Sum('amount')).order_by('period')
-            # Post-process to group by period
             period_map = {}
             for r in results:
                 p = r['period']
                 if p not in period_map: period_map[p] = 0.0
                 val = float(r['total'])
-                # Net income display = -Revenue (credits) - Expenses (debits)
-                # Since Revenue is stored as negative, -val adds it.
                 period_map[p] += -val
             
-            final_results = [{"period": p, "total": v} for p, v in period_map.items()]
+            final_results = [{"period": p, "amount": v} for p, v in period_map.items()]
             final_results.sort(key=lambda x: x['period'])
         else:
-            results = queryset.annotate(period=trunc_func).values('period').annotate(total=Sum('amount')).order_by('period')
-            final_results = []
+            results = queryset.annotate(period=trunc_func).values('period', 'account_id').annotate(total=Sum('amount')).order_by('period')
+            period_map = {}
             for r in results:
+                p = r['period']
+                if p not in period_map:
+                    period_map[p] = {"period": p, "amount": 0.0}
+                
                 val = float(r['total'])
                 display_val = -val if dimension == 'revenue' else val
-                final_results.append({"period": r['period'], "total": display_val})
+                period_map[p]["amount"] += display_val
+                
+                cat_name = account_to_cat.get(r['account_id'], f"Directly under {root.name}")
+                period_map[p][cat_name] = period_map[p].get(cat_name, 0.0) + display_val
+            
+            final_results = list(period_map.values())
+            final_results.sort(key=lambda x: x['period'])
 
         # Bi-weekly post-processing
         if interval == 'bi-weekly':
             bi_weekly = []
             for i in range(0, len(final_results), 2):
                 item = final_results[i]
-                amount = item['total']
+                # Merge two periods
+                new_item = item.copy()
                 if i + 1 < len(final_results):
-                    amount += final_results[i+1]['total']
-                bi_weekly.append({
-                    "period": item['period'].strftime("%Y-%m-%d"),
-                    "amount": float(amount)
-                })
+                    next_item = final_results[i+1]
+                    new_item["amount"] += next_item["amount"]
+                    for k, v in next_item.items():
+                        if k not in ["period", "amount"]:
+                            new_item[k] = new_item.get(k, 0.0) + v
+                
+                new_item["period"] = new_item["period"].strftime("%Y-%m-%d")
+                bi_weekly.append(new_item)
             return bi_weekly
 
         return [
-            {
-                "period": r['period'].strftime("%Y-%m" if interval == 'monthly' else "%Y-%m-%d"),
-                "amount": float(r['total'])
-            }
+            {**r, "period": r['period'].strftime("%Y-%m" if interval == 'monthly' else "%Y-%m-%d")}
             for r in final_results
         ]
 
@@ -792,44 +825,58 @@ def get_dimension_evolution(
         root_assets = Account.objects.filter(family=family, name='Assets', parent=None).first()
         root_liabilities = Account.objects.filter(family=family, name='Liabilities', parent=None).first()
         
-        ast_ids = list(root_assets.get_descendants(include_self=True).values_list('id', flat=True)) if root_assets else []
-        lib_ids = list(root_liabilities.get_descendants(include_self=True).values_list('id', flat=True)) if root_liabilities else []
+        root = None
+        if dimension == 'assets': root = root_assets
+        elif dimension == 'liabilities': root = root_liabilities
+        else: root = None # net-worth handling below
         
-        all_ids = []
-        if dimension == 'assets': all_ids = ast_ids
-        elif dimension == 'liabilities': all_ids = lib_ids
-        else: all_ids = ast_ids + lib_ids # net-worth
+        # Breakdown mapping for assets/liabilities
+        account_to_cat = {}
+        if root:
+            for child in root.get_children():
+                d_ids = child.get_descendants(include_self=True).values_list('id', flat=True)
+                for d_id in d_ids:
+                    account_to_cat[d_id] = child.name
 
-        # Iterate through periods to get ending balances
-        # We start from start_date and move to end_date
-        current_p = start_date.replace(day=1) # start of month
+        current_p = start_date.replace(day=1)
         results = []
         
         while current_p <= end_date:
-            # End of month
             end_of_p = current_p + relativedelta(months=1) - relativedelta(days=1)
             
-            # Cumulative sum
-            total = TransactionLine.objects.filter(
-                journal_entry__family=family,
-                account_id__in=all_ids,
-                journal_entry__date__lte=end_of_p
-            ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
-            
-            display_val = float(total)
-            if dimension == 'liabilities': display_val = -display_val
-            # Net worth is already Assets + Liabilities (where lib is negative)
-            
-            results.append({
+            period_data = {
                 "period": current_p.strftime("%Y-%m"),
-                "amount": float(display_val)
-            })
+                "amount": 0.0
+            }
+
+            if dimension == 'net-worth':
+                total = TransactionLine.objects.filter(
+                    journal_entry__family=family,
+                    account__account_type__in=[Account.AccountType.ASSET, Account.AccountType.LIABILITY],
+                    journal_entry__date__lte=end_of_p
+                ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
+                period_data["amount"] = float(total)
+            else:
+                # Optimized breakdown query for stock dimensions
+                branch_ids = list(root.get_descendants(include_self=True).values_list('id', flat=True)) if root else []
+                qs = TransactionLine.objects.filter(
+                    journal_entry__family=family,
+                    account_id__in=branch_ids,
+                    journal_entry__date__lte=end_of_p
+                ).values('account_id').annotate(total=Sum('amount'))
+                
+                total_acc = 0.0
+                for item in qs:
+                    val = float(item['total'])
+                    display_val = -val if dimension == 'liabilities' else val
+                    total_acc += display_val
+                    cat_name = account_to_cat.get(item['account_id'], f"Directly under {root.name}")
+                    period_data[cat_name] = period_data.get(cat_name, 0.0) + display_val
+                
+                period_data["amount"] = total_acc
             
+            results.append(period_data)
             current_p += relativedelta(months=1) if interval == 'monthly' else relativedelta(weeks=2)
-            if interval == 'bi-weekly':
-                # Bi-weekly implementation for stock is tricky if we want exact 14 day snapshots.
-                # For now, let's keep it simple.
-                pass
 
         return results
 
@@ -921,6 +968,60 @@ def get_spending_by_category(request, start_date: date, end_date: date):
     # Sort by highest spend
     results.sort(key=lambda x: x['amount'], reverse=True)
     return results
+
+@router.get("/annual-statements/history", response=AnnualHistoryOut)
+def get_annual_statements_history(request):
+    """
+    Returns Income Statement + Balance Sheet key metrics for ALL available years.
+    Used to power the Historical Overview panel on the Dashboard.
+    """
+    family = request.auth.family
+
+    years_qs = JournalEntry.objects.filter(family=family).dates('date', 'year')
+    available_years = sorted(set(y.year for y in years_qs))
+
+    def get_sum(root_name, start, end):
+        root = Account.objects.filter(family=family, name=root_name, parent=None).first()
+        if not root:
+            return Decimal('0.00')
+        ids = root.get_descendants(include_self=True).values_list('id', flat=True)
+        return TransactionLine.objects.filter(
+            journal_entry__family=family,
+            account_id__in=ids,
+            journal_entry__date__range=[start, end]
+        ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
+
+    def get_cumulative_sum(root_name, up_to_date):
+        root = Account.objects.filter(family=family, name=root_name, parent=None).first()
+        if not root:
+            return Decimal('0.00')
+        ids = root.get_descendants(include_self=True).values_list('id', flat=True)
+        return TransactionLine.objects.filter(
+            journal_entry__family=family,
+            account_id__in=ids,
+            journal_entry__date__lte=up_to_date
+        ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
+
+    result = []
+    for year in available_years:
+        jan_1 = date(year, 1, 1)
+        dec_31 = date(year, 12, 31)
+        revenue = get_sum('Revenue', jan_1, dec_31)
+        expenses = get_sum('Expenses', jan_1, dec_31)
+        assets = get_cumulative_sum('Assets', dec_31)
+        liabilities = get_cumulative_sum('Liabilities', dec_31)
+        result.append({
+            "year": year,
+            "revenue": float(-revenue),
+            "expenses": float(expenses),
+            "net_income": float(-revenue - expenses),
+            "assets": float(assets),
+            "liabilities": float(-liabilities),
+            "net_worth": float(assets) - abs(float(liabilities)),
+        })
+
+    return {"years": result}
+
 
 @router.get("/annual-statements")
 def get_annual_statements(request, year: int):

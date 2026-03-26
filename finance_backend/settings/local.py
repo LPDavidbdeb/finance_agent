@@ -10,7 +10,7 @@ from .base import *
 
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '*']  # '*' allows LAN access from iPad/other devices
 
 X_FRAME_OPTIONS = 'ALLOWALL'
 

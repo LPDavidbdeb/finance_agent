@@ -3,8 +3,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { fetchDrillDown, fetchBannerTransactions, fetchAccountsFlat, rerouteJournalEntry } from '../api/client';
-import { Loader2, X, FileText, List, ArrowRight, Store, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronRight, ArrowRightLeft, Check, Eye } from 'lucide-react';
+import { Loader2, X, FileText, List, ArrowRight, Store, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronRight, ArrowRightLeft, Check, Eye, Wand2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import { CreateRuleModal } from './CreateRuleModal';
 
 interface DrillDownModalProps {
   isOpen: boolean;
@@ -28,6 +29,8 @@ interface BannerTx {
   routed_to: string;
   routed_to_id: number;
   statement_id?: number;
+  raw_description: string;
+  institution_id?: number;
 }
 
 export const DrillDownModal: React.FC<DrillDownModalProps> = ({ isOpen, onClose, dimension, period }) => {
@@ -39,6 +42,9 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({ isOpen, onClose,
   const [expandedBanner, setExpandedBanner] = useState<string | null>(null);
   const [bannerTxs, setBannerTxs] = useState<Record<string, BannerTx[]>>({});
   const [loadingBanner, setLoadingBanner] = useState<string | null>(null);
+
+  // New state for rule creation
+  const [ruleTx, setRuleTx] = useState<BannerTx | null>(null);
 
   // Re-route state
   const [flatAccounts, setFlatAccounts] = useState<FlatAccount[]>([]);
@@ -298,6 +304,17 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({ isOpen, onClose,
                                                     <Eye className="h-3 w-3" />
                                                   </button>
                                                 )}
+
+                                                {tx.institution_id && (
+                                                  <button
+                                                    onClick={() => setRuleTx(tx)}
+                                                    className="p-1 rounded hover:bg-purple-100 text-slate-400 hover:text-purple-600 transition-colors"
+                                                    title="Create permanent mapping rule"
+                                                  >
+                                                    <Wand2 className="h-3 w-3" />
+                                                  </button>
+                                                )}
+
                                                 <button
                                                   onClick={() => setReroutingEntry(reroutingEntry === tx.journal_entry_id ? null : tx.journal_entry_id)}
                                                   className="p-1 rounded hover:bg-blue-100 text-slate-400 hover:text-blue-600 transition-colors"
@@ -386,6 +403,24 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({ isOpen, onClose,
           <Button onClick={onClose}>Close Investigation</Button>
         </div>
       </Card>
+
+      {ruleTx && ruleTx.institution_id && (
+        <CreateRuleModal
+          isOpen={!!ruleTx}
+          onClose={() => setRuleTx(null)}
+          onSuccess={(updatedCount) => {
+            setRuleTx(null);
+            // Re-load the specific banner to reflect the new rule's categorization
+            if (expandedBanner) {
+              setBannerTxs(prev => ({ ...prev, [expandedBanner]: [] })); // Clear it to force reload
+              handleBannerClick(expandedBanner);
+            }
+            loadDrillDown(); // Refresh the whole drill down stats to reflect changes in category performance
+          }}
+          rawDescription={ruleTx.raw_description}
+          institutionId={ruleTx.institution_id}
+        />
+      )}
     </div>
   );
 };

@@ -460,3 +460,40 @@ def get_merchant_detail(request, merchant_id: int):
         family=user.family
     )
     return merchant
+
+@router.get("/unmapped-strings")
+def get_unmapped_strings(request, q: str = None):
+    """
+    Returns unique raw_descriptions from UNPROCESSED transactions, 
+    grouped by frequency and institution.
+    """
+    from django.db.models import Count
+    from banking.models import StagedTransaction
+
+    user = request.auth
+    
+    # Base query for unmapped transactions
+    qs = StagedTransaction.objects.filter(
+        statement_import__financial_product__family=user.family,
+        status=StagedTransaction.Status.UNPROCESSED
+    )
+    
+    if q:
+        qs = qs.filter(raw_description__icontains=q)
+        
+    # Group by the exact string and institution
+    grouped = qs.values(
+        'raw_description', 
+        'statement_import__financial_product__institution_id'
+    ).annotate(
+        tx_count=Count('id')
+    ).order_by('-tx_count')[:50] # Top 50 worst offenders
+    
+    return [
+        {
+            "raw_description": item['raw_description'],
+            "institution_id": item['statement_import__financial_product__institution_id'],
+            "count": item['tx_count']
+        }
+        for item in grouped
+    ]
