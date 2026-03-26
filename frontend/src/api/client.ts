@@ -669,3 +669,60 @@ export async function simulateScenarios(scenarios: ScenarioSpec[]): Promise<Scen
   return res.json();
 }
 
+export interface AnnuityPeriodOut {
+  id: number;
+  period_number: number;
+  payment_date: string;
+  payment_amount: number;
+  interest_portion: number;
+  principal_portion: number;
+  balance_after: number;
+  is_paid: boolean;
+  journal_entry_id: number | null;
+}
+
+export interface AnnuityScheduleOut {
+  id: number;
+  name: string;
+  schedule_type: string;
+  principal_amount: number;
+  annual_rate: number;
+  n_periods: number;
+  payment_frequency: string;
+  start_date: string;
+  computed_payment: number;
+  linked_journal_entry_id: number | null;
+  created_at: string;
+  periods: AnnuityPeriodOut[];
+}
+
+export async function commitSchedule(
+  spec: ScenarioSpec,
+  linked_journal_entry_id?: number,
+): Promise<AnnuityScheduleOut> {
+  const res = await fetch(`${API_URL}/planning/schedules`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify({ spec, linked_journal_entry_id: linked_journal_entry_id ?? null }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(err.detail || 'Commit failed');
+  }
+  return res.json();
+}
+
+export async function fetchSchedules(): Promise<AnnuityScheduleOut[]> {
+  const res = await fetch(`${API_URL}/planning/schedules`, { headers: getAuthHeader() });
+  if (!res.ok) throw new Error('Failed to fetch schedules');
+  return res.json();
+}
+
+export async function deleteSchedule(scheduleId: number): Promise<void> {
+  const res = await fetch(`${API_URL}/planning/schedules/${scheduleId}`, {
+    method: 'DELETE',
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error('Failed to delete schedule');
+}
+

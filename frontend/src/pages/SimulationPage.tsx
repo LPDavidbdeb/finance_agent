@@ -1,6 +1,9 @@
-import React, { useState, useCallback } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronUp, TrendingDown, TrendingUp, Calculator } from 'lucide-react';
-import { simulateScenarios, ScenarioSpec, ScenarioResult, PeriodRow } from '../api/client';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Plus, Trash2, ChevronDown, ChevronUp, TrendingDown, TrendingUp, Calculator, CheckCircle2, BookMarked, X } from 'lucide-react';
+import {
+  simulateScenarios, commitSchedule, fetchSchedules, deleteSchedule,
+  ScenarioSpec, ScenarioResult, PeriodRow, AnnuityScheduleOut,
+} from '../api/client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -60,7 +63,7 @@ const ScheduleTable: React.FC<{ schedule: PeriodRow[]; type: 'LOAN_AMORTIZATION'
             <th className="text-left py-1 font-medium">Date</th>
             <th className="text-right py-1 font-medium">Payment</th>
             <th className="text-right py-1 font-medium">{type === 'LOAN_AMORTIZATION' ? 'Interest' : 'Earned'}</th>
-            <th className="text-right py-1 font-medium">{type === 'LOAN_AMORTIZATION' ? 'Principal' : 'Contribution'}</th>
+            <th className="text-right py-1 font-medium">{type === 'LOAN_AMORTIZATION' ? 'Principal' : 'Contrib.'}</th>
             <th className="text-right py-1 font-medium">Balance</th>
           </tr>
         </thead>
@@ -90,14 +93,19 @@ const ScheduleTable: React.FC<{ schedule: PeriodRow[]; type: 'LOAN_AMORTIZATION'
   );
 };
 
-// ─── Scenario Card (result) ───────────────────────────────────────────────────
+// ─── Result Card ──────────────────────────────────────────────────────────────
 
 const ResultCard: React.FC<{
   result: ScenarioResult;
+  spec: ScenarioSpec;
   isBaseline: boolean;
   index: number;
-}> = ({ result, isBaseline, index }) => {
+  onCommitted: () => void;
+}> = ({ result, spec, isBaseline, index, onCommitted }) => {
   const [expanded, setExpanded] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const [committed, setCommitted] = useState(false);
+  const [commitError, setCommitError] = useState<string | null>(null);
 
   const CARD_COLORS = [
     'border-blue-400 bg-blue-50',
@@ -107,8 +115,21 @@ const ResultCard: React.FC<{
     'border-rose-400 bg-rose-50',
   ];
   const colorClass = CARD_COLORS[index % CARD_COLORS.length];
-
   const deltaPositive = result.delta_vs_baseline !== null && result.delta_vs_baseline > 0;
+
+  const handleCommit = async () => {
+    setCommitError(null);
+    setCommitting(true);
+    try {
+      await commitSchedule(spec);
+      setCommitted(true);
+      onCommitted();
+    } catch (e: unknown) {
+      setCommitError(e instanceof Error ? e.message : 'Commit failed');
+    } finally {
+      setCommitting(false);
+    }
+  };
 
   return (
     <div className={`rounded-xl border-2 p-4 flex flex-col gap-3 ${colorClass}`}>
@@ -119,9 +140,16 @@ const ResultCard: React.FC<{
             {result.type === 'LOAN_AMORTIZATION' ? 'Loan / Mortgage' : 'Sinking Fund'}
           </span>
         </div>
-        {isBaseline && (
-          <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full font-medium">Baseline</span>
-        )}
+        <div className="flex items-center gap-2">
+          {isBaseline && (
+            <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full font-medium">Baseline</span>
+          )}
+          {committed && (
+            <span className="text-xs bg-emerald-600 text-white px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
+              <CheckCircle2 className="h-3 w-3" /> Committed
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Key metrics */}
@@ -149,30 +177,45 @@ const ResultCard: React.FC<{
         <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${
           deltaPositive ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
         }`}>
-          {deltaPositive
-            ? <TrendingDown className="h-4 w-4" />
-            : <TrendingUp className="h-4 w-4" />}
+          {deltaPositive ? <TrendingDown className="h-4 w-4" /> : <TrendingUp className="h-4 w-4" />}
           {deltaPositive
             ? `${fmt(result.delta_vs_baseline)} more per period than baseline`
             : `${fmt(Math.abs(result.delta_vs_baseline))} less per period than baseline`}
         </div>
       )}
 
-      {/* Schedule toggle */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 transition-colors"
-      >
-        {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-        {expanded ? 'Hide' : 'Show'} amortization schedule
-      </button>
+      {/* Actions row */}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 transition-colors"
+        >
+          {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          {expanded ? 'Hide' : 'Show'} schedule
+        </button>
+
+        {!committed && (
+          <button
+            onClick={handleCommit}
+            disabled={committing}
+            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-300 text-white rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+          >
+            <BookMarked className="h-3.5 w-3.5" />
+            {committing ? 'Committing…' : 'Commit'}
+          </button>
+        )}
+      </div>
+
+      {commitError && (
+        <div className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{commitError}</div>
+      )}
 
       {expanded && <ScheduleTable schedule={result.schedule} type={result.type} />}
     </div>
   );
 };
 
-// ─── Scenario Form Card ───────────────────────────────────────────────────────
+// ─── Form Card ────────────────────────────────────────────────────────────────
 
 const FormCard: React.FC<{
   form: ScenarioForm;
@@ -289,25 +332,103 @@ const FormCard: React.FC<{
   </div>
 );
 
+// ─── Committed Schedules Panel ────────────────────────────────────────────────
+
+const CommittedSchedules: React.FC<{ schedules: AnnuityScheduleOut[]; onDelete: (id: number) => void }> = ({
+  schedules,
+  onDelete,
+}) => {
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  if (schedules.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <h2 className="text-lg font-semibold text-slate-700 flex items-center gap-2">
+        <BookMarked className="h-5 w-5 text-slate-500" />
+        Committed Schedules
+      </h2>
+      <div className="space-y-2">
+        {schedules.map((s) => (
+          <div key={s.id} className="border border-slate-200 rounded-xl bg-white overflow-hidden">
+            <div
+              className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
+              onClick={() => setExpanded(expanded === s.id ? null : s.id)}
+            >
+              <div className="flex items-center gap-3">
+                <div>
+                  <span className="font-medium text-slate-800">{s.name}</span>
+                  <span className="ml-2 text-xs text-slate-400">
+                    {s.schedule_type === 'LOAN_AMORTIZATION' ? 'Loan' : 'Sinking Fund'}
+                    {' · '}started {s.start_date}
+                    {' · '}{s.n_periods} periods
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <div className="font-semibold text-slate-800">{fmt(s.computed_payment)}<span className="text-xs text-slate-400 font-normal"> / period</span></div>
+                  <div className="text-xs text-slate-400">{s.annual_rate}% annual · {s.payment_frequency.toLowerCase()}</div>
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); if (window.confirm(`Delete "${s.name}"?`)) onDelete(s.id); }}
+                  className="text-slate-300 hover:text-red-500 transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+                {expanded === s.id ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+              </div>
+            </div>
+
+            {expanded === s.id && s.periods.length > 0 && (
+              <div className="border-t border-slate-100 px-4 pb-4">
+                <ScheduleTable
+                  schedule={s.periods.map(p => ({
+                    period_number: p.period_number,
+                    payment_date: p.payment_date,
+                    payment_amount: p.payment_amount,
+                    interest_portion: p.interest_portion,
+                    principal_portion: p.principal_portion,
+                    balance_after: p.balance_after,
+                  }))}
+                  type={s.schedule_type as 'LOAN_AMORTIZATION' | 'SINKING_FUND'}
+                />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export const SimulationPage: React.FC = () => {
   const [forms, setForms] = useState<ScenarioForm[]>([defaultForm()]);
   const [results, setResults] = useState<ScenarioResult[] | null>(null);
+  const [resultSpecs, setResultSpecs] = useState<ScenarioSpec[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [committedSchedules, setCommittedSchedules] = useState<AnnuityScheduleOut[]>([]);
+
+  const loadSchedules = useCallback(async () => {
+    try {
+      const data = await fetchSchedules();
+      setCommittedSchedules(data);
+    } catch {
+      // not critical — page still works for simulation
+    }
+  }, []);
+
+  useEffect(() => { loadSchedules(); }, [loadSchedules]);
 
   const handleChange = useCallback((id: string, field: keyof ScenarioForm, value: string) => {
     setForms((prev) => prev.map((f) => (f.id === id ? { ...f, [field]: value } : f)));
   }, []);
 
-  const handleAddScenario = () => {
-    setForms((prev) => [...prev, defaultForm()]);
-  };
-
-  const handleRemove = (id: string) => {
-    setForms((prev) => prev.filter((f) => f.id !== id));
-  };
+  const handleAddScenario = () => setForms((prev) => [...prev, defaultForm()]);
+  const handleRemove = (id: string) => setForms((prev) => prev.filter((f) => f.id !== id));
 
   const handleSimulate = async () => {
     setError(null);
@@ -323,9 +444,9 @@ export const SimulationPage: React.FC = () => {
         start_date: f.start_date,
         current_balance: parseFloat(f.current_balance || '0'),
       }));
-
       const data = await simulateScenarios(specs);
       setResults(data);
+      setResultSpecs(specs);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Simulation failed');
     } finally {
@@ -333,19 +454,25 @@ export const SimulationPage: React.FC = () => {
     }
   };
 
+  const handleDelete = async (id: number) => {
+    await deleteSchedule(id);
+    setCommittedSchedules((prev) => prev.filter((s) => s.id !== id));
+  };
+
   const canSimulate = forms.every(
     (f) => f.principal && f.annual_rate && f.amortization_years && f.start_date
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Header */}
       <div className="flex items-center gap-3">
         <Calculator className="h-6 w-6 text-blue-600" />
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Scenario Simulator</h1>
           <p className="text-sm text-slate-500">
-            Compare N loan or savings scenarios side-by-side — see the PMT, total interest, and FCF impact of each option before committing.
+            Compare N loan or savings scenarios — see the PMT, total interest, and FCF impact.
+            The <strong>start date</strong> is the origination date; all payment dates flow from it.
           </p>
         </div>
       </div>
@@ -394,7 +521,7 @@ export const SimulationPage: React.FC = () => {
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-slate-700">Results</h2>
 
-          {/* Summary comparison bar */}
+          {/* Summary bar */}
           <div className="bg-white border border-slate-200 rounded-xl p-4">
             <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${results.length}, 1fr)` }}>
               {results.map((r) => (
@@ -415,11 +542,21 @@ export const SimulationPage: React.FC = () => {
           {/* Full result cards */}
           <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${Math.min(results.length, 3)}, 1fr)` }}>
             {results.map((result, i) => (
-              <ResultCard key={result.name} result={result} isBaseline={i === 0} index={i} />
+              <ResultCard
+                key={result.name}
+                result={result}
+                spec={resultSpecs[i]}
+                isBaseline={i === 0}
+                index={i}
+                onCommitted={loadSchedules}
+              />
             ))}
           </div>
         </div>
       )}
+
+      {/* Committed schedules */}
+      <CommittedSchedules schedules={committedSchedules} onDelete={handleDelete} />
     </div>
   );
 };
