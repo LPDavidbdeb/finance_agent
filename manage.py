@@ -6,7 +6,12 @@ import sys
 
 def main():
     """Run administrative tasks."""
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'finance_backend.settings.local')
+    import pathlib
+    base_dir = pathlib.Path(__file__).resolve().parent
+    if (base_dir / '.env.remote').exists():
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'finance_backend.settings.remote')
+    else:
+        os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'finance_backend.settings.local')
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
