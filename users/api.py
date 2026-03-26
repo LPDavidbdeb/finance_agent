@@ -8,7 +8,7 @@ from .models import Family, CustomUser, FamilyMember
 
 router = Router()
 
-@router.post("/register")
+@router.post("/register", auth=None)
 def register_user(request, payload: RegisterUserIn):
     with transaction.atomic():
         # Step A: Create the Family
@@ -22,7 +22,7 @@ def register_user(request, payload: RegisterUserIn):
             last_name=payload.last_name,
             family=family
         )
-        
+
     return {
         "status": "success",
         "message": "User and Household created successfully",

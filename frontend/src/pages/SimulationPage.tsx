@@ -45,13 +45,6 @@ const FREQ_LABELS: Record<FrequencyOption, string> = {
   ANNUALLY: 'Annual',
 };
 
-const FREQ_PERIODS: Record<FrequencyOption, number> = {
-  MONTHLY: 12,
-  BIWEEKLY: 26,
-  WEEKLY: 52,
-  ANNUALLY: 1,
-};
-
 // ─── Schedule Table ───────────────────────────────────────────────────────────
 
 const ScheduleTable: React.FC<{ schedule: PeriodRow[]; type: 'LOAN_AMORTIZATION' | 'SINKING_FUND' }> = ({ schedule, type }) => {
@@ -404,7 +397,7 @@ export const SimulationPage: React.FC = () => {
           {/* Summary comparison bar */}
           <div className="bg-white border border-slate-200 rounded-xl p-4">
             <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${results.length}, 1fr)` }}>
-              {results.map((r, i) => (
+              {results.map((r) => (
                 <div key={r.name} className="text-center">
                   <div className="text-xs text-slate-500 mb-1 truncate" title={r.name}>{r.name}</div>
                   <div className="text-xl font-bold text-slate-800">{fmt(r.payment_amount)}</div>

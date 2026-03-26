@@ -2,13 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
 import { 
   fetchFinancialProduct, 
   fetchProductStatements, 
-  uploadStatement,
+  batchUploadStatements,
   deleteStatementImport,
   fetchStatementMonths,
   fetchStatementTransactions,
@@ -59,8 +57,6 @@ export const ProductDetail: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
-  const [documentDate, setDocumentDate] = useState<string>('');
-  
   // Staging Area State
   const [statements, setStatements] = useState<StatementImport[]>([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -145,15 +141,24 @@ export const ProductDetail: React.FC = () => {
   };
 
   const handleFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || !id) return;
+    const files = event.target.files;
+    if (!files || files.length === 0 || !id) return;
 
     setUploadMessage(null);
     try {
       setUploading(true);
-      await uploadStatement(Number(id), file, documentDate);
-      setUploadMessage('Statement uploaded to staging area successfully.');
-      setDocumentDate('');
+      const fileList = Array.from(files);
+      const results = await batchUploadStatements(Number(id), fileList);
+      
+      const uploadedCount = results.uploaded.length;
+      const skippedCount = results.skipped.length;
+      const failedCount = results.failed.length;
+
+      let msg = `Successfully uploaded ${uploadedCount} statement(s).`;
+      if (skippedCount > 0) msg += ` Skipped ${skippedCount} duplicate(s).`;
+      if (failedCount > 0) msg += ` Failed ${failedCount} file(s).`;
+      
+      setUploadMessage(msg);
       setRefreshTrigger(prev => prev + 1);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Upload failed.';
@@ -233,7 +238,7 @@ export const ProductDetail: React.FC = () => {
               Upload Statement
             </Button>
           )}
-          <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleFileSelected} />
+          <input ref={fileInputRef} type="file" accept="application/pdf" multiple className="hidden" onChange={handleFileSelected} />
         </div>
       </div>
 
@@ -293,17 +298,6 @@ export const ProductDetail: React.FC = () => {
                 <CardTitle className="text-xs uppercase tracking-wider text-slate-500">Quick Upload Settings</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="doc-date" className="text-[11px] font-bold">Statement Date</Label>
-                  <Input 
-                    id="doc-date"
-                    type="date" 
-                    size={1} 
-                    className="h-8 text-xs" 
-                    value={documentDate}
-                    onChange={(e) => setDocumentDate(e.target.value)}
-                  />
-                </div>
                 {uploadMessage && (
                   <p className="text-[10px] text-slate-600 italic bg-white p-2 rounded border border-slate-200">
                     {uploadMessage}

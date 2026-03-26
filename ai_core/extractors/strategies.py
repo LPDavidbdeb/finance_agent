@@ -167,7 +167,7 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
 
         # Payments (CR or -) = positive amount (reduces liability)
         # Purchases (no CR) = negative amount (increases liability)
-        df_clean['amount'] = parsed_amount * np.where(has_cr | has_minus, -1, 1)
+        df_clean['amount'] = parsed_amount * np.where(has_cr | has_minus, 1, -1)
         df_clean['account_identifier'] = 'CREDIT_CARD'
 
         return df_clean[['date', 'description', 'amount', 'account_identifier']].dropna(

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { fetchStatementImport, fetchStatementImportTransactions } from '../api/client';
@@ -186,13 +185,13 @@ export const StatementDetail: React.FC = () => {
         <div className="flex items-center gap-2">
           {pdfUrl && (
             <>
-              <Button variant="outline" size="sm" asChild>
-                <a href={pdfUrl} target="_blank" rel="noopener noreferrer">
+              <Button variant="outline" size="sm">
+                <a href={pdfUrl} target="_blank" rel="noopener noreferrer" className="flex items-center">
                   <ExternalLink className="h-4 w-4 mr-2" /> Open Original
                 </a>
               </Button>
-              <Button variant="outline" size="sm" asChild>
-                <a href={pdfUrl} download>
+              <Button variant="outline" size="sm">
+                <a href={pdfUrl} download className="flex items-center">
                   <Download className="h-4 w-4 mr-2" /> Download
                 </a>
               </Button>
