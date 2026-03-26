@@ -55,13 +55,11 @@ export const Dashboard: React.FC = () => {
       try {
         const data = await fetchAvailableYears();
         setAvailableYears(data.available_years);
-        // Set selected year to the most recent year with data
         if (data.available_years.length > 0) {
           setSelectedYear(data.available_years[0]);
         }
       } catch (err) {
         console.error('Failed to load available years:', err);
-        // Fall back to current year
         setAvailableYears([currentYear]);
       }
     };
@@ -97,17 +95,15 @@ export const Dashboard: React.FC = () => {
       }
 
       const results = await Promise.all(promises);
-      const annual = results[0];
-      const evolution = results[1];
-      
-      setStatements(annual);
-      setEvolutionData(evolution);
+      setStatements(results[0]);
+      setEvolutionData(results[1]);
 
       if (activeDimension === 'expenses') {
         setCategoryData(results[2]);
       } else {
         const dimensionDetail = results[2];
         setCategoryData(dimensionDetail.line_items.map((item: any) => ({
+          id: item.id,
           category: item.name,
           amount: Math.abs(item.balance)
         })));
@@ -129,6 +125,18 @@ export const Dashboard: React.FC = () => {
       setDrillDownPeriod(data.period);
       setIsDrillDownOpen(true);
     }
+  };
+
+  const handlePieClick = (data: any) => {
+    if (data && data.id) {
+      navigate(`/dashboard/accounts/${data.id}?year=${selectedYear}`);
+    }
+  };
+
+  const truncateLabel = (label: string, maxLength: number = 25) => {
+    if (!label) return '';
+    if (label.length <= maxLength) return label;
+    return label.substring(0, maxLength) + '...';
   };
 
   const dimensionConfig = useMemo(() => ({
@@ -308,14 +316,25 @@ export const Dashboard: React.FC = () => {
                     paddingAngle={5}
                     dataKey="amount"
                     nameKey="category"
+                    onClick={handlePieClick}
+                    className="cursor-pointer"
                   >
                     {categoryData.map((_entry, index) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip formatter={(value: any) => `$${value.toLocaleString()}`} />
-                  <Legend layout="vertical" align="right" verticalAlign="middle" iconType="circle"
-                    formatter={(value) => <span className="text-[10px] text-slate-600 font-bold uppercase">{value}</span>}
+                  <Legend 
+                    layout="vertical" 
+                    align="right" 
+                    verticalAlign="middle" 
+                    iconType="circle"
+                    width={200}
+                    formatter={(value) => (
+                      <span className="text-[10px] text-slate-600 font-bold uppercase" title={value}>
+                        {truncateLabel(value)}
+                      </span>
+                    )}
                   />
                 </PieChart>
               </ResponsiveContainer>

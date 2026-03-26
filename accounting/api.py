@@ -913,6 +913,7 @@ def get_spending_by_category(request, start_date: date, end_date: date):
         ).aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
         
         results.append({
+            "id": cat.id,
             "category": cat.name,
             "amount": float(total)
         })
