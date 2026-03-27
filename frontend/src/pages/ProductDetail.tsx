@@ -3,14 +3,14 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { 
-  fetchFinancialProduct, 
-  fetchProductStatements, 
-  batchUploadStatements,
+import {
+  fetchFinancialProduct,
+  fetchProductStatements,
+  uploadStatement,
   deleteStatementImport,
   fetchStatementMonths,
   fetchStatementTransactions,
-  fetchStagedTransactions
+  fetchStagedTransactions,
 } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { TransactionListTable } from '../components/TransactionListTable';
@@ -56,7 +56,7 @@ export const ProductDetail: React.FC = () => {
   // Upload State
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+
   // Staging Area State
   const [statements, setStatements] = useState<StatementImport[]>([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -141,28 +141,20 @@ export const ProductDetail: React.FC = () => {
   };
 
   const handleFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files || files.length === 0 || !id) return;
+    const file = event.target.files?.[0];
+    if (!file || !id) return;
 
-    setUploadMessage(null);
+    setUploading(true);
     try {
-      setUploading(true);
-      const fileList = Array.from(files);
-      const results = await batchUploadStatements(Number(id), fileList);
-      
-      const uploadedCount = results.uploaded.length;
-      const skippedCount = results.skipped.length;
-      const failedCount = results.failed.length;
-
-      let msg = `Successfully uploaded ${uploadedCount} statement(s).`;
-      if (skippedCount > 0) msg += ` Skipped ${skippedCount} duplicate(s).`;
-      if (failedCount > 0) msg += ` Failed ${failedCount} file(s).`;
-      
-      setUploadMessage(msg);
+      await uploadStatement(Number(id), file);
+      toast({ title: 'Statement uploaded', description: 'Extraction queued — check back shortly.' });
       setRefreshTrigger(prev => prev + 1);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Upload failed.';
-      setUploadMessage(errorMessage);
+    } catch (err: any) {
+      toast({
+        title: 'Upload failed',
+        description: err.message || 'An unexpected error occurred.',
+        variant: 'destructive',
+      });
     } finally {
       setUploading(false);
       event.target.value = '';
@@ -238,7 +230,7 @@ export const ProductDetail: React.FC = () => {
               Upload Statement
             </Button>
           )}
-          <input ref={fileInputRef} type="file" accept="application/pdf" multiple className="hidden" onChange={handleFileSelected} />
+          <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleFileSelected} />
         </div>
       </div>
 
@@ -292,28 +284,15 @@ export const ProductDetail: React.FC = () => {
             </CardContent>
           </Card>
 
-          {selectedMonth === null && (
-            <Card className="shadow-sm bg-slate-50 border-dashed border-2">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-xs uppercase tracking-wider text-slate-500">Quick Upload Settings</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {uploadMessage && (
-                  <p className="text-[10px] text-slate-600 italic bg-white p-2 rounded border border-slate-200">
-                    {uploadMessage}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          )}
         </div>
 
         {/* Right Column: Dynamic Content Area */}
         <div className="lg:col-span-3 space-y-8">
           {selectedMonth === null ? (
             <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+
               {/* Inbox Mode */}
-              <div 
+              <div
                 className="border-2 border-dashed border-slate-300 rounded-xl p-12 text-center bg-white hover:bg-slate-50 transition-colors cursor-pointer"
                 onClick={handleUploadClick}
               >

@@ -386,9 +386,10 @@ export async function batchUploadStatements(productId: number, files: File[]) {
     formData.append('files', file);
   }
 
+  const token = localStorage.getItem('access_token');
   const res = await fetch(`${API_URL}/banking/products/${productId}/statements/batch-upload`, {
     method: 'POST',
-    headers: getAuthHeader(),
+    headers: { Authorization: token ? `Bearer ${token}` : '' },
     body: formData,
   });
 
@@ -779,6 +780,25 @@ export async function fetchStatementCoverage(): Promise<StatementCoverage> {
 }
 
 // --- Auth ---
+
+export interface ProcessingLogEntry {
+  ts: string;
+  msg: string;
+  level: 'info' | 'warn' | 'error' | 'success';
+}
+
+export interface StatementStatus {
+  id: number;
+  status: string;
+  processing_log: ProcessingLogEntry[];
+  validation_errors: any;
+}
+
+export async function fetchStatementStatus(importId: number): Promise<StatementStatus> {
+  const res = await fetch(`${API_URL}/banking/statements/${importId}/status`, { headers: getAuthHeader() });
+  if (!res.ok) throw new Error('Failed to fetch statement status');
+  return res.json();
+}
 
 export async function changePassword(
   currentPassword: string,

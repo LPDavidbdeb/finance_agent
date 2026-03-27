@@ -55,6 +55,7 @@ class BankStatementImport(models.Model):
     
     raw_ai_extraction = models.JSONField(null=True, blank=True)
     validation_errors = models.JSONField(null=True, blank=True)
+    processing_log = models.JSONField(default=list, blank=True)
     
     def __str__(self):
         return f"Statement Import {self.id} - {self.financial_product}"

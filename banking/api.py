@@ -6,7 +6,11 @@ from typing import List, Optional
 from datetime import date
 from dateutil.relativedelta import relativedelta
 import hashlib
+import logging
 from django.shortcuts import get_object_or_404
+
+logger = logging.getLogger(__name__)
+
 from django.db.models import ProtectedError, Count
 from django.db.models.functions import TruncMonth
 from users.models import FamilyMember
@@ -121,10 +125,6 @@ def batch_upload_statements(request, product_id: int, files: List[UploadedFile] 
     for file in files:
         try:
             file_content = file.read()
-            if not file_content.startswith(b'%PDF'):
-                results["failed"].append({"name": file.name, "reason": "Not a PDF file."})
-                continue
-                
             file_hash = hashlib.sha256(file_content).hexdigest()
             file.seek(0)
 
@@ -139,6 +139,7 @@ def batch_upload_statements(request, product_id: int, files: List[UploadedFile] 
                 status=BankStatementImport.Status.STAGED,
                 processed_by_ai=False,
                 processed_by_python=False,
+                processing_log=[],
             )
 
             # Queue extraction task
@@ -146,6 +147,7 @@ def batch_upload_statements(request, product_id: int, files: List[UploadedFile] 
             results["uploaded"].append({"name": file.name, "id": statement.id})
 
         except Exception as e:
+            logger.exception(f"[BATCH] Failed to process {file.name}")
             results["failed"].append({"name": file.name, "reason": str(e)})
 
     return results
@@ -156,33 +158,38 @@ def upload_statement(request, product_id: int, file: File[UploadedFile], documen
     """Stores a bank statement, blocks duplicate files, and triggers Celery extraction pipeline."""
     from banking.tasks import extract_transactions_task
 
-    user = request.auth
-    product = get_object_or_404(FinancialProduct, id=product_id, family=user.family)
+    try:
+        user = request.auth
+        product = get_object_or_404(FinancialProduct, id=product_id, family=user.family)
 
-    # Validate the file is a PDF by checking its magic bytes
-    file_content = file.read()
-    if not file_content.startswith(b'%PDF'):
-        raise HttpError(400, "Only PDF files are accepted.")
-    file_hash = hashlib.sha256(file_content).hexdigest()
-    file.seek(0)
+        file_content = file.read()
+        file_hash = hashlib.sha256(file_content).hexdigest()
+        file.seek(0)
 
-    if BankStatementImport.objects.filter(file_hash=file_hash).exists():
-        raise HttpError(409, "This specific PDF has already been uploaded to the system.")
+        if BankStatementImport.objects.filter(file_hash=file_hash).exists():
+            logger.warning(f"[UPLOAD] Duplicate upload: {file.name} (hash: {file_hash})")
+            raise HttpError(409, "This specific PDF has already been uploaded to the system.")
 
-    statement = BankStatementImport.objects.create(
-        financial_product=product,
-        file=file,
-        file_hash=file_hash,
-        document_date=document_date,
-        status=BankStatementImport.Status.STAGED,
-        processed_by_ai=False,
-        processed_by_python=False,
-    )
+        statement = BankStatementImport.objects.create(
+            financial_product=product,
+            file=file,
+            file_hash=file_hash,
+            document_date=document_date,
+            status=BankStatementImport.Status.STAGED,
+            processed_by_ai=False,
+            processed_by_python=False,
+            processing_log=[],
+        )
 
-    # Queue extraction task
-    extract_transactions_task.delay(statement.id, user.id)
+        # Queue extraction task
+        extract_transactions_task.delay(statement.id, user.id)
 
-    return statement
+        return statement
+    except HttpError:
+        raise
+    except Exception as e:
+        logger.exception(f"[UPLOAD] Unexpected error during upload of {file.name}")
+        raise HttpError(500, f"Internal server error: {str(e)}")
 
 
 @router.get("/products/{product_id}/statements", response=List[StatementImportOut])

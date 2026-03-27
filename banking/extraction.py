@@ -87,6 +87,7 @@ def extract_transactions_from_statement(import_id: int, user):
         logger.error(f"BankStatementImport with id {import_id} not found.")
         return
 
+    print(f"[EXTRACT] START statement_id={import_id}")
     statement_import.status = BankStatementImport.Status.PROCESSING
     statement_import.save(update_fields=['status'])
 
@@ -94,19 +95,21 @@ def extract_transactions_from_statement(import_id: int, user):
         if not statement_import.file:
             raise ValueError("No file attached to statement import.")
 
-        # 1. Attempt to get statement date from PDF content
+        print(f"[EXTRACT] Step 1 — reading PDF to detect statement date: {statement_import.file.path}")
         pdf_year, pdf_month = get_statement_date_from_pdf(statement_import.file.path)
-        
+
         if pdf_year and pdf_month:
             statement_import.document_date = date(pdf_year, pdf_month, 1)
             statement_import.save(update_fields=['document_date'])
             statement_year = pdf_year
             statement_month = pdf_month
+            print(f"[EXTRACT] Date detected from PDF: {pdf_year}-{pdf_month:02d}")
         elif statement_import.document_date:
             statement_year = statement_import.document_date.year
             statement_month = statement_import.document_date.month
+            print(f"[EXTRACT] Using manually provided date: {statement_year}-{statement_month:02d}")
         else:
-            # FATAL: Cannot determine the statement period
+            print(f"[EXTRACT] FATAL — could not determine statement date")
             statement_import.status = BankStatementImport.Status.VALIDATION_FAILED
             statement_import.validation_errors = {
                 'error': "Could not determine the statement date from the PDF content. Please re-upload and provide an explicit Document Date.",
@@ -116,18 +119,23 @@ def extract_transactions_from_statement(import_id: int, user):
             return
 
         product = statement_import.financial_product
+        print(f"[EXTRACT] Step 2 — selecting parser for: {product.institution.name} / {product.product_type}")
         extractor = PDFExtractorFactory.get_extractor(product.institution.name, product.product_type)
-        
-        # 2. Extract with year/month context
+        print(f"[EXTRACT] Parser selected: {type(extractor).__name__}")
+
+        print(f"[EXTRACT] Step 3 — parsing PDF with tabula...")
         df, shadow_mismatch = extractor.extract(statement_import.file.path, statement_year, statement_month)
-        
+
         statement_import.shadow_mode_mismatch = shadow_mismatch
         statement_import.save(update_fields=['shadow_mode_mismatch'])
 
         transactions_data = df.to_dict('records')
+        print(f"[EXTRACT] Parsed {len(transactions_data)} rows. Shadow mismatch: {shadow_mismatch}")
+
         institution_id = statement_import.financial_product.institution_id
         family_id = statement_import.financial_product.family_id
 
+        print(f"[EXTRACT] Step 4 — categorizing {len(transactions_data)} transactions...")
         staged_transactions = []
         for tx_data in transactions_data:
             raw_description = str(tx_data.get('description', ''))
