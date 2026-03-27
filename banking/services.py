@@ -1,3 +1,4 @@
+from decimal import Decimal
 from django.db import transaction
 from .models import FinancialProduct, FinancialInstitution, BankStatementImport, StagedTransaction
 from accounting.models import Account, JournalEntry, TransactionLine
@@ -53,6 +54,40 @@ def provision_financial_product(family: Family, owner: FamilyMember, institution
 
     return product
 
+def _resolve_entry_accounts(source_account: Account, target_account: Account, amount: Decimal):
+    """Resolve debit and credit accounts from staged cash-flow semantics.
+
+    amount is cash-flow based: negative=outflow, positive=inflow.
+    TransactionLine invariant remains: debit is positive, credit is negative.
+    """
+    if amount == 0:
+        raise ValueError("Cannot approve a zero-amount transaction.")
+
+    source_type = source_account.account_type
+    target_type = target_account.account_type
+
+    # Cross-balance-sheet transfer: source outflow and target inflow.
+    if target_type in {Account.AccountType.ASSET, Account.AccountType.LIABILITY, Account.AccountType.EQUITY}:
+        if amount < 0:
+            return target_account, source_account
+        return source_account, target_account
+
+    # P&L categories: the category line should reflect economic intent.
+    if target_type == Account.AccountType.EXPENSE:
+        # Purchase/outflow -> Debit expense; Refund/inflow -> Credit expense.
+        if amount < 0:
+            return target_account, source_account
+        return source_account, target_account
+
+    if target_type == Account.AccountType.INCOME:
+        # Income/inflow -> Credit income; reversal/outflow -> Debit income.
+        if amount > 0:
+            return source_account, target_account
+        return target_account, source_account
+
+    raise ValueError(f"Unsupported target account type: {target_type}")
+
+
 @transaction.atomic
 def approve_staged_transaction(transaction_id: int, target_account_id: int, user):
     """
@@ -60,7 +95,7 @@ def approve_staged_transaction(transaction_id: int, target_account_id: int, user
     and updating the staged transaction status.
     """
     try:
-        staged_tx = StagedTransaction.objects.select_related(
+        staged_tx = StagedTransaction.objects.select_for_update().select_related(
             'statement_import__financial_product__family',
             'statement_import__financial_product__account'
         ).get(id=transaction_id)
@@ -88,32 +123,21 @@ def approve_staged_transaction(transaction_id: int, target_account_id: int, user
     )
 
     amount = staged_tx.amount
-    
-    if source_account.account_type == Account.AccountType.LIABILITY:
-        # Visa extractor convention: purchases = NEGATIVE, payments/refunds = POSITIVE.
-        # A purchase INCREASES liability (Credit) and INCREASES expense (Debit).
-        if amount < 0:
-            debit_account, credit_account = target_account, source_account
-        else: # A payment to the credit card or a refund
-            debit_account, credit_account = source_account, target_account
-    else:
-        # Asset accounts (Checking/Savings)
-        # Deposits are positive, Expenses are negative
-        if amount > 0:
-            debit_account, credit_account = source_account, target_account
-        else:
-            debit_account, credit_account = target_account, source_account
+    debit_account, credit_account = _resolve_entry_accounts(source_account, target_account, amount)
+
+    # Guarantee balanced entry by construction: +abs(amount) and -abs(amount).
+    line_amount = abs(amount)
 
     TransactionLine.objects.create(
         journal_entry=journal_entry,
         account=debit_account,
-        amount=abs(amount)
+        amount=line_amount
     )
-    
+
     TransactionLine.objects.create(
         journal_entry=journal_entry,
         account=credit_account,
-        amount=-abs(amount)
+        amount=-line_amount
     )
 
     staged_tx.status = StagedTransaction.Status.RECONCILED

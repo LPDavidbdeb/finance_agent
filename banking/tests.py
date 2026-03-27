@@ -116,7 +116,7 @@ class ApproveStagedTransactionTest(TestCase):
             )
         self.assertIn("already processed", str(cm.exception))
 
-    def test_liability_negative_reduces_liability(self):
+    def test_liability_negative_purchase_increases_liability(self):
         liability_account = Account.objects.create(
             name="Visa", account_type=Account.AccountType.LIABILITY, family=self.family_a
         )
@@ -131,22 +131,22 @@ class ApproveStagedTransactionTest(TestCase):
         staged = StagedTransaction.objects.create(
             statement_import=cc_import,
             bank_date=date(2026, 3, 10),
-            raw_description="Paiement carte",
+            raw_description="Restaurant",
             amount=Decimal("-775.00"),
             status=StagedTransaction.Status.UNPROCESSED,
         )
-        payment_source = Account.objects.create(
-            name="Checking", account_type=Account.AccountType.ASSET, family=self.family_a
+        expense_account = Account.objects.create(
+            name="Dining", account_type=Account.AccountType.EXPENSE, family=self.family_a
         )
 
-        je = approve_staged_transaction(staged.id, payment_source.id, self.user_a)
+        je = approve_staged_transaction(staged.id, expense_account.id, self.user_a)
         debit_line = je.lines.get(amount=Decimal("775.00"))
         credit_line = je.lines.get(amount=Decimal("-775.00"))
 
-        self.assertEqual(debit_line.account, liability_account)
-        self.assertEqual(credit_line.account, payment_source)
+        self.assertEqual(debit_line.account, expense_account)
+        self.assertEqual(credit_line.account, liability_account)
 
-    def test_liability_positive_increases_liability(self):
+    def test_liability_positive_refund_or_payment_reduces_liability(self):
         liability_account = Account.objects.create(
             name="Visa 2", account_type=Account.AccountType.LIABILITY, family=self.family_a
         )
@@ -161,7 +161,7 @@ class ApproveStagedTransactionTest(TestCase):
         staged = StagedTransaction.objects.create(
             statement_import=cc_import,
             bank_date=date(2026, 3, 11),
-            raw_description="Restaurant",
+            raw_description="Refund",
             amount=Decimal("45.00"),
             status=StagedTransaction.Status.UNPROCESSED,
         )
@@ -173,8 +173,40 @@ class ApproveStagedTransactionTest(TestCase):
         debit_line = je.lines.get(amount=Decimal("45.00"))
         credit_line = je.lines.get(amount=Decimal("-45.00"))
 
-        self.assertEqual(debit_line.account, expense_account)
-        self.assertEqual(credit_line.account, liability_account)
+        self.assertEqual(debit_line.account, liability_account)
+        self.assertEqual(credit_line.account, expense_account)
+
+    def test_transfer_checking_to_visa_cross_type_balance_sheet(self):
+        checking_account = Account.objects.create(
+            name="Checking Transfer", account_type=Account.AccountType.ASSET, family=self.family_a
+        )
+        checking_product = FinancialProduct.objects.create(
+            institution=self.institution,
+            family=self.family_a,
+            owner=self.member_a,
+            account=checking_account,
+            product_type=FinancialProduct.ProductType.CHECKING,
+        )
+        checking_import = BankStatementImport.objects.create(financial_product=checking_product)
+
+        visa_account = Account.objects.create(
+            name="Visa Transfer", account_type=Account.AccountType.LIABILITY, family=self.family_a
+        )
+
+        staged = StagedTransaction.objects.create(
+            statement_import=checking_import,
+            bank_date=date(2026, 3, 12),
+            raw_description="Visa Payment",
+            amount=Decimal("-300.00"),
+            status=StagedTransaction.Status.UNPROCESSED,
+        )
+
+        je = approve_staged_transaction(staged.id, visa_account.id, self.user_a)
+        debit_line = je.lines.get(amount=Decimal("300.00"))
+        credit_line = je.lines.get(amount=Decimal("-300.00"))
+
+        self.assertEqual(debit_line.account, visa_account)
+        self.assertEqual(credit_line.account, checking_account)
 
 class UploadStatementDeduplicationTest(TestCase):
     def setUp(self):
@@ -231,4 +263,3 @@ class UploadStatementDeduplicationTest(TestCase):
         self.assertIn("already been uploaded", second_response.json()["detail"])
         self.assertEqual(BankStatementImport.objects.count(), 1)
         self.assertEqual(mock_delay.call_count, 1)
-
