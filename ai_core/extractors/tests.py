@@ -67,6 +67,10 @@ class TangerineExtractorTests(TestCase):
       2. Pass 2 correctly assigns account_number and inferred_product_type to rows.
       3. The sign convention is respected (outflow = negative, inflow = positive).
       4. Rows from different accounts are correctly segregated in the output.
+
+    test_real_world_january_2023_structure uses the exact account-number string
+    from a real January 2023 Tangerine statement to pin the parsing behaviour
+    against real-world data before the E2E command is run.
     """
 
     def _make_pdf_mock(self, page_texts: list[str]):
@@ -216,6 +220,83 @@ class TangerineExtractorTests(TestCase):
 
         self.assertEqual(len(result), 1)
         self.assertEqual(result.iloc[0]['inferred_product_type'], 'CHECKING')
+
+    @patch('tabula.read_pdf')
+    @patch('pdfplumber.open')
+    def test_real_world_january_2023_structure(self, mock_pdf_open, mock_tabula):
+        """
+        Pins behaviour against the real four-account structure found in a
+        January 2023 Tangerine consolidated statement.
+
+        Pass 1 assertions (direct call to _pass1_infer_product_types):
+          3014873044  Compte d'épargne → SAVINGS
+          3403209360  (CELI)           → INVESTMENT
+          3805015509  CPG libre d'impôt → INVESTMENT
+          3805041041  CPG libre d'impôt → INVESTMENT
+
+        Pass 2 assertions (via full extract()):
+          All output rows carry account_number='3014873044' and
+          inferred_product_type='SAVINGS'.
+        """
+        SUMMARY_PAGE = (
+            "Compte(s) en un coup d'oeil\n"
+            "Compte d'épargne Tangerine 3014873044\n"
+            "(CELI) 3403209360\n"
+            "CPG libre d'impôt 3805015509\n"
+            "CPG libre d'impôt 3805041041"
+        )
+        SECTION_PAGE = (
+            "Détails - Compte d'épargne Tangerine - 3014873044\n"
+            "Date Description Retraits Dépôts\n"
+        )
+
+        # Both Pass 1 and _find_section_pages open the same PDF; return the
+        # same two-page mock for every call to pdfplumber.open().
+        mock_pdf_open.return_value = self._make_pdf_mock([SUMMARY_PAGE, SECTION_PAGE])
+
+        mock_tabula.return_value = [pd.DataFrame({
+            'Date':        ['2023-01-15', '2023-01-20'],
+            'Description': ['VIREMENT ENTRANT', 'FRAIS MENSUELS'],
+            'Retraits':    [0.00, 5.00],
+            'Dépôts':      [1000.00, 0.00],
+        })]
+
+        extractor = TangerineExtractor()
+
+        # ---- Pass 1 assertion ----
+        # Build a standalone pdfplumber-module mock so we can call the private
+        # method directly without going through extract() a second time.
+        mock_plumber = MagicMock()
+        mock_plumber.open.return_value = self._make_pdf_mock([SUMMARY_PAGE])
+        product_types = extractor._pass1_infer_product_types('dummy.pdf', mock_plumber)
+
+        self.assertEqual(product_types.get('3014873044'), 'SAVINGS',
+                         "Compte d'épargne must map to SAVINGS")
+        self.assertEqual(product_types.get('3403209360'), 'INVESTMENT',
+                         "CELI must map to INVESTMENT")
+        self.assertEqual(product_types.get('3805015509'), 'INVESTMENT',
+                         "CPG libre d'impôt must map to INVESTMENT")
+        self.assertEqual(product_types.get('3805041041'), 'INVESTMENT',
+                         "CPG libre d'impôt must map to INVESTMENT")
+
+        # ---- Pass 2 assertion (via full extract()) ----
+        result, mismatch = extractor.extract('dummy.pdf', 2023, 1)
+
+        self.assertFalse(mismatch)
+        self.assertEqual(len(result), 2, "Expected 2 transactions from the savings section")
+        self.assertTrue(
+            (result['account_number'] == '3014873044').all(),
+            "All rows must be tagged to the savings account number"
+        )
+        self.assertTrue(
+            (result['inferred_product_type'] == 'SAVINGS').all(),
+            "All rows must carry SAVINGS as inferred_product_type"
+        )
+        # Sign convention: deposit → positive, withdrawal → negative
+        virement = result[result['description'] == 'VIREMENT ENTRANT'].iloc[0]
+        frais    = result[result['description'] == 'FRAIS MENSUELS'].iloc[0]
+        self.assertAlmostEqual(float(virement['amount']),  1000.0, places=2)
+        self.assertAlmostEqual(float(frais['amount']),      -5.0,  places=2)
 
     @patch('tabula.read_pdf')
     @patch('pdfplumber.open')

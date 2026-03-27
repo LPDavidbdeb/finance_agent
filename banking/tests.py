@@ -497,3 +497,88 @@ class ConsolidatedIngestionIntegrationTest(TestCase):
         # --- Import completed cleanly ---
         statement.refresh_from_db()
         self.assertEqual(statement.status, BankStatementImport.Status.COMPLETED)
+
+    # ------------------------------------------------------------------
+    # Test Case 3: Multi-Statement Product Lifecycle (The Timeline)
+    # ------------------------------------------------------------------
+
+    def test_product_lifecycle_across_two_statements(self):
+        """
+        Simulates the real-world product lifecycle across two consecutive monthly
+        statements, proving that the pipeline builds the product roster incrementally.
+
+        Month 1 — The Birth:
+          Statement A contains 1 row for account '111' (CHECKING).
+          Must spawn exactly 1 FinancialProduct and 1 Account.
+
+        Month 2 — The Life / Cache Hit:
+          Statement B contains account '111' again (cache hit) AND a new account
+          '222' (INVESTMENT).
+          Must spawn exactly 1 NEW product (for '222').
+          Must NOT duplicate the product or account for '111'.
+        """
+        # ---- Month 1 ----
+        df_month1 = pd.DataFrame([{
+            'date': pd.Timestamp('2023-01-15'), 'description': 'PAYROLL DEPOSIT',
+            'amount': 2000.0, 'account_number': '111', 'inferred_product_type': 'CHECKING',
+        }])
+        statement_a = self._make_import(document_date=date(2023, 1, 1))
+        self._run_extraction(statement_a, df_month1)
+
+        self.assertEqual(
+            FinancialProduct.objects.filter(family=self.family).count(), 1,
+            "Month 1: exactly 1 product should be born",
+        )
+        self.assertEqual(
+            Account.objects.filter(family=self.family).count(), 1,
+            "Month 1: exactly 1 account should be created",
+        )
+        product_111 = FinancialProduct.objects.get(family=self.family, account_number='111')
+        self.assertEqual(product_111.product_type, FinancialProduct.ProductType.CHECKING)
+
+        statement_a.refresh_from_db()
+        self.assertEqual(statement_a.status, BankStatementImport.Status.COMPLETED)
+
+        # ---- Month 2 ----
+        df_month2 = pd.DataFrame([
+            {
+                'date': pd.Timestamp('2023-02-10'), 'description': 'GROCERY STORE',
+                'amount': -80.0, 'account_number': '111', 'inferred_product_type': 'CHECKING',
+            },
+            {
+                'date': pd.Timestamp('2023-02-15'), 'description': 'CELI CONTRIBUTION',
+                'amount': 500.0, 'account_number': '222', 'inferred_product_type': 'INVESTMENT',
+            },
+        ])
+        statement_b = self._make_import(document_date=date(2023, 2, 1))
+        self._run_extraction(statement_b, df_month2)
+
+        # Totals after Month 2
+        self.assertEqual(
+            FinancialProduct.objects.filter(family=self.family).count(), 2,
+            "Month 2: exactly 2 products should exist (111 reused, 222 spawned)",
+        )
+        self.assertEqual(
+            Account.objects.filter(family=self.family).count(), 2,
+            "Month 2: exactly 2 accounts should exist",
+        )
+
+        # '111' must not be duplicated
+        self.assertEqual(
+            FinancialProduct.objects.filter(family=self.family, account_number='111').count(),
+            1,
+            "Product '111' must not be duplicated by Month 2 statement",
+        )
+
+        # '222' correctly spawned
+        product_222 = FinancialProduct.objects.get(family=self.family, account_number='222')
+        self.assertEqual(product_222.product_type, FinancialProduct.ProductType.INVESTMENT)
+
+        # Transactions correctly routed in Month 2
+        txs_b = StagedTransaction.objects.filter(statement_import=statement_b)
+        self.assertEqual(txs_b.count(), 2)
+        self.assertEqual(txs_b.filter(financial_product=product_111).count(), 1)
+        self.assertEqual(txs_b.filter(financial_product=product_222).count(), 1)
+
+        statement_b.refresh_from_db()
+        self.assertEqual(statement_b.status, BankStatementImport.Status.COMPLETED)
