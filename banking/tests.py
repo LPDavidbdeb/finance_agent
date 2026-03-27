@@ -1,13 +1,20 @@
+import shutil
+import tempfile
+
 from django.test import TestCase
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from decimal import Decimal
 from datetime import date
+
+import pandas as pd
+
 from users.models import Family, FamilyMember
 from accounting.models import Account, JournalEntry, TransactionLine
 from banking.models import FinancialInstitution, FinancialProduct, BankStatementImport, StagedTransaction
 from banking.services import approve_staged_transaction
+from banking.extraction import extract_transactions_from_statement
 from finance_backend.api import api
 
 User = get_user_model()
@@ -210,7 +217,7 @@ class ApproveStagedTransactionTest(TestCase):
 
 class UploadStatementDeduplicationTest(TestCase):
     def setUp(self):
-        self.client = api.client
+        from ninja_jwt.tokens import AccessToken
         self.family = Family.objects.create(name="Upload Family")
         self.user = User.objects.create_user(email="upload@example.com", password="password", family=self.family)
         self.member = FamilyMember.objects.create(
@@ -234,6 +241,7 @@ class UploadStatementDeduplicationTest(TestCase):
             account=self.account,
             product_type=FinancialProduct.ProductType.CHECKING,
         )
+        self.auth = {"HTTP_AUTHORIZATION": f"Bearer {AccessToken.for_user(self.user)}"}
 
     @patch("banking.tasks.extract_transactions_task.delay")
     def test_duplicate_pdf_upload_returns_409(self, mock_delay):
@@ -242,9 +250,8 @@ class UploadStatementDeduplicationTest(TestCase):
 
         first_response = self.client.post(
             f"/api/banking/products/{self.product.id}/statements/upload",
-            FILES={"file": file_one},
-            data={"document_date": "2026-03-22"},
-            user=self.user,
+            data={"file": file_one, "document_date": "2026-03-22"},
+            **self.auth,
         )
 
         self.assertEqual(first_response.status_code, 200)
@@ -254,12 +261,239 @@ class UploadStatementDeduplicationTest(TestCase):
         file_two = SimpleUploadedFile("same-content-different-name.pdf", payload_bytes, content_type="application/pdf")
         second_response = self.client.post(
             f"/api/banking/products/{self.product.id}/statements/upload",
-            FILES={"file": file_two},
-            data={"document_date": "2026-03-22"},
-            user=self.user,
+            data={"file": file_two, "document_date": "2026-03-22"},
+            **self.auth,
         )
 
         self.assertEqual(second_response.status_code, 409)
         self.assertIn("already been uploaded", second_response.json()["detail"])
         self.assertEqual(BankStatementImport.objects.count(), 1)
         self.assertEqual(mock_delay.call_count, 1)
+
+
+class ConsolidatedIngestionIntegrationTest(TestCase):
+    """
+    End-to-end integration tests for the multi-product ingestion pipeline.
+
+    Strategy:
+      - The PDF extractor is mocked to return a pre-built DataFrame, so we are
+        testing the STAGING LAYER logic (auto-spawn, caching, routing), not PDF
+        parsing.
+      - `get_statement_date_from_pdf` is mocked to return (None, None) so the
+        pipeline falls back to the `document_date` already set on the import.
+      - A real MEDIA_ROOT temp directory is used so Django's FileField validation
+        passes without hitting production storage.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.family = Family.objects.create(name="Integration Family")
+        self.user = get_user_model().objects.create_user(
+            email="integration@example.com",
+            password="password",
+            family=self.family,
+        )
+        self.institution = FinancialInstitution.objects.create(name="Tangerine")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _make_import(self, document_date=date(2026, 2, 1)):
+        """
+        Create a BankStatementImport linked to the institution (no financial_product).
+        A dummy PDF file is attached so the file-presence guard inside
+        extract_transactions_from_statement does not raise.
+        """
+        dummy_pdf = SimpleUploadedFile(
+            "tangerine_statement.pdf", b"%PDF-1.4 dummy", content_type="application/pdf"
+        )
+        with self.settings(MEDIA_ROOT=self.tmpdir):
+            return BankStatementImport.objects.create(
+                institution=self.institution,
+                financial_product=None,
+                document_date=document_date,
+                status=BankStatementImport.Status.STAGED,
+                file=dummy_pdf,
+                processing_log=[],
+            )
+
+    def _mock_extractor(self, df: pd.DataFrame):
+        """Return a mock extractor whose .extract() returns (df, False)."""
+        extractor = MagicMock()
+        extractor.extract.return_value = (df, False)
+        return extractor
+
+    def _run_extraction(self, statement_import, mock_df: pd.DataFrame):
+        """
+        Run extract_transactions_from_statement with the extractor mocked to
+        return mock_df and date-detection mocked to fall back on document_date.
+        """
+        with self.settings(MEDIA_ROOT=self.tmpdir), \
+             patch('banking.extraction.get_statement_date_from_pdf', return_value=(None, None)), \
+             patch('banking.extraction.PDFExtractorFactory') as mock_factory:
+            mock_factory.get_extractor.return_value = self._mock_extractor(mock_df)
+            extract_transactions_from_statement(statement_import.id, self.user)
+
+    # ------------------------------------------------------------------
+    # Test Case 1: Auto-Spawning & Routing
+    # ------------------------------------------------------------------
+
+    def test_auto_spawn_creates_products_accounts_and_routes_transactions(self):
+        """
+        A 3-row DataFrame with 2 distinct account_numbers must:
+          - auto-spawn exactly 2 FinancialProducts (one per unique account_number)
+          - auto-spawn exactly 2 family-scoped Accounts, both ASSET type
+          - stage exactly 3 StagedTransactions
+          - link the first two rows to product '111' and the third to product '222'
+          - complete the import successfully
+        """
+        mock_df = pd.DataFrame([
+            {
+                'date': pd.Timestamp('2026-02-10'), 'description': 'Coffee',
+                'amount': 100.0, 'account_number': '111', 'inferred_product_type': 'CHECKING',
+            },
+            {
+                'date': pd.Timestamp('2026-02-11'), 'description': 'Grocery Store',
+                'amount': -50.0, 'account_number': '111', 'inferred_product_type': 'CHECKING',
+            },
+            {
+                'date': pd.Timestamp('2026-02-15'), 'description': 'RRSP Contribution',
+                'amount': 5000.0, 'account_number': '222', 'inferred_product_type': 'INVESTMENT',
+            },
+        ])
+
+        statement = self._make_import()
+        self._run_extraction(statement, mock_df)
+
+        # --- 2 FinancialProducts auto-spawned ---
+        products = FinancialProduct.objects.filter(family=self.family)
+        self.assertEqual(products.count(), 2, "Expected exactly 2 auto-spawned FinancialProducts")
+
+        product_111 = products.get(account_number='111')
+        product_222 = products.get(account_number='222')
+        self.assertEqual(product_111.product_type, FinancialProduct.ProductType.CHECKING)
+        self.assertEqual(product_222.product_type, FinancialProduct.ProductType.INVESTMENT)
+
+        # --- 2 family-scoped Accounts, both ASSET ---
+        family_accounts = Account.objects.filter(family=self.family)
+        self.assertEqual(family_accounts.count(), 2, "Expected exactly 2 new family-scoped Accounts")
+        account_types = set(family_accounts.values_list('account_type', flat=True))
+        self.assertEqual(
+            account_types, {Account.AccountType.ASSET},
+            "CHECKING and INVESTMENT both map to ASSET in the ledger tree",
+        )
+
+        # --- 3 StagedTransactions created ---
+        staged = StagedTransaction.objects.filter(statement_import=statement)
+        self.assertEqual(staged.count(), 3, "Expected exactly 3 StagedTransactions")
+
+        # --- Correct per-row routing ---
+        txs_111 = staged.filter(financial_product=product_111)
+        txs_222 = staged.filter(financial_product=product_222)
+        self.assertEqual(txs_111.count(), 2, "2 transactions must be linked to account '111'")
+        self.assertEqual(txs_222.count(), 1, "1 transaction must be linked to account '222'")
+
+        # --- Amounts preserved correctly ---
+        descriptions_111 = set(txs_111.values_list('raw_description', flat=True))
+        self.assertEqual(descriptions_111, {'Coffee', 'Grocery Store'})
+        self.assertEqual(txs_222.first().amount, Decimal('5000.00'))
+
+        # --- Import marked COMPLETED ---
+        statement.refresh_from_db()
+        self.assertEqual(statement.status, BankStatementImport.Status.COMPLETED)
+
+    # ------------------------------------------------------------------
+    # Test Case 2: Cache Hit / Idempotency
+    # ------------------------------------------------------------------
+
+    def test_cache_hit_reuses_existing_product_and_only_spawns_new_one(self):
+        """
+        When a FinancialProduct for account '333' already exists, the pipeline must:
+          - reuse it (cache hit on the pre-built product_by_account_number dict)
+          - auto-spawn exactly 1 new product for the new account '444'
+          - create exactly 1 new family Account (for '444')
+          - NOT duplicate the existing product or account for '333'
+          - stage 2 transactions, each linked to the correct product
+        """
+        # Pre-create the parent account that provision_financial_product would get_or_create
+        parent_account = Account.objects.create(
+            name="Bank Accounts",
+            account_type=Account.AccountType.ASSET,
+            family=None,  # system-wide
+        )
+        existing_account = Account.objects.create(
+            name="Tangerine 333",
+            account_type=Account.AccountType.ASSET,
+            family=self.family,
+            parent=parent_account,
+        )
+        existing_product = FinancialProduct.objects.create(
+            institution=self.institution,
+            family=self.family,
+            account=existing_account,
+            product_type=FinancialProduct.ProductType.CHECKING,
+            account_number='333',
+        )
+
+        products_before = FinancialProduct.objects.count()
+        family_accounts_before = Account.objects.filter(family=self.family).count()
+
+        mock_df = pd.DataFrame([
+            {
+                'date': pd.Timestamp('2026-02-10'), 'description': 'Bill Payment',
+                'amount': -200.0, 'account_number': '333', 'inferred_product_type': 'CHECKING',
+            },
+            {
+                'date': pd.Timestamp('2026-02-12'), 'description': 'Savings Deposit',
+                'amount': 1000.0, 'account_number': '444', 'inferred_product_type': 'SAVINGS',
+            },
+        ])
+
+        statement = self._make_import()
+        self._run_extraction(statement, mock_df)
+
+        # --- Exactly 1 new product spawned (for '444') ---
+        self.assertEqual(
+            FinancialProduct.objects.count(), products_before + 1,
+            "Exactly 1 new FinancialProduct should be created (for account '444')",
+        )
+        # --- Exactly 1 new family Account spawned (for '444') ---
+        self.assertEqual(
+            Account.objects.filter(family=self.family).count(), family_accounts_before + 1,
+            "Exactly 1 new family Account should be created (for account '444')",
+        )
+
+        # --- Product '333' not duplicated ---
+        self.assertEqual(
+            FinancialProduct.objects.filter(
+                institution=self.institution, account_number='333'
+            ).count(),
+            1,
+            "Product '333' must not be duplicated",
+        )
+
+        # --- 2 staged transactions, correctly routed ---
+        staged = StagedTransaction.objects.filter(statement_import=statement)
+        self.assertEqual(staged.count(), 2)
+
+        tx_333 = staged.get(raw_description='Bill Payment')
+        tx_444 = staged.get(raw_description='Savings Deposit')
+
+        self.assertEqual(
+            tx_333.financial_product, existing_product,
+            "Transaction for '333' must be linked to the pre-existing product",
+        )
+        self.assertNotEqual(
+            tx_444.financial_product, existing_product,
+            "Transaction for '444' must be linked to the newly spawned product",
+        )
+        self.assertEqual(tx_444.financial_product.account_number, '444')
+        self.assertEqual(tx_444.financial_product.product_type, FinancialProduct.ProductType.SAVINGS)
+
+        # --- Import completed cleanly ---
+        statement.refresh_from_db()
+        self.assertEqual(statement.status, BankStatementImport.Status.COMPLETED)

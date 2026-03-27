@@ -17,7 +17,7 @@ class VisaDesjardinsExtractorSignTests(TestCase):
             }
         )
 
-        out = extractor.process_dataframe(df, statement_year=2026, statement_month=3)
+        out, _ = extractor.process_dataframe(df, statement_year=2026, statement_month=3)
 
         self.assertEqual(len(out), 2)
         self.assertAlmostEqual(float(out.iloc[0]["amount"]), 123.45, places=2)
@@ -32,7 +32,7 @@ class VisaDesjardinsExtractorSignTests(TestCase):
             }
         )
 
-        out = extractor.process_dataframe(df, statement_year=2026, statement_month=3)
+        out, _ = extractor.process_dataframe(df, statement_year=2026, statement_month=3)
 
         self.assertEqual(len(out), 1)
         self.assertAlmostEqual(float(out.iloc[0]["amount"]), -25.50, places=2)
@@ -48,7 +48,7 @@ class VisaDesjardinsExtractorSignTests(TestCase):
         )
 
         # Statement from January 2026
-        out = extractor.process_dataframe(df, statement_year=2026, statement_month=1)
+        out, _ = extractor.process_dataframe(df, statement_year=2026, statement_month=1)
 
         self.assertEqual(len(out), 2)
         # Dec transaction should be 2025

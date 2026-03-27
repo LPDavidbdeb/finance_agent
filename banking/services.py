@@ -95,7 +95,7 @@ def approve_staged_transaction(transaction_id: int, target_account_id: int, user
     and updating the staged transaction status.
     """
     try:
-        staged_tx = StagedTransaction.objects.select_for_update().select_related(
+        staged_tx = StagedTransaction.objects.select_for_update(of=('self',)).select_related(
             'financial_product__family',
             'financial_product__account',
             'statement_import__financial_product__family',

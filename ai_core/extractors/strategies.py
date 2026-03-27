@@ -19,14 +19,15 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
         """
         df.columns = [str(x).upper() for x in df.columns]
 
-        header_found = False
-        for i in range(min(5, len(df))):
-            row_values = [str(x).upper() for x in df.iloc[i].values]
-            if any('DESCRIPTION' in val for val in row_values) and any('MONTANT' in val for val in row_values):
-                df.columns = row_values
-                df = df.iloc[i + 1:].reset_index(drop=True)
-                header_found = True
-                break
+        header_found = 'DESCRIPTION' in df.columns and 'MONTANT' in df.columns
+        if not header_found:
+            for i in range(min(5, len(df))):
+                row_values = [str(x).upper() for x in df.iloc[i].values]
+                if any('DESCRIPTION' in val for val in row_values) and any('MONTANT' in val for val in row_values):
+                    df.columns = row_values
+                    df = df.iloc[i + 1:].reset_index(drop=True)
+                    header_found = True
+                    break
 
         if not header_found:
             return pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier']), False
@@ -126,6 +127,11 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
         desc_col = next((col for col in df_clean.columns if 'DESCRIPTION' in col), 'DESCRIPTION')
         amount_col = next((col for col in df_clean.columns if 'MONTANT' in col), 'MONTANT')
 
+        # Exclude payment rows — handled separately by _extract_payment_table to avoid duplication
+        desc_upper = df_clean[desc_col].astype(str).str.upper()
+        payment_mask = desc_upper.str.contains('PAIEMENT', na=False) | desc_upper.str.contains('PRÉLÈVEMENT', na=False)
+        df_clean = df_clean[~payment_mask].reset_index(drop=True)
+
         # Extract dates from description column (primary method for regular transactions)
         extracted_dates = df_clean[desc_col].astype(str).str.extract(date_pattern)
         valid_rows = extracted_dates[0].notna() & extracted_dates[1].notna()
@@ -168,9 +174,9 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
         )
         parsed_amount = pd.to_numeric(amount_magnitude, errors='coerce')
 
-        # Payments (CR or -) = positive amount (reduces liability)
-        # Purchases (no CR) = negative amount (increases liability)
-        df_clean['amount'] = parsed_amount * np.where(has_cr | has_minus, 1, -1)
+        # Purchases (no CR, no minus) = positive amount (expense on the statement)
+        # Credits/payments (CR or -) = negative amount (reduces the statement balance)
+        df_clean['amount'] = parsed_amount * np.where(has_cr | has_minus, -1, 1)
         df_clean['account_identifier'] = 'CREDIT_CARD'
 
         return df_clean[['date', 'description', 'amount', 'account_identifier']].dropna(
