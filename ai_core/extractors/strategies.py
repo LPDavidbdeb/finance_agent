@@ -485,19 +485,23 @@ class TangerineExtractor(BasePDFExtractor):
     """
     Multi-product extractor for Tangerine consolidated statements.
 
-    Uses a two-pass strategy:
+    Uses a two-pass strategy (pdfplumber only — no tabula):
 
-      Pass 1 — Product-type roster (pdfplumber, page 1)
-        Locate the "Compte(s) en un coup d'oeil" summary table and build a
-        mapping  account_number → FinancialProduct.ProductType  by inspecting
-        each line for keywords ('épargne', 'CELI', 'CPG', 'chèque').
+      Pass 1 — Product-type roster (pages 1-2)
+        Locate the "Compte(s) en un coup d'oeil" summary and build a mapping
+        account_number → FinancialProduct.ProductType from keywords
+        ('épargne', 'CELI', 'CPG', 'chèque').
 
-      Pass 2 — Ledger extraction (pdfplumber + tabula, all pages)
-        Scan every page for a section header matching
-            r"Détails - .* - (\\d+)"
-        The captured group is the account_number that owns the table below.
-        Use tabula to extract that page range, then clean and tag each row with
-        account_number and inferred_product_type from Pass 1.
+      Pass 2 — Text-line ledger extraction (all pages)
+        Concatenate all page texts.  Find every 'Détails - ... - NNNN' header
+        with finditer (multiple per page supported).  For each section, parse
+        lines of the form 'DD.MM.YYYY description amount balance'.
+        Sign is inferred from the balance change (balance increases → positive
+        inflow; balance decreases → negative outflow).  "Solde d'ouverture" /
+        "Solde" marker lines are used for anchoring and then excluded.
+
+    Tangerine statements use a text-layout format with no ruled table borders,
+    so tabula cannot extract them reliably.
 
     Output DataFrame contract — every row has these five columns:
       date                  pd.Timestamp
@@ -508,49 +512,32 @@ class TangerineExtractor(BasePDFExtractor):
     """
 
     OUTPUT_COLUMNS = ['date', 'description', 'amount', 'account_number', 'inferred_product_type']
-
-    # Fallback when a section account number is not found in the Pass 1 roster.
     _DEFAULT_PRODUCT_TYPE = 'CHECKING'
+    _HEADER_RE = re.compile(r'Détails\s+-\s+.+?\s+-\s+(\d+)', re.IGNORECASE)
+    _BALANCE_MARKERS = frozenset(["solde d'ouverture", 'solde'])
 
-    def tabula_parameters(self) -> dict:
-        return {'pages': 'all', 'stream': True}
+    def tabula_parameters(self) -> dict:  # satisfies BasePDFExtractor ABC
+        return {}
 
     # ------------------------------------------------------------------
     # Public entry point (overrides BasePDFExtractor.extract entirely)
     # ------------------------------------------------------------------
 
     def extract(self, pdf_path: str, statement_year: int, statement_month: int) -> tuple[pd.DataFrame, bool]:
-        import tabula
         import pdfplumber
 
         try:
             product_types = self._pass1_infer_product_types(pdf_path, pdfplumber)
             logger.info(f"[TangerineExtractor] Pass 1 roster: {product_types}")
 
-            section_pages = self._find_section_pages(pdf_path, pdfplumber)
-            logger.info(f"[TangerineExtractor] Pass 2 sections found: {section_pages}")
+            all_dfs = self._pass2_extract_from_text(pdf_path, pdfplumber, product_types)
 
-            if not section_pages:
+            if not all_dfs:
                 logger.warning("[TangerineExtractor] No section headers found. Returning empty DataFrame.")
                 return pd.DataFrame(columns=self.OUTPUT_COLUMNS), False
 
-            all_dfs = []
-            for idx, (account_number, start_page) in enumerate(section_pages):
-                # Pages for this section: from its header page up to (but not including)
-                # the next section's header page.
-                end_page = section_pages[idx + 1][1] - 1 if idx + 1 < len(section_pages) else None
-                page_range = f"{start_page}-{end_page}" if end_page and end_page >= start_page else str(start_page)
-
-                raw_dfs = tabula.read_pdf(pdf_path, pages=page_range, stream=True, pandas_options={'header': 0})
-                for raw_df in (raw_dfs or []):
-                    clean = self._clean_transaction_df(raw_df, statement_year, statement_month, account_number, product_types)
-                    if clean is not None and not clean.empty:
-                        all_dfs.append(clean)
-
-            if not all_dfs:
-                return pd.DataFrame(columns=self.OUTPUT_COLUMNS), False
-
             combined = pd.concat(all_dfs, ignore_index=True)
+            logger.info(f"[TangerineExtractor] Extracted {len(combined)} transactions across {len(all_dfs)} section(s).")
             return combined[self.OUTPUT_COLUMNS], False
 
         except Exception as e:
@@ -586,99 +573,109 @@ class TangerineExtractor(BasePDFExtractor):
                         product_types[account_number] = 'SAVINGS'
                     elif 'chèque' in line_lower or 'cheque' in line_lower:
                         product_types[account_number] = 'CHECKING'
-                    # First match wins; don't overwrite if already set.
                 break  # Summary found — no need to continue to page 2
         return product_types
 
     # ------------------------------------------------------------------
-    # Pass 2: locate section header pages
+    # Pass 2: text-line extraction across all sections
     # ------------------------------------------------------------------
 
-    def _find_section_pages(self, pdf_path: str, pdfplumber_module) -> list:
+    def _pass2_extract_from_text(
+        self, pdf_path: str, pdfplumber_module, product_types: dict
+    ) -> list:
         """
-        Iterate all pages and return [(account_number, 1-based-page-index), ...]
-        ordered by page number for each 'Détails - ... - NNNN' header found.
+        Concatenate all page texts, find every 'Détails - ... - NNNN' header
+        with finditer (handles multiple sections per page), then parse each
+        section's transaction lines.
         """
-        header_re = re.compile(r'Détails\s+-\s+.+?\s+-\s+(\d+)', re.IGNORECASE)
-        sections = []
         with pdfplumber_module.open(pdf_path) as pdf:
-            for i, page in enumerate(pdf.pages):
-                text = page.extract_text() or ''
-                match = header_re.search(text)
-                if match:
-                    sections.append((match.group(1), i + 1))  # 1-indexed for tabula
-        return sections
+            full_text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
 
-    # ------------------------------------------------------------------
-    # Per-section DataFrame cleaning
-    # ------------------------------------------------------------------
+        sections = list(self._HEADER_RE.finditer(full_text))
+        if not sections:
+            return []
 
-    def _clean_transaction_df(
-        self,
-        df: pd.DataFrame,
-        year: int,
-        month: int,
-        account_number: str,
-        product_types: dict,
+        all_dfs = []
+        for i, match in enumerate(sections):
+            account_number = match.group(1)
+            section_start = match.end()
+            section_end = sections[i + 1].start() if i + 1 < len(sections) else len(full_text)
+            section_text = full_text[section_start:section_end]
+
+            df = self._parse_section_text(section_text, account_number, product_types)
+            if df is not None and not df.empty:
+                all_dfs.append(df)
+
+        return all_dfs
+
+    def _parse_section_text(
+        self, text: str, account_number: str, product_types: dict
     ):
         """
-        Normalise a raw tabula DataFrame into the OUTPUT_COLUMNS contract.
-        Returns None if the DataFrame does not look like a transaction table.
+        Parse lines of the form 'DD.MM.YYYY description amount balance'.
+
+        Sign is derived from balance change:
+          balance_after - balance_before > 0  →  positive (inflow)
+          balance_after - balance_before < 0  →  negative (outflow)
+
+        "Solde d'ouverture" / "Solde" marker lines are used only as balance
+        anchors and are excluded from the output.
         """
-        if df is None or df.empty:
+        product_type = product_types.get(account_number, self._DEFAULT_PRODUCT_TYPE)
+
+        # French decimal numbers may use non-breaking spaces as thousands separators.
+        _MONEY = r'(?:[\d\u00a0\u202f ]+,\d{2})'
+        TX_RE = re.compile(
+            r'^(\d{2})\.(\d{2})\.(\d{4})\s+'  # DD.MM.YYYY
+            r'(.+)\s+'                          # description (greedy — absorbs any embedded ref numbers)
+            r'(' + _MONEY + r')\s+'             # amount (absolute, last-but-one money token)
+            r'(' + _MONEY + r')\s*$'            # running balance (last money token)
+        )
+
+        def _parse_fr(s: str) -> float:
+            # Strip all space variants and convert French comma decimal
+            return float(
+                s.replace('\u00a0', '').replace('\u202f', '').replace(' ', '').replace(',', '.')
+            )
+
+        parsed = []
+        for line in text.split('\n'):
+            m = TX_RE.match(line.strip())
+            if not m:
+                continue
+            try:
+                tx_date = pd.Timestamp(year=int(m.group(3)), month=int(m.group(2)), day=int(m.group(1)))
+            except ValueError:
+                continue
+            parsed.append((tx_date, m.group(4).strip(), m.group(5), m.group(6)))
+
+        if not parsed:
             return None
 
-        df = df.copy()
-        df.columns = [str(c).strip() for c in df.columns]
+        rows = []
+        prev_balance = None
+        for tx_date, description, raw_amount, raw_balance in parsed:
+            balance = _parse_fr(raw_balance)
+            if description.lower() in self._BALANCE_MARKERS:
+                prev_balance = balance
+                continue
 
-        # Locate required columns by keyword scan (column names vary across
-        # Tangerine PDF versions and tabula parse results).
-        date_col = next((c for c in df.columns if re.search(r'\bdate\b', c, re.I)), None)
-        desc_col = next((c for c in df.columns if re.search(r'description|transaction|activit', c, re.I)), None)
-        withdraw_col = next((c for c in df.columns if re.search(r'retrait|withdraw|débit|debit', c, re.I)), None)
-        deposit_col = next((c for c in df.columns if re.search(r'dépôt|depot|deposit|crédit|credit', c, re.I)), None)
-        amount_col = next((c for c in df.columns if re.search(r'^montant$|^amount$', c, re.I)), None)
+            magnitude = _parse_fr(raw_amount)
+            if prev_balance is not None and magnitude != 0:
+                sign = 1.0 if round(balance - prev_balance, 4) >= 0 else -1.0
+            else:
+                sign = 1.0
 
-        if not date_col or not desc_col:
-            return None
+            prev_balance = balance
+            rows.append({
+                'date': tx_date,
+                'description': description,
+                'amount': magnitude * sign,
+                'account_number': account_number,
+                'inferred_product_type': product_type,
+            })
 
-        # --- Date ---
-        df['date'] = pd.to_datetime(df[date_col].astype(str), infer_datetime_format=True, errors='coerce')
-        df = df.dropna(subset=['date'])
-        if df.empty:
-            return None
-
-        # --- Amount ---
-        def _to_numeric(series: pd.Series) -> pd.Series:
-            return pd.to_numeric(
-                series.astype(str).str.replace(r'[$, ]', '', regex=True),
-                errors='coerce'
-            ).fillna(0)
-
-        if withdraw_col and deposit_col:
-            # Bank-account layout: separate Withdrawals / Deposits columns.
-            # Outflow (withdrawal) → negative; inflow (deposit) → positive.
-            df['amount'] = _to_numeric(df[deposit_col]) - _to_numeric(df[withdraw_col])
-        elif amount_col:
-            # Single-amount layout (e.g. credit card).
-            # Tabula may encode purchases as positive and payments as negative,
-            # or use a CR suffix — normalise to cash-flow sign convention.
-            raw = df[amount_col].astype(str)
-            has_cr = raw.str.contains(r'\bCR\b', case=False, regex=True)
-            magnitude = _to_numeric(raw.str.replace(r'\bCR\b', '', case=False, regex=True).str.replace('-', '', regex=False))
-            # Purchases are positive in Tangerine credit-card PDFs → flip to negative.
-            # Payments carry CR → they are inflows → keep positive.
-            df['amount'] = np.where(has_cr, magnitude, -magnitude)
-        else:
-            return None
-
-        # --- Other columns ---
-        df['description'] = df[desc_col].astype(str).str.strip()
-        df['account_number'] = account_number
-        df['inferred_product_type'] = product_types.get(account_number, self._DEFAULT_PRODUCT_TYPE)
-
-        result = df[self.OUTPUT_COLUMNS].dropna(subset=['date', 'amount'])
-        return result if not result.empty else None
+        return pd.DataFrame(rows) if rows else None
 
     # ------------------------------------------------------------------
     # process_dataframe — satisfies ABC contract but is never called

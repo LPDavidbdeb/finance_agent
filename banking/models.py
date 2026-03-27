@@ -56,7 +56,7 @@ class BankStatementImport(models.Model):
         related_name='statement_imports',
         null=True, blank=True,
     )
-    file = models.FileField(upload_to='statements/%Y/%m/', null=True, blank=True)
+    file = models.FileField(upload_to='statements/%Y/%m/', null=True, blank=True, max_length=255)
     file_hash = models.CharField(max_length=64, unique=True, null=True, blank=True)
 
     upload_date = models.DateTimeField(auto_now_add=True)

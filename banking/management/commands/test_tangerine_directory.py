@@ -14,6 +14,7 @@ Usage:
 
 import os
 from datetime import date
+from django.core.files import File
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
@@ -122,8 +123,11 @@ class Command(BaseCommand):
                         processing_log=[],
                     )
 
-                    # Attach the real PDF file via direct field assignment (no upload)
-                    stmt.file.name = os.path.relpath(pdf_path, start="/")
+                    # Bind the real PDF as a proper Django File so only the
+                    # basename is stored in the database (avoids varchar overflow).
+                    filename = os.path.basename(pdf_path)
+                    with open(pdf_path, "rb") as f:
+                        stmt.file.save(filename, File(f), save=False)
                     stmt.save(update_fields=["file"])
 
                     try:

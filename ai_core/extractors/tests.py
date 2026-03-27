@@ -1,6 +1,6 @@
 from django.test import TestCase
 import pandas as pd
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 from datetime import date
 
 from ai_core.extractors.strategies import VisaDesjardinsExtractor, TangerineExtractor
@@ -61,16 +61,12 @@ class TangerineExtractorTests(TestCase):
     """
     Mock-based tests for TangerineExtractor routing logic.
 
-    These tests never touch a real PDF. pdfplumber and tabula are both mocked so
-    we can verify that:
-      1. Pass 1 correctly maps account numbers to ProductType values.
-      2. Pass 2 correctly assigns account_number and inferred_product_type to rows.
-      3. The sign convention is respected (outflow = negative, inflow = positive).
-      4. Rows from different accounts are correctly segregated in the output.
+    These tests never touch a real PDF. pdfplumber is mocked with page texts
+    that include DD.MM.YYYY transaction lines so the text-line parser can run.
 
-    test_real_world_january_2023_structure uses the exact account-number string
-    from a real January 2023 Tangerine statement to pin the parsing behaviour
-    against real-world data before the E2E command is run.
+    Sign is encoded in the running balance: balance increases → positive inflow,
+    balance decreases → negative outflow.  "Solde d'ouverture" / "Solde" lines
+    act as balance anchors and are excluded from the output.
     """
 
     def _make_pdf_mock(self, page_texts: list[str]):
@@ -87,41 +83,30 @@ class TangerineExtractorTests(TestCase):
         ctx.__exit__ = MagicMock(return_value=False)
         return ctx
 
-    @patch('tabula.read_pdf')
     @patch('pdfplumber.open')
-    def test_routing_assigns_correct_account_number_and_product_type(self, mock_pdf_open, mock_tabula):
+    def test_routing_assigns_correct_account_number_and_product_type(self, mock_pdf_open):
         """
         Two-section statement: chequing (12345) and savings (67890).
         Verify that every row gets the right account_number and inferred_product_type.
         """
         page_texts = [
-            # Page 1 — summary table ("coup d'oeil")
+            # Page 1 — summary ("coup d'oeil")
             "Compte(s) en un coup d'oeil\n"
             "Compte-chèques 12345   $500.00\n"
             "Compte épargne 67890   $1 000.00\n",
-            # Page 2 — chequing section header + table
+            # Page 2 — chequing section with two transactions
             "Détails - Compte-chèques - 12345\n"
-            "Date Description Retraits Dépôts\n",
-            # Page 3 — savings section header + table
+            "01.01.2024 Solde d'ouverture 0,00 500,00\n"
+            "15.01.2024 GROCERY STORE 50,00 450,00\n"
+            "20.01.2024 PAYROLL DEPOSIT 2000,00 2450,00\n"
+            "31.01.2024 Solde 0,00 2450,00\n",
+            # Page 3 — savings section with one transaction
             "Détails - Compte épargne - 67890\n"
-            "Date Description Retraits Dépôts\n",
+            "01.01.2024 Solde d'ouverture 0,00 1000,00\n"
+            "31.01.2024 INTEREST 5,25 1005,25\n"
+            "31.01.2024 Solde 0,00 1005,25\n",
         ]
         mock_pdf_open.return_value = self._make_pdf_mock(page_texts)
-
-        chequing_df = pd.DataFrame({
-            'Date':        ['2024-01-15', '2024-01-20'],
-            'Description': ['GROCERY STORE', 'PAYROLL DEPOSIT'],
-            'Retraits':    [50.00, 0.00],
-            'Dépôts':      [0.00, 2000.00],
-        })
-        savings_df = pd.DataFrame({
-            'Date':        ['2024-01-31'],
-            'Description': ['INTEREST'],
-            'Retraits':    [0.00],
-            'Dépôts':      [5.25],
-        })
-        # tabula is called once per section (2 sections)
-        mock_tabula.side_effect = [[chequing_df], [savings_df]]
 
         extractor = TangerineExtractor()
         result, mismatch = extractor.extract('dummy.pdf', 2024, 1)
@@ -138,24 +123,22 @@ class TangerineExtractorTests(TestCase):
         self.assertTrue(all(chequing_rows['inferred_product_type'] == 'CHECKING'))
         self.assertTrue(all(savings_rows['inferred_product_type'] == 'SAVINGS'))
 
-    @patch('tabula.read_pdf')
     @patch('pdfplumber.open')
-    def test_sign_convention_withdrawal_negative_deposit_positive(self, mock_pdf_open, mock_tabula):
+    def test_sign_convention_withdrawal_negative_deposit_positive(self, mock_pdf_open):
         """
         Withdrawals must produce negative amounts; deposits must produce positive amounts.
+        Sign is inferred from the running balance change between rows.
         """
         page_texts = [
-            "Compte(s) en un coup d'oeil\nCompte-chèques 11111   $100.00\n",
-            "Détails - Compte-chèques - 11111\nDate Description Retraits Dépôts\n",
+            "Compte(s) en un coup d'oeil\nCompte-chèques 11111   $100.00\n"
+            "Détails - Compte-chèques - 11111\n"
+            "01.03.2024 Solde d'ouverture 0,00 100,00\n"
+            "01.03.2024 COFFEE SHOP 4,75 95,25\n"
+            "05.03.2024 SALARY 3000,00 3095,25\n"
+            "10.03.2024 TRANSFER OUT 250,00 2845,25\n"
+            "31.03.2024 Solde 0,00 2845,25\n",
         ]
         mock_pdf_open.return_value = self._make_pdf_mock(page_texts)
-
-        mock_tabula.return_value = [pd.DataFrame({
-            'Date':        ['2024-03-01', '2024-03-05', '2024-03-10'],
-            'Description': ['COFFEE SHOP', 'SALARY', 'TRANSFER OUT'],
-            'Retraits':    [4.75,   0.00,   250.00],
-            'Dépôts':      [0.00,   3000.00, 0.00],
-        })]
 
         extractor = TangerineExtractor()
         result, _ = extractor.extract('dummy.pdf', 2024, 3)
@@ -169,24 +152,19 @@ class TangerineExtractorTests(TestCase):
         self.assertAlmostEqual(float(salary['amount']),   3000.00,  places=2)
         self.assertAlmostEqual(float(transfer['amount']), -250.00,  places=2)
 
-    @patch('tabula.read_pdf')
     @patch('pdfplumber.open')
-    def test_celi_account_maps_to_investment(self, mock_pdf_open, mock_tabula):
+    def test_celi_account_maps_to_investment(self, mock_pdf_open):
         """
         Account labelled 'CELI' in the summary must get inferred_product_type='INVESTMENT'.
         """
         page_texts = [
-            "Compte(s) en un coup d'oeil\nCELI 99999   $5 000.00\n",
-            "Détails - CELI - 99999\nDate Description Retraits Dépôts\n",
+            "Compte(s) en un coup d'oeil\nCELI 99999   $5 000.00\n"
+            "Détails - CELI - 99999\n"
+            "01.06.2024 Solde d'ouverture 0,00 5000,00\n"
+            "15.06.2024 CONTRIBUTION 500,00 5500,00\n"
+            "30.06.2024 Solde 0,00 5500,00\n",
         ]
         mock_pdf_open.return_value = self._make_pdf_mock(page_texts)
-
-        mock_tabula.return_value = [pd.DataFrame({
-            'Date':        ['2024-06-15'],
-            'Description': ['CONTRIBUTION'],
-            'Retraits':    [0.00],
-            'Dépôts':      [500.00],
-        })]
 
         extractor = TangerineExtractor()
         result, _ = extractor.extract('dummy.pdf', 2024, 6)
@@ -195,25 +173,20 @@ class TangerineExtractorTests(TestCase):
         self.assertEqual(result.iloc[0]['inferred_product_type'], 'INVESTMENT')
         self.assertEqual(result.iloc[0]['account_number'], '99999')
 
-    @patch('tabula.read_pdf')
     @patch('pdfplumber.open')
-    def test_unknown_account_falls_back_to_checking(self, mock_pdf_open, mock_tabula):
+    def test_unknown_account_falls_back_to_checking(self, mock_pdf_open):
         """
         If Pass 1 doesn't recognise an account number, the row gets 'CHECKING' as fallback.
         """
         page_texts = [
             # Summary page with no recognisable keyword for account 55555
-            "Compte(s) en un coup d'oeil\nCompte X 55555   $0.00\n",
-            "Détails - Compte X - 55555\nDate Description Retraits Dépôts\n",
+            "Compte(s) en un coup d'oeil\nCompte X 55555   $0.00\n"
+            "Détails - Compte X - 55555\n"
+            "01.02.2024 Solde d'ouverture 0,00 100,00\n"
+            "01.02.2024 MYSTERY TXN 10,00 90,00\n"
+            "28.02.2024 Solde 0,00 90,00\n",
         ]
         mock_pdf_open.return_value = self._make_pdf_mock(page_texts)
-
-        mock_tabula.return_value = [pd.DataFrame({
-            'Date':        ['2024-02-01'],
-            'Description': ['MYSTERY TXN'],
-            'Retraits':    [10.00],
-            'Dépôts':      [0.00],
-        })]
 
         extractor = TangerineExtractor()
         result, _ = extractor.extract('dummy.pdf', 2024, 2)
@@ -221,9 +194,8 @@ class TangerineExtractorTests(TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result.iloc[0]['inferred_product_type'], 'CHECKING')
 
-    @patch('tabula.read_pdf')
     @patch('pdfplumber.open')
-    def test_real_world_january_2023_structure(self, mock_pdf_open, mock_tabula):
+    def test_real_world_january_2023_structure(self, mock_pdf_open):
         """
         Pins behaviour against the real four-account structure found in a
         January 2023 Tangerine consolidated statement.
@@ -247,19 +219,13 @@ class TangerineExtractorTests(TestCase):
         )
         SECTION_PAGE = (
             "Détails - Compte d'épargne Tangerine - 3014873044\n"
-            "Date Description Retraits Dépôts\n"
+            "01.01.2023 Solde d'ouverture 0,00 0,00\n"
+            "15.01.2023 VIREMENT ENTRANT 1000,00 1000,00\n"
+            "20.01.2023 FRAIS MENSUELS 5,00 995,00\n"
+            "31.01.2023 Solde 0,00 995,00\n"
         )
 
-        # Both Pass 1 and _find_section_pages open the same PDF; return the
-        # same two-page mock for every call to pdfplumber.open().
         mock_pdf_open.return_value = self._make_pdf_mock([SUMMARY_PAGE, SECTION_PAGE])
-
-        mock_tabula.return_value = [pd.DataFrame({
-            'Date':        ['2023-01-15', '2023-01-20'],
-            'Description': ['VIREMENT ENTRANT', 'FRAIS MENSUELS'],
-            'Retraits':    [0.00, 5.00],
-            'Dépôts':      [1000.00, 0.00],
-        })]
 
         extractor = TangerineExtractor()
 
@@ -292,15 +258,14 @@ class TangerineExtractorTests(TestCase):
             (result['inferred_product_type'] == 'SAVINGS').all(),
             "All rows must carry SAVINGS as inferred_product_type"
         )
-        # Sign convention: deposit → positive, withdrawal → negative
+        # Sign convention: deposit → positive (balance up), withdrawal → negative (balance down)
         virement = result[result['description'] == 'VIREMENT ENTRANT'].iloc[0]
         frais    = result[result['description'] == 'FRAIS MENSUELS'].iloc[0]
         self.assertAlmostEqual(float(virement['amount']),  1000.0, places=2)
         self.assertAlmostEqual(float(frais['amount']),      -5.0,  places=2)
 
-    @patch('tabula.read_pdf')
     @patch('pdfplumber.open')
-    def test_empty_statement_returns_empty_dataframe(self, mock_pdf_open, mock_tabula):
+    def test_empty_statement_returns_empty_dataframe(self, mock_pdf_open):
         """
         A PDF with no 'Détails' section headers must return an empty DataFrame
         with the correct column schema.
@@ -310,7 +275,6 @@ class TangerineExtractorTests(TestCase):
             "Some other page with no section header.\n",
         ]
         mock_pdf_open.return_value = self._make_pdf_mock(page_texts)
-        mock_tabula.return_value = []
 
         extractor = TangerineExtractor()
         result, mismatch = extractor.extract('dummy.pdf', 2024, 1)
