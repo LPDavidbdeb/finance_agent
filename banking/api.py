@@ -27,6 +27,7 @@ from .schemas import (
     StatementMonthOut,
     StatementCoverageOut,
 )
+from django.db.models import Q
 from .models import FinancialInstitution, FinancialProduct, BankStatementImport, StagedTransaction
 from .services import provision_financial_product, approve_staged_transaction
 
@@ -348,41 +349,63 @@ def list_statement_transactions(request, product_id: int, year: int, month: int)
 @router.get("/statement-coverage", response=StatementCoverageOut)
 def get_statement_coverage(request):
     """
-    Returns a month-by-month coverage grid for all financial products.
-    Each cell shows whether a statement exists for that product/month based on document_date.
-    Months before a product's first statement are neutral; gaps after are flagged as missing.
+    Returns a month-by-month coverage grid grouped by Upload Target.
+
+    A target is one of:
+      INSTITUTION — an institution that has ≥1 consolidated (multi-product)
+                    BankStatementImport (financial_product=None).
+      PRODUCT     — a legacy FinancialProduct that has its own per-statement uploads.
+
+    Both target types can coexist for the same institution (e.g. Desjardins has
+    per-product legacy uploads; Tangerine has consolidated institution-level uploads).
     """
     user = request.auth
     family = user.family
 
-    products = FinancialProduct.objects.filter(family=family).select_related('institution', 'account')
-    if not products.exists():
-        return {"all_months": [], "products": []}
+    family_institution_ids = set(
+        FinancialProduct.objects.filter(family=family).values_list('institution_id', flat=True)
+    )
+    if not family_institution_ids:
+        return {"all_months": [], "targets": []}
 
-    # Build map: product_id → { "YYYY-MM": (statement_id, status) }
+    # Fetch all statements visible to this family:
+    #   legacy path  → financial_product belongs to this family
+    #   consolidated → financial_product is null, institution belongs to this family
     statements = (
         BankStatementImport.objects
-        .filter(financial_product__family=family, document_date__isnull=False)
-        .values('id', 'financial_product_id', 'document_date', 'status')
+        .filter(document_date__isnull=False)
+        .filter(
+            Q(financial_product__family=family) |
+            Q(financial_product__isnull=True, institution_id__in=family_institution_ids)
+        )
+        .values('id', 'financial_product_id', 'institution_id', 'document_date', 'status')
     )
-    product_map: dict = {}
+
+    institution_map: dict = {}   # institution_id → { "YYYY-MM": {statement_id, status} }
+    product_map: dict = {}       # product_id     → { "YYYY-MM": {statement_id, status} }
     global_min_date: Optional[date] = None
 
     for s in statements:
-        pid = s['financial_product_id']
         key = s['document_date'].strftime('%Y-%m')
-        if pid not in product_map:
-            product_map[pid] = {}
-        # Keep the most recent upload for a given month if duplicates exist
-        if key not in product_map[pid]:
-            product_map[pid][key] = {'statement_id': s['id'], 'status': s['status']}
         if global_min_date is None or s['document_date'] < global_min_date:
             global_min_date = s['document_date']
 
-    if global_min_date is None:
-        return {"all_months": [], "products": []}
+        if s['financial_product_id'] is None:
+            iid = s['institution_id']
+            if iid not in institution_map:
+                institution_map[iid] = {}
+            if key not in institution_map[iid]:
+                institution_map[iid][key] = {'statement_id': s['id'], 'status': s['status']}
+        else:
+            pid = s['financial_product_id']
+            if pid not in product_map:
+                product_map[pid] = {}
+            if key not in product_map[pid]:
+                product_map[pid][key] = {'statement_id': s['id'], 'status': s['status']}
 
-    # Build the full ordered list of months
+    if global_min_date is None:
+        return {"all_months": [], "targets": []}
+
     today = date.today()
     current = global_min_date.replace(day=1)
     end = today.replace(day=1)
@@ -391,35 +414,52 @@ def get_statement_coverage(request):
         all_months.append(current.strftime('%Y-%m'))
         current += relativedelta(months=1)
 
-    product_rows = []
-    for product in products.order_by('institution__name', 'account__name'):
-        pid = product.id
-        coverage = product_map.get(pid, {})
-
-        # Product's first known month (neutral before this)
-        product_months_present = sorted(coverage.keys())
-        product_start = product_months_present[0] if product_months_present else None
-
+    def _build_cells(coverage: dict) -> list:
+        months_present = sorted(coverage.keys())
+        start = months_present[0] if months_present else None
         cells = []
         for m in all_months:
-            if product_start is None or m < product_start:
-                # Before first statement — not tracked
+            if start is None or m < start:
                 cells.append({'month': m, 'statement_id': None, 'status': 'before_start'})
             elif m in coverage:
                 cells.append({'month': m, 'statement_id': coverage[m]['statement_id'], 'status': coverage[m]['status']})
             else:
-                # Gap — missing statement
                 cells.append({'month': m, 'statement_id': None, 'status': 'missing'})
+        return cells
 
-        product_rows.append({
-            'product_id': pid,
-            'product_name': product.account.name,
-            'institution_name': product.institution.name,
-            'product_type': product.product_type,
-            'months': cells,
+    targets = []
+
+    # --- Institution targets (consolidated) ---
+    if institution_map:
+        institutions = {
+            inst.id: inst
+            for inst in FinancialInstitution.objects.filter(id__in=institution_map.keys())
+        }
+        for iid, coverage in sorted(institution_map.items(), key=lambda x: institutions[x[0]].name):
+            inst = institutions[iid]
+            targets.append({
+                'target_id': iid,
+                'target_name': f"{inst.name} (Consolidé)",
+                'target_type': 'INSTITUTION',
+                'months': _build_cells(coverage),
+            })
+
+    # --- Product targets (legacy) ---
+    products = (
+        FinancialProduct.objects
+        .filter(family=family)
+        .select_related('institution', 'account')
+        .order_by('institution__name', 'account__name')
+    )
+    for product in products:
+        targets.append({
+            'target_id': product.id,
+            'target_name': product.account.name,
+            'target_type': 'PRODUCT',
+            'months': _build_cells(product_map.get(product.id, {})),
         })
 
-    return {'all_months': all_months, 'products': product_rows}
+    return {'all_months': all_months, 'targets': targets}
 
 
 @router.post("/products/{product_id}/staged-transactions/{transaction_id}/approve")

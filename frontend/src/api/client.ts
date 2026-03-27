@@ -763,17 +763,18 @@ export interface StatementCell {
   status: string;             // present status, 'missing', or 'before_start'
 }
 
-export interface ProductCoverage {
-  product_id: number;
-  product_name: string;
-  institution_name: string;
-  product_type: string;
+export interface TargetCoverage {
+  /** FinancialInstitution.id when target_type='INSTITUTION', FinancialProduct.id when 'PRODUCT' */
+  target_id: number;
+  /** Display name — e.g. "Tangerine (Consolidé)" or "Desjardins Boni Visa" */
+  target_name: string;
+  target_type: 'INSTITUTION' | 'PRODUCT';
   months: StatementCell[];
 }
 
 export interface StatementCoverage {
   all_months: string[];
-  products: ProductCoverage[];
+  targets: TargetCoverage[];
 }
 
 export async function fetchStatementCoverage(): Promise<StatementCoverage> {

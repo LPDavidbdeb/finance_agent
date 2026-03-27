@@ -1,18 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Loader2, AlertCircle, CheckCircle2, MinusCircle } from 'lucide-react';
-import { fetchStatementCoverage, ProductCoverage, StatementCoverage as StatementCoverageData } from '../api/client';
+import { Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { fetchStatementCoverage, TargetCoverage, StatementCoverage as StatementCoverageData } from '../api/client';
 
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-const PRODUCT_TYPE_LABEL: Record<string, string> = {
-  CHECKING: 'Chequing',
-  SAVINGS: 'Savings',
-  CREDIT_CARD: 'Credit Card',
-  LOAN: 'Loan',
-  INVESTMENT: 'Investment',
-  REGISTERED: 'Registered',
-};
 
 function groupMonthsByYear(months: string[]): { year: string; count: number }[] {
   const map: Record<string, number> = {};
@@ -23,11 +14,11 @@ function groupMonthsByYear(months: string[]): { year: string; count: number }[] 
   return Object.entries(map).map(([year, count]) => ({ year, count }));
 }
 
-function missCount(product: ProductCoverage): number {
-  return product.months.filter(c => c.status === 'missing').length;
+function missCount(target: TargetCoverage): number {
+  return target.months.filter(c => c.status === 'missing').length;
 }
 
-function Cell({ cell, month }: { cell: ProductCoverage['months'][number]; month: string }) {
+function Cell({ cell, month }: { cell: TargetCoverage['months'][number]; month: string }) {
   const [year, m] = month.split('-');
   const label = `${MONTH_ABBR[parseInt(m) - 1]} ${year}`;
 
@@ -48,7 +39,6 @@ function Cell({ cell, month }: { cell: ProductCoverage['months'][number]; month:
     );
   }
 
-  // Present — link to statement
   const isOk = cell.status === 'COMPLETED';
   const bg = isOk ? 'bg-emerald-100 border-emerald-300 hover:bg-emerald-200' : 'bg-amber-100 border-amber-300 hover:bg-amber-200';
   const textColor = isOk ? 'text-emerald-700' : 'text-amber-700';
@@ -67,6 +57,31 @@ function Cell({ cell, month }: { cell: ProductCoverage['months'][number]; month:
   );
 }
 
+function TargetLabel({ target }: { target: TargetCoverage }) {
+  const isConsolidated = target.target_type === 'INSTITUTION';
+  const inner = (
+    <div>
+      <div className="font-semibold text-slate-700 text-sm leading-tight truncate max-w-[200px]">
+        {target.target_name}
+      </div>
+      <div className="text-xs text-slate-400 mt-0.5">
+        {isConsolidated ? 'Multi-product' : 'Single product'}
+      </div>
+    </div>
+  );
+
+  if (isConsolidated) {
+    // No product detail page for institution-level targets
+    return <div className="px-4 py-2">{inner}</div>;
+  }
+
+  return (
+    <Link to={`/dashboard/product/${target.target_id}`} className="block px-4 py-2">
+      {inner}
+    </Link>
+  );
+}
+
 export const StatementCoverage: React.FC = () => {
   const [data, setData] = useState<StatementCoverageData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -80,14 +95,12 @@ export const StatementCoverage: React.FC = () => {
       .finally(() => setLoading(false));
   }, []);
 
-  // Scroll to current month on load
   useEffect(() => {
     if (!data || !scrollRef.current) return;
     const today = new Date();
     const currentMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
     const idx = data.all_months.indexOf(currentMonth);
     if (idx >= 0) {
-      // Each cell is ~40px wide, product label col ~220px
       scrollRef.current.scrollLeft = Math.max(0, (idx - 3) * 40);
     }
   }, [data]);
@@ -117,12 +130,12 @@ export const StatementCoverage: React.FC = () => {
 
       {/* Coverage summary pills */}
       <div className="flex flex-wrap gap-2">
-        {data.products.map(p => {
-          const missing = missCount(p);
+        {data.targets.map(t => {
+          const missing = missCount(t);
           return (
-            <div key={p.product_id} className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${missing > 0 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+            <div key={`${t.target_type}-${t.target_id}`} className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${missing > 0 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
               {missing > 0 ? <AlertCircle className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}
-              {p.product_name}
+              {t.target_name}
               {missing > 0 && <span className="ml-1 font-bold">{missing} missing</span>}
             </div>
           );
@@ -137,10 +150,10 @@ export const StatementCoverage: React.FC = () => {
               {/* Year row */}
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="sticky left-0 z-10 bg-slate-50 px-4 py-2 text-left text-xs font-semibold text-slate-500 w-56 border-r border-slate-200">
-                  Product
+                  Upload Target
                 </th>
-                <th className="px-2 py-2 text-xs font-medium text-slate-400 w-10 border-r border-slate-100">
-                  <MinusCircle className="h-3 w-3 mx-auto" />
+                <th className="px-2 py-2 text-xs font-medium text-slate-400 w-10 border-r border-slate-100 text-center">
+                  Gap
                 </th>
                 {yearGroups.map(({ year, count }) => (
                   <th
@@ -154,10 +167,8 @@ export const StatementCoverage: React.FC = () => {
               </tr>
               {/* Month row */}
               <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="sticky left-0 z-10 bg-slate-50 px-4 py-1 text-left text-xs text-slate-400 border-r border-slate-200">
-                  {PRODUCT_TYPE_LABEL['CREDIT_CARD']}
-                </th>
-                <th className="px-2 py-1 text-xs text-slate-400 w-10 border-r border-slate-100 text-center">Gap</th>
+                <th className="sticky left-0 z-10 bg-slate-50 px-4 py-1 text-left text-xs text-slate-400 border-r border-slate-200" />
+                <th className="px-2 py-1 text-xs text-slate-400 w-10 border-r border-slate-100 text-center" />
                 {data.all_months.map(m => {
                   const [, mo] = m.split('-');
                   const isCurrent = m === currentMonthKey;
@@ -176,20 +187,13 @@ export const StatementCoverage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {data.products.map(product => {
-                const missing = missCount(product);
+              {data.targets.map(target => {
+                const missing = missCount(target);
                 return (
-                  <tr key={product.product_id} className="hover:bg-slate-50/50 transition-colors">
-                    {/* Product label — sticky */}
-                    <td className="sticky left-0 z-10 bg-white px-4 py-2 border-r border-slate-200 hover:bg-slate-50">
-                      <Link to={`/dashboard/product/${product.product_id}`} className="block">
-                        <div className="font-semibold text-slate-700 text-sm leading-tight truncate max-w-[200px]">
-                          {product.product_name}
-                        </div>
-                        <div className="text-xs text-slate-400 mt-0.5">
-                          {product.institution_name} · {PRODUCT_TYPE_LABEL[product.product_type] ?? product.product_type}
-                        </div>
-                      </Link>
+                  <tr key={`${target.target_type}-${target.target_id}`} className="hover:bg-slate-50/50 transition-colors">
+                    {/* Target label — sticky */}
+                    <td className="sticky left-0 z-10 bg-white border-r border-slate-200 hover:bg-slate-50">
+                      <TargetLabel target={target} />
                     </td>
                     {/* Missing count */}
                     <td className="px-2 py-2 text-center border-r border-slate-100">
@@ -200,7 +204,7 @@ export const StatementCoverage: React.FC = () => {
                       )}
                     </td>
                     {/* Month cells */}
-                    {product.months.map((cell, i) => (
+                    {target.months.map((cell, i) => (
                       <Cell key={i} cell={cell} month={data.all_months[i]} />
                     ))}
                   </tr>

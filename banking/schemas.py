@@ -129,13 +129,21 @@ class StatementCellOut(Schema):
     statement_id: Optional[int] = None   # None = missing
     status: Optional[str] = None
 
-class ProductCoverageOut(Schema):
-    product_id: int
-    product_name: str
-    institution_name: str
-    product_type: str
+class TargetCoverageOut(Schema):
+    """
+    One row in the coverage grid.
+
+    target_type = 'INSTITUTION' → consolidated multi-product upload target
+                                   (e.g. Tangerine).  target_id is the
+                                   FinancialInstitution.id.
+    target_type = 'PRODUCT'     → legacy single-product upload target.
+                                   target_id is the FinancialProduct.id.
+    """
+    target_id: int
+    target_name: str     # "Tangerine (Consolidé)"  |  "Desjardins Boni Visa"
+    target_type: str     # 'INSTITUTION' | 'PRODUCT'
     months: List['StatementCellOut']
 
 class StatementCoverageOut(Schema):
     all_months: List[str]            # ordered "YYYY-MM" strings — column headers
-    products: List[ProductCoverageOut]
+    targets: List[TargetCoverageOut]
