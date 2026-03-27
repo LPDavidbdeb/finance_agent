@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { fetchDrillDown, fetchBannerTransactions, fetchAccountsFlat, fetchMerchants } from '../api/client';
-import { Loader2, X, FileText, ArrowRight, Store, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronRight, ArrowRightLeft, Eye, Wand2 } from 'lucide-react';
+import { List, Loader2, X, FileText, ArrowRight, Store, ArrowUpRight, ArrowDownRight, ChevronDown, ChevronRight, ArrowRightLeft, Eye, Wand2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { CreateRuleModal } from './CreateRuleModal';
 import { InlineReroutePanel, FlatAccount, RerouteMerchant } from './InlineReroutePanel';
