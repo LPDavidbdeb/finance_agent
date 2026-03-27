@@ -18,7 +18,7 @@ ACCOUNT_ROUTING_MAP = {
 }
 
 @transaction.atomic
-def provision_financial_product(family: Family, owner: FamilyMember, institution_id: int, product_type: str, product_name: str, account_number: str = None) -> FinancialProduct:
+def provision_financial_product(family: Family, institution_id: int, product_type: str, product_name: str, owner: FamilyMember = None, account_number: str = None) -> FinancialProduct:
     """
     Creates a FinancialProduct and its corresponding double-entry Account.
     """
@@ -96,20 +96,31 @@ def approve_staged_transaction(transaction_id: int, target_account_id: int, user
     """
     try:
         staged_tx = StagedTransaction.objects.select_for_update().select_related(
+            'financial_product__family',
+            'financial_product__account',
             'statement_import__financial_product__family',
-            'statement_import__financial_product__account'
+            'statement_import__financial_product__account',
         ).get(id=transaction_id)
     except StagedTransaction.DoesNotExist:
         raise ValueError("Staged Transaction not found.")
 
-    family = staged_tx.statement_import.financial_product.family
+    # Per-row product (set by Phase 3 routing) takes precedence over the legacy
+    # statement-level product.  One of these must be set.
+    resolved_product = staged_tx.financial_product or staged_tx.statement_import.financial_product
+    if not resolved_product:
+        raise ValueError(
+            f"StagedTransaction {transaction_id} has no associated FinancialProduct. "
+            "Cannot resolve source account or family."
+        )
+
+    family = resolved_product.family
     if user.family != family:
         raise PermissionError("User does not have access to this transaction's family.")
 
     if staged_tx.status != StagedTransaction.Status.UNPROCESSED:
         raise ValueError(f"Transaction is already processed (Status: {staged_tx.status}).")
 
-    source_account = staged_tx.statement_import.financial_product.account
+    source_account = resolved_product.account
     try:
         target_account = Account.objects.get(id=target_account_id, family=family)
     except Account.DoesNotExist:

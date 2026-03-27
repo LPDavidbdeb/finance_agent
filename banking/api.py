@@ -99,11 +99,11 @@ def create_product(request, payload: FinancialProductIn):
         
     product = provision_financial_product(
         family=user.family,
-        owner=owner,
         institution_id=payload.institution_id,
         product_type=payload.product_type,
         product_name=payload.product_name,
-        account_number=payload.account_number
+        owner=owner,
+        account_number=payload.account_number,
     )
     
     return product
@@ -151,6 +151,77 @@ def batch_upload_statements(request, product_id: int, files: List[UploadedFile] 
             results["failed"].append({"name": file.name, "reason": str(e)})
 
     return results
+
+
+def _get_statement_for_family(import_id: int, family) -> BankStatementImport:
+    """
+    Fetch a BankStatementImport and assert family ownership.
+    Handles both legacy (financial_product set) and multi-product (institution only) imports.
+    Raises 404 on any ownership mismatch to avoid leaking resource existence.
+    """
+    from ninja.errors import HttpError
+    statement = get_object_or_404(BankStatementImport, id=import_id)
+    if statement.financial_product_id:
+        if statement.financial_product.family_id != family.id:
+            raise HttpError(404, "Not found.")
+    elif statement.institution_id:
+        if not FinancialProduct.objects.filter(
+            institution_id=statement.institution_id, family=family
+        ).exists():
+            raise HttpError(404, "Not found.")
+    else:
+        raise HttpError(404, "Not found.")
+    return statement
+
+
+@router.post("/institutions/{institution_id}/statements/upload", response=StatementUploadOut)
+def upload_consolidated_statement(
+    request, institution_id: int, file: File[UploadedFile], document_date: Optional[date] = Form(None)
+):
+    """
+    Upload a consolidated multi-product statement for an institution (e.g. Tangerine).
+    The extraction pipeline will route each row to the correct FinancialProduct by
+    account_number, auto-spawning new products as needed.
+    """
+    from banking.tasks import extract_transactions_task
+    try:
+        user = request.auth
+        institution = get_object_or_404(FinancialInstitution, id=institution_id)
+
+        # Guard: family must have at least one product registered under this institution.
+        if not FinancialProduct.objects.filter(institution=institution, family=user.family).exists():
+            raise HttpError(
+                403,
+                "No products are registered under this institution for your family. "
+                "Register at least one product before uploading a consolidated statement."
+            )
+
+        file_content = file.read()
+        file_hash = hashlib.sha256(file_content).hexdigest()
+        file.seek(0)
+
+        if BankStatementImport.objects.filter(file_hash=file_hash).exists():
+            raise HttpError(409, "This specific PDF has already been uploaded to the system.")
+
+        statement = BankStatementImport.objects.create(
+            institution=institution,
+            financial_product=None,
+            file=file,
+            file_hash=file_hash,
+            document_date=document_date,
+            status=BankStatementImport.Status.STAGED,
+            processed_by_ai=False,
+            processed_by_python=False,
+            processing_log=[],
+        )
+
+        extract_transactions_task.delay(statement.id, user.id)
+        return statement
+    except HttpError:
+        raise
+    except Exception as e:
+        logger.exception(f"[UPLOAD] Unexpected error during consolidated upload for institution {institution_id}")
+        raise HttpError(500, f"Internal server error: {str(e)}")
 
 
 @router.post("/products/{product_id}/statements/upload", response=StatementUploadOut)
@@ -204,14 +275,14 @@ def list_product_statements(request, product_id: int):
 def get_statement_import(request, import_id: int):
     """Returns a specific statement import."""
     user = request.auth
-    return get_object_or_404(BankStatementImport, id=import_id, financial_product__family=user.family)
+    return _get_statement_for_family(import_id, user.family)
 
 
 @router.get("/statements/{import_id}/transactions", response=List[StagedTransactionOut])
 def get_statement_import_transactions(request, import_id: int):
     """Returns all transactions for a specific statement import."""
     user = request.auth
-    statement = get_object_or_404(BankStatementImport, id=import_id, financial_product__family=user.family)
+    statement = _get_statement_for_family(import_id, user.family)
     return StagedTransaction.objects.filter(
         statement_import=statement
     ).select_related('predicted_account', 'journal_entry').prefetch_related('journal_entry__lines__account').order_by("bank_date")
@@ -221,7 +292,7 @@ def get_statement_import_transactions(request, import_id: int):
 def delete_statement_import(request, import_id: int):
     """Deletes a statement import, its staged transactions, and its journal entries via CASCADE."""
     user = request.auth
-    statement = get_object_or_404(BankStatementImport, id=import_id, financial_product__family=user.family)
+    statement = _get_statement_for_family(import_id, user.family)
     statement.delete()
     return {"success": True}
 

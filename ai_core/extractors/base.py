@@ -8,7 +8,7 @@ class BasePDFExtractor(ABC):
         try:
             dfs = tabula.read_pdf(pdf_path, **self.tabula_parameters())
             if not dfs:
-                return pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier']), False
+                return pd.DataFrame(columns=['date', 'description', 'amount']), False
 
             processed_dfs = []
             mismatch_detected = False
@@ -21,13 +21,13 @@ class BasePDFExtractor(ABC):
 
             if processed_dfs:
                 combined_df = pd.concat(processed_dfs, ignore_index=True)
-                if all(col in combined_df.columns for col in ['date', 'description', 'amount', 'account_identifier']):
-                    return combined_df[['date', 'description', 'amount', 'account_identifier']], mismatch_detected
+                if all(col in combined_df.columns for col in ['date', 'description', 'amount']):
+                    return combined_df, mismatch_detected
 
-            return pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier']), mismatch_detected
+            return pd.DataFrame(columns=['date', 'description', 'amount']), mismatch_detected
         except Exception as e:
             print(f"Extraction error: {e}")
-            return pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier']), False
+            return pd.DataFrame(columns=['date', 'description', 'amount']), False
 
     @abstractmethod
     def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> tuple[pd.DataFrame, bool]:

@@ -1,4 +1,4 @@
-from .strategies import VisaDesjardinsExtractor, MasterCardWealthSimpleExtractor, CompteDesjardinsExtractor
+from .strategies import VisaDesjardinsExtractor, MasterCardWealthSimpleExtractor, CompteDesjardinsExtractor, TangerineExtractor
 
 
 class PDFExtractorFactory:
@@ -21,5 +21,8 @@ class PDFExtractorFactory:
             return CompteDesjardinsExtractor()
         elif "Wealthsimple" in institution_name:
             return MasterCardWealthSimpleExtractor()
+        elif "Tangerine" in institution_name and product_type is None:
+            # Multi-product consolidated extractor — no product_type required.
+            return TangerineExtractor()
 
         raise ValueError(f"No extractor built yet for {institution_name} - {product_type}")

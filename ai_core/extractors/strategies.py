@@ -1,7 +1,10 @@
 import re
+import logging
 import pandas as pd
 import numpy as np
 from .base import BasePDFExtractor
+
+logger = logging.getLogger(__name__)
 
 
 class VisaDesjardinsExtractor(BasePDFExtractor):
@@ -470,3 +473,65 @@ class CompteDesjardinsExtractor(BasePDFExtractor):
             logger.info("SHADOW MODE MATCH: Both extractors yielded identical high-level results.")
 
         return df_legacy, mismatch
+
+
+class TangerineExtractor(BasePDFExtractor):
+    """
+    Multi-product extractor for Tangerine consolidated statements.
+
+    Unlike legacy extractors (which are scoped to a single FinancialProduct),
+    this extractor emits rows for ALL accounts in the PDF. The staging layer
+    routes each row to the correct FinancialProduct using `account_number`.
+
+    Output DataFrame contract — every row MUST have these five columns:
+
+      date                 pd.Timestamp  — transaction date
+      description          str           — raw transaction description
+      amount               float         — positive = inflow, negative = outflow
+      account_number       str           — Tangerine account number (e.g. "1234567-8")
+                                           used by the staging layer for per-row routing
+                                           and FinancialProduct auto-spawn
+      inferred_product_type str          — one of FinancialProduct.ProductType values:
+                                           'CHECKING' | 'SAVINGS' | 'CREDIT_CARD' |
+                                           'LOAN' | 'INVESTMENT' | 'REGISTERED'
+                                           used by the staging layer to create the
+                                           Account + FinancialProduct if first seen
+
+    NOTE: This extractor does NOT emit `account_identifier`.
+    """
+
+    # Maps Tangerine product section headers (as they appear in the PDF) to
+    # FinancialProduct.ProductType values.  Populated once sample PDFs are available.
+    PRODUCT_TYPE_MAP: dict[str, str] = {
+        # 'CHEQUING ACCOUNT': 'CHECKING',
+        # 'SAVINGS ACCOUNT':  'SAVINGS',
+        # 'RSP SAVINGS':      'REGISTERED',
+        # 'TFSA SAVINGS':     'REGISTERED',
+        # 'LINE OF CREDIT':   'LOAN',
+    }
+
+    # The three columns that are always required by BasePDFExtractor; plus the two
+    # Tangerine-specific routing columns.
+    OUTPUT_COLUMNS = ['date', 'description', 'amount', 'account_number', 'inferred_product_type']
+
+    def tabula_parameters(self) -> dict:
+        return {'pages': 'all', 'stream': True}
+
+    def process_dataframe(
+        self, df: pd.DataFrame, statement_year: int, statement_month: int
+    ) -> tuple[pd.DataFrame, bool]:
+        """
+        Parse a raw tabula DataFrame from a Tangerine consolidated statement.
+
+        TODO: Implement PDF string-parsing logic once sample statements are available.
+              The PRODUCT_TYPE_MAP above should be populated at that time.
+
+        Until then, this returns an empty DataFrame with the correct column schema
+        so the wiring (factory → staging layer → auto-spawn) can be validated end-to-end
+        without touching live PDFs.
+        """
+        logger.warning(
+            "[TangerineExtractor] process_dataframe called but PDF parsing logic is not yet "
+            "implemented. Returning empty DataFrame."
+        )
+        return pd.DataFrame(columns=self.OUTPUT_COLUMNS), False

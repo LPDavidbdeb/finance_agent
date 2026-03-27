@@ -1,5 +1,5 @@
 from .models import BankStatementImport, StagedTransaction, FinancialProduct
-from .services import approve_staged_transaction
+from .services import approve_staged_transaction, provision_financial_product
 from ai_core.extractors.factory import PDFExtractorFactory
 from accounting.models import Account
 from decimal import Decimal
@@ -166,14 +166,35 @@ def extract_transactions_from_statement(import_id: int, user):
             clean_amount = Decimal(str(amount_val))
 
             # --- Per-row product routing ---
-            row_account_number = tx_data.get('account_number') or tx_data.get('account_identifier')
+            row_account_number = tx_data.get('account_number')
             if row_account_number:
-                resolved_product = product_by_account_number.get(str(row_account_number).strip())
+                account_key = str(row_account_number).strip()
+                resolved_product = product_by_account_number.get(account_key)
                 if not resolved_product:
-                    raise ValueError(
-                        f"No FinancialProduct found for account_number '{row_account_number}' "
-                        f"under institution '{institution.name}'. "
-                        "Register the product (with that exact account_number) before re-importing."
+                    # Auto-spawn: first time we've seen this account_number in this institution.
+                    # The extractor must supply inferred_product_type for Account tree placement.
+                    inferred_type = tx_data.get('inferred_product_type')
+                    if not inferred_type or inferred_type not in FinancialProduct.ProductType.values:
+                        raise ValueError(
+                            f"Cannot auto-spawn FinancialProduct for account_number '{account_key}' "
+                            f"under '{institution.name}': 'inferred_product_type' is missing or "
+                            f"invalid (got: {inferred_type!r}). "
+                            "The extractor must emit a valid ProductType value per row."
+                        )
+                    resolved_product = provision_financial_product(
+                        family=user.family,
+                        institution_id=institution.id,
+                        product_type=inferred_type,
+                        product_name=account_key,
+                        owner=None,
+                        account_number=account_key,
+                    )
+                    # Cache immediately so every subsequent row for the same account reuses it.
+                    product_by_account_number[account_key] = resolved_product
+                    logger.info(
+                        f"[EXTRACT] Auto-spawned FinancialProduct id={resolved_product.id} "
+                        f"account_number='{account_key}' type={inferred_type} "
+                        f"institution='{institution.name}'"
                     )
             else:
                 # Legacy fallback: no account_number in row → use statement-level product.

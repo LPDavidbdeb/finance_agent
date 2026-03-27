@@ -55,6 +55,8 @@ class StatementUploadOut(Schema):
 
 class StatementImportOut(Schema):
     id: int
+    institution_id: Optional[int] = None
+    financial_product_id: Optional[int] = None
     upload_date: datetime
     document_date: Optional[date] = None
     file_name: str
