@@ -132,7 +132,8 @@ class AccountTransactionOut(Schema):
     institution_id: Optional[int] = None
 
 class RerouteIn(Schema):
-    new_account_id: int
+    new_account_id: Optional[int] = None
+    merchant_id: Optional[int] = None
 
 class FlatAccountOut(Schema):
     id: int

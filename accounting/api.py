@@ -477,7 +477,8 @@ def get_banner_transactions(request, dimension_slug: str, period: str, banner: s
 def reroute_journal_entry(request, entry_id: int, payload: RerouteIn):
     """
     Swaps the category leg of a journal entry to a different account.
-    The source (financial product) leg is left untouched to preserve double-entry balance.
+    If merchant_id is provided, it updates the entry description to that merchant name 
+    and sets the account to that merchant's default account.
     """
     from banking.models import FinancialProduct
     from django.db import transaction as db_transaction
@@ -486,7 +487,20 @@ def reroute_journal_entry(request, entry_id: int, payload: RerouteIn):
     family = user.family
 
     entry = get_object_or_404(JournalEntry, id=entry_id, family=family)
-    new_account = get_object_or_404(Account, id=payload.new_account_id, family=family)
+    
+    new_account = None
+    new_description = None
+    
+    if payload.merchant_id:
+        merchant = get_object_or_404(Merchant, id=payload.merchant_id, family=family)
+        if not merchant.default_account:
+            raise errors.HttpError(400, f"Merchant '{merchant.name}' does not have a default account associated.")
+        new_account = merchant.default_account
+        new_description = merchant.name
+    elif payload.new_account_id:
+        new_account = get_object_or_404(Account, id=payload.new_account_id, family=family)
+    else:
+        raise errors.HttpError(400, "Either new_account_id or merchant_id must be provided.")
 
     fp_map = {
         fp.account_id: fp.institution_id
@@ -499,14 +513,49 @@ def reroute_journal_entry(request, entry_id: int, payload: RerouteIn):
     category_line = next((l for l in lines if l.account_id not in fp_account_ids), None)
 
     if not category_line:
-        raise errors.HttpError(400, "Could not identify the category leg of this journal entry.")
+        # Fallback for self-routed transfers where both legs are FP accounts
+        if len(lines) >= 2:
+            category_line = next((l for l in lines if l != source_line), lines[1])
+        else:
+            raise errors.HttpError(400, "Could not identify the category leg of this journal entry.")
+
+    # Resolve staged transaction early — needed inside the atomic block for gap 2.
+    staged_tx = entry.staged_transactions.first()
+
+    # Re-derive the correct amounts for both lines from first principles.
+    # source_line.amount sign encodes the original transaction direction:
+    #   positive  → source was the DEBIT leg  (inflow to asset / payment on liability)
+    #   negative  → source was the CREDIT leg (outflow from asset / purchase on liability)
+    # The category leg always sits on the opposite side, so we recompute both
+    # amounts rather than blindly swapping just the account FK.  This ensures
+    # the entry remains correct even when the new account crosses the
+    # debit-normal / credit-normal boundary (e.g. expense → revenue).
+    abs_amount = abs(source_line.amount)
+    if source_line.amount > 0:          # source was debit
+        new_source_amount   =  abs_amount
+        new_category_amount = -abs_amount
+    else:                               # source was credit
+        new_source_amount   = -abs_amount
+        new_category_amount =  abs_amount
 
     with db_transaction.atomic():
-        category_line.account = new_account
-        category_line.save(update_fields=['account'])
+        source_line.amount = new_source_amount
+        source_line.save(update_fields=['amount'])
 
-    # Link back to statement if available
-    staged_tx = entry.staged_transactions.first()
+        category_line.account = new_account
+        category_line.amount  = new_category_amount
+        category_line.save(update_fields=['account', 'amount'])
+
+        if new_description:
+            entry.description = new_description
+            entry.save(update_fields=['description'])
+
+        # Gap 2: persist the merchant link on the staged transaction so that
+        # SyncMerchantHistoryService can cover this entry in the future.
+        if staged_tx and payload.merchant_id:
+            staged_tx.merchant = merchant
+            staged_tx.save(update_fields=['merchant'])
+
     statement_id = staged_tx.statement_import_id if staged_tx else None
     
     # Grab raw description and institution ID for rule creation compatibility

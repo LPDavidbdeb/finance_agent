@@ -104,11 +104,14 @@ export async function fetchAccountsFlat() {
   return res.json();
 }
 
-export async function rerouteJournalEntry(entryId: number, newAccountId: number) {
+export async function rerouteJournalEntry(entryId: number, newAccountId?: number, merchantId?: number) {
   const res = await fetch(`${API_URL}/accounting/journal-entries/${entryId}/reroute`, {
     method: "PATCH",
     headers: getAuthHeader(),
-    body: JSON.stringify({ new_account_id: newAccountId }),
+    body: JSON.stringify({ 
+      new_account_id: newAccountId,
+      merchant_id: merchantId 
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

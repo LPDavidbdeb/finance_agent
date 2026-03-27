@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { fetchAccountDetail, fetchAccountTransactions, fetchAccountsFlat, rerouteJournalEntry } from '../api/client';
+import { fetchAccountDetail, fetchAccountTransactions, fetchAccountsFlat, fetchMerchants } from '../api/client';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, ReferenceLine, Cell
 } from 'recharts';
@@ -11,8 +11,9 @@ import {
   ArrowLeft, Store, Layers, Loader2,
   TrendingUp, TrendingDown, Zap,
   Activity, BarChart3, Calendar, ChevronRight,
-  ArrowRightLeft, PlusCircle, Check, X
+  ArrowRightLeft, PlusCircle, X
 } from 'lucide-react';
+import { InlineReroutePanel, RerouteMerchant } from '../components/InlineReroutePanel';
 import { CreateRuleModal } from '../components/CreateRuleModal';
 
 interface ChildAccount {
@@ -99,39 +100,16 @@ const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Se
 interface BannerTableProps {
   transactions: any[];
   flatAccounts: any[];
+  merchants: RerouteMerchant[];
   onTransactionUpdate: (entryId: number, updated: any) => void;
   onRuleSuccess: () => void;
 }
 
-const BannerTable: React.FC<BannerTableProps> = ({ transactions, flatAccounts, onTransactionUpdate, onRuleSuccess }) => {
+const BannerTable: React.FC<BannerTableProps> = ({ transactions, flatAccounts, merchants, onTransactionUpdate, onRuleSuccess }) => {
   const [txSearch, setTxSearch] = useState('');
   const [expandedBanner, setExpandedBanner] = useState<string | null>(null);
   const [reroutingEntry, setReroutingEntry] = useState<number | null>(null);
-  const [rerouteSearch, setRerouteSearch] = useState('');
-  const [selectedAccount, setSelectedAccount] = useState<any | null>(null);
-  const [savingEntry, setSavingEntry] = useState<number | null>(null);
   const [ruleModalTx, setRuleModalTx] = useState<any | null>(null);
-  const rerouteSearchRef = useRef<HTMLInputElement>(null);
-
-  const filteredAccounts = flatAccounts.filter(a =>
-    rerouteSearch.length > 0 && a.name.toLowerCase().includes(rerouteSearch.toLowerCase())
-  );
-
-  const handleReroute = async (entryId: number) => {
-    if (!selectedAccount) return;
-    try {
-      setSavingEntry(entryId);
-      const updated = await rerouteJournalEntry(entryId, selectedAccount.id);
-      onTransactionUpdate(entryId, updated);
-      setReroutingEntry(null);
-      setRerouteSearch('');
-      setSelectedAccount(null);
-    } catch (err: any) {
-      alert(err.message);
-    } finally {
-      setSavingEntry(null);
-    }
-  };
 
   const bannerMap = new Map<string, { txs: any[]; total: number }>();
   transactions.forEach(tx => {
@@ -228,9 +206,6 @@ const BannerTable: React.FC<BannerTableProps> = ({ transactions, flatAccounts, o
                                     <button
                                       onClick={() => {
                                         setReroutingEntry(reroutingEntry === tx.journal_entry_id ? null : tx.journal_entry_id);
-                                        setRerouteSearch('');
-                                        setSelectedAccount(null);
-                                        setTimeout(() => rerouteSearchRef.current?.focus(), 50);
                                       }}
                                       className="p-1 rounded hover:bg-blue-100 text-slate-400 hover:text-blue-600 transition-colors border border-slate-200"
                                       title="Re-route"
@@ -243,51 +218,16 @@ const BannerTable: React.FC<BannerTableProps> = ({ transactions, flatAccounts, o
                               {reroutingEntry === tx.journal_entry_id && (
                                 <tr>
                                   <td colSpan={5} className="px-10 py-3 bg-blue-50 border-l-4 border-blue-400">
-                                    <div className="flex items-center gap-3">
-                                      <div className="relative flex-1 max-w-sm">
-                                        <input
-                                          ref={rerouteSearchRef}
-                                          type="text"
-                                          value={rerouteSearch}
-                                          onChange={e => { setRerouteSearch(e.target.value); setSelectedAccount(null); }}
-                                          placeholder="Search accounts..."
-                                          className="w-full text-xs border border-slate-300 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
-                                        />
-                                        {rerouteSearch && !selectedAccount && filteredAccounts.length > 0 && (
-                                          <div className="absolute z-20 top-full mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-48 overflow-y-auto">
-                                            {filteredAccounts.map((acc: any) => (
-                                              <button
-                                                key={acc.id}
-                                                className="w-full text-left px-3 py-2 text-xs hover:bg-blue-50 flex items-center gap-2"
-                                                onClick={() => { setSelectedAccount(acc); setRerouteSearch(acc.name); }}
-                                              >
-                                                <span className="text-slate-300">{'\u00a0'.repeat(acc.depth * 2)}</span>
-                                                <span className="font-medium text-slate-700 uppercase">{acc.name}</span>
-                                                <span className="text-slate-400 ml-auto text-[10px]">{acc.account_type}</span>
-                                              </button>
-                                            ))}
-                                          </div>
-                                        )}
-                                      </div>
-                                      <Button
-                                        size="sm"
-                                        disabled={!selectedAccount || savingEntry === tx.journal_entry_id}
-                                        onClick={() => handleReroute(tx.journal_entry_id)}
-                                        className="text-xs h-7"
-                                      >
-                                        {savingEntry === tx.journal_entry_id
-                                          ? <Loader2 className="h-3 w-3 animate-spin" />
-                                          : <><Check className="h-3 w-3 mr-1" />Save</>}
-                                      </Button>
-                                      <button onClick={() => setReroutingEntry(null)} className="text-xs text-slate-400 hover:text-slate-600">
-                                        Cancel
-                                      </button>
-                                    </div>
-                                    {selectedAccount && (
-                                      <p className="text-[10px] text-blue-600 mt-1.5 font-medium">
-                                        Will move to: <span className="font-black uppercase">{selectedAccount.name}</span>
-                                      </p>
-                                    )}
+                                    <InlineReroutePanel
+                                      entryId={tx.journal_entry_id}
+                                      flatAccounts={flatAccounts}
+                                      merchants={merchants}
+                                      onSuccess={(updated) => {
+                                        onTransactionUpdate(tx.journal_entry_id, updated);
+                                        setReroutingEntry(null);
+                                      }}
+                                      onCancel={() => setReroutingEntry(null)}
+                                    />
                                   </td>
                                 </tr>
                               )}
@@ -332,6 +272,7 @@ export const AccountDetail: React.FC = () => {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [txLoading, setTxLoading] = useState(false);
   const [flatAccounts, setFlatAccounts] = useState<any[]>([]);
+  const [merchants, setMerchants] = useState<RerouteMerchant[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
   // Year list: always derived from the fixed historical map returned by the backend.
@@ -372,6 +313,7 @@ export const AccountDetail: React.FC = () => {
 
   useEffect(() => {
     fetchAccountsFlat().then(setFlatAccounts).catch(() => {});
+    fetchMerchants().then(setMerchants).catch(() => {});
   }, []);
 
   const loadTransactions = async (accountId: number) => {
@@ -756,6 +698,7 @@ export const AccountDetail: React.FC = () => {
                 <BannerTable
                   transactions={transactions}
                   flatAccounts={flatAccounts}
+                  merchants={merchants}
                   onTransactionUpdate={handleTransactionUpdate}
                   onRuleSuccess={() => loadTransactions(Number(id))}
                 />
@@ -796,6 +739,7 @@ export const AccountDetail: React.FC = () => {
                       MONTH_NAMES[new Date(tx.date + 'T00:00:00').getMonth()] === selectedMonth
                     )}
                     flatAccounts={flatAccounts}
+                    merchants={merchants}
                     onTransactionUpdate={handleTransactionUpdate}
                     onRuleSuccess={() => { setSelectedMonth(null); loadTransactions(Number(id)); }}
                   />
