@@ -1,4 +1,4 @@
-from .models import BankStatementImport, StagedTransaction
+from .models import BankStatementImport, StagedTransaction, FinancialProduct
 from .services import approve_staged_transaction
 from ai_core.extractors.factory import PDFExtractorFactory
 from accounting.models import Account
@@ -118,9 +118,24 @@ def extract_transactions_from_statement(import_id: int, user):
             statement_import.save(update_fields=['status', 'validation_errors'])
             return
 
-        product = statement_import.financial_product
-        print(f"[EXTRACT] Step 2 — selecting parser for: {product.institution.name} / {product.product_type}")
-        extractor = PDFExtractorFactory.get_extractor(product.institution.name, product.product_type)
+        # --- Step 2: Select extractor ---
+        # Legacy path: financial_product is set → route by institution + product type.
+        # Multi-product path: only institution is set → route by institution alone.
+        legacy_product = statement_import.financial_product
+        institution = statement_import.institution
+
+        if not institution:
+            raise ValueError(
+                f"BankStatementImport {statement_import.id} has no institution set. "
+                "Re-upload via the new import flow or run the institution backfill migration."
+            )
+
+        if legacy_product:
+            print(f"[EXTRACT] Step 2 — selecting parser for: {institution.name} / {legacy_product.product_type}")
+            extractor = PDFExtractorFactory.get_extractor(institution.name, legacy_product.product_type)
+        else:
+            print(f"[EXTRACT] Step 2 — selecting multi-product parser for: {institution.name}")
+            extractor = PDFExtractorFactory.get_extractor(institution.name)
         print(f"[EXTRACT] Parser selected: {type(extractor).__name__}")
 
         print(f"[EXTRACT] Step 3 — parsing PDF with tabula...")
@@ -132,8 +147,13 @@ def extract_transactions_from_statement(import_id: int, user):
         transactions_data = df.to_dict('records')
         print(f"[EXTRACT] Parsed {len(transactions_data)} rows. Shadow mismatch: {shadow_mismatch}")
 
-        institution_id = statement_import.financial_product.institution_id
-        family_id = statement_import.financial_product.family_id
+        # Build a lookup cache: account_number → FinancialProduct for this institution.
+        # Used for per-row routing when the extractor emits an account_number column.
+        product_by_account_number = {
+            p.account_number: p
+            for p in FinancialProduct.objects.filter(institution=institution)
+            if p.account_number
+        }
 
         print(f"[EXTRACT] Step 4 — categorizing {len(transactions_data)} transactions...")
         staged_transactions = []
@@ -145,19 +165,36 @@ def extract_transactions_from_statement(import_id: int, user):
                 amount_val = 0
             clean_amount = Decimal(str(amount_val))
 
+            # --- Per-row product routing ---
+            row_account_number = tx_data.get('account_number') or tx_data.get('account_identifier')
+            if row_account_number:
+                resolved_product = product_by_account_number.get(str(row_account_number).strip())
+                if not resolved_product:
+                    raise ValueError(
+                        f"No FinancialProduct found for account_number '{row_account_number}' "
+                        f"under institution '{institution.name}'. "
+                        "Register the product (with that exact account_number) before re-importing."
+                    )
+            else:
+                # Legacy fallback: no account_number in row → use statement-level product.
+                if not legacy_product:
+                    raise ValueError(
+                        f"Row has no account_number and statement_import {statement_import.id} "
+                        "has no financial_product. Cannot route transaction."
+                    )
+                resolved_product = legacy_product
+
             rule = find_matching_rule(
                 raw_description,
-                institution_id,
-                family_id,
+                resolved_product.institution_id,
+                resolved_product.family_id,
                 transaction_amount=clean_amount,
             )
 
-            clean_desc = raw_description
             predicted_acc = None
             merchant_obj = None
 
             if rule:
-                clean_desc = rule.merchant.name
                 merchant_obj = rule.merchant
                 if rule.merchant.is_unique_provider:
                     predicted_acc = rule.merchant.default_account
@@ -165,6 +202,7 @@ def extract_transactions_from_statement(import_id: int, user):
             staged_transactions.append(
                 StagedTransaction(
                     statement_import=statement_import,
+                    financial_product=resolved_product,
                     bank_date=tx_data.get('date'),
                     raw_description=raw_description,
                     predicted_account=predicted_acc,
@@ -206,7 +244,12 @@ def extract_transactions_from_statement(import_id: int, user):
         statement_date = statement_import.document_date
 
         if statement_date and statement_date < cutoff_date:
-            family = statement_import.financial_product.family
+            if statement_import.financial_product:
+                family = statement_import.financial_product.family
+            else:
+                # Multi-product import: derive family from the first product under the institution.
+                first_product = FinancialProduct.objects.filter(institution=institution).first()
+                family = first_product.family if first_product else None
             uncategorized = Account.objects.filter(
                 family=family, name__iexact='Uncategorized Expenses'
             ).first()
