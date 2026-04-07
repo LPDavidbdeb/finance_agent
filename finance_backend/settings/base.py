@@ -38,7 +38,7 @@ LOCAL_APPS = [
     'accounting',
     'banking',
     'categorization',
-    'planning',
+    'planning.apps.PlanningConfig',
     'assets',
 ]
 
