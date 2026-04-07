@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Plus, Trash2, ChevronDown, ChevronUp, TrendingDown, TrendingUp, Calculator, CheckCircle2, BookMarked, X } from 'lucide-react';
 import {
-  simulateScenarios, commitSchedule, fetchSchedules, deleteSchedule,
-  ScenarioSpec, ScenarioResult, PeriodRow, AnnuityScheduleOut,
+  simulateScenarios, commitSchedule, fetchSchedules, fetchSchedule, deleteSchedule,
+  ScenarioSpec, ScenarioResult, PeriodRow, AnnuityScheduleOut, AnnuityScheduleListOut,
 } from '../api/client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -334,11 +334,41 @@ const FormCard: React.FC<{
 
 // ─── Committed Schedules Panel ────────────────────────────────────────────────
 
-const CommittedSchedules: React.FC<{ schedules: AnnuityScheduleOut[]; onDelete: (id: number) => void }> = ({
+const CommittedSchedules: React.FC<{ schedules: AnnuityScheduleListOut[]; onDelete: (id: number) => void }> = ({
   schedules,
   onDelete,
 }) => {
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [scheduleDetailsById, setScheduleDetailsById] = useState<Record<number, AnnuityScheduleOut>>({});
+  const [loadingDetailsById, setLoadingDetailsById] = useState<Record<number, boolean>>({});
+  const [detailErrorsById, setDetailErrorsById] = useState<Record<number, string>>({});
+
+  const handleToggle = async (scheduleId: number) => {
+    if (expanded === scheduleId) {
+      setExpanded(null);
+      return;
+    }
+
+    setExpanded(scheduleId);
+    if (scheduleDetailsById[scheduleId] || loadingDetailsById[scheduleId]) {
+      return;
+    }
+
+    setLoadingDetailsById((prev) => ({ ...prev, [scheduleId]: true }));
+    setDetailErrorsById((prev) => ({ ...prev, [scheduleId]: '' }));
+
+    try {
+      const details = await fetchSchedule(scheduleId);
+      setScheduleDetailsById((prev) => ({ ...prev, [scheduleId]: details }));
+    } catch (e: unknown) {
+      setDetailErrorsById((prev) => ({
+        ...prev,
+        [scheduleId]: e instanceof Error ? e.message : 'Failed to load schedule details',
+      }));
+    } finally {
+      setLoadingDetailsById((prev) => ({ ...prev, [scheduleId]: false }));
+    }
+  };
 
   if (schedules.length === 0) return null;
 
@@ -353,7 +383,7 @@ const CommittedSchedules: React.FC<{ schedules: AnnuityScheduleOut[]; onDelete: 
           <div key={s.id} className="border border-slate-200 rounded-xl bg-white overflow-hidden">
             <div
               className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
-              onClick={() => setExpanded(expanded === s.id ? null : s.id)}
+                onClick={() => { void handleToggle(s.id); }}
             >
               <div className="flex items-center gap-3">
                 <div>
@@ -380,19 +410,30 @@ const CommittedSchedules: React.FC<{ schedules: AnnuityScheduleOut[]; onDelete: 
               </div>
             </div>
 
-            {expanded === s.id && s.periods.length > 0 && (
+            {expanded === s.id && (
               <div className="border-t border-slate-100 px-4 pb-4">
-                <ScheduleTable
-                  schedule={s.periods.map(p => ({
-                    period_number: p.period_number,
-                    payment_date: p.payment_date,
-                    payment_amount: p.payment_amount,
-                    interest_portion: p.interest_portion,
-                    principal_portion: p.principal_portion,
-                    balance_after: p.balance_after,
-                  }))}
-                  type={s.schedule_type as 'LOAN_AMORTIZATION' | 'SINKING_FUND'}
-                />
+                {loadingDetailsById[s.id] && (
+                  <div className="py-3 text-xs text-slate-500">Loading schedule details...</div>
+                )}
+                {!!detailErrorsById[s.id] && (
+                  <div className="py-3 text-xs text-red-600">{detailErrorsById[s.id]}</div>
+                )}
+                {!loadingDetailsById[s.id] && !detailErrorsById[s.id] && scheduleDetailsById[s.id]?.periods?.length ? (
+                  <ScheduleTable
+                    schedule={scheduleDetailsById[s.id].periods.map((p) => ({
+                      period_number: p.period_number,
+                      payment_date: p.payment_date,
+                      payment_amount: p.payment_amount,
+                      interest_portion: p.interest_portion,
+                      principal_portion: p.principal_portion,
+                      balance_after: p.balance_after,
+                    }))}
+                    type={s.schedule_type as 'LOAN_AMORTIZATION' | 'SINKING_FUND'}
+                  />
+                ) : null}
+                {!loadingDetailsById[s.id] && !detailErrorsById[s.id] && !scheduleDetailsById[s.id]?.periods?.length && (
+                  <div className="py-3 text-xs text-slate-500">No periods available for this schedule.</div>
+                )}
               </div>
             )}
           </div>
@@ -410,7 +451,7 @@ export const SimulationPage: React.FC = () => {
   const [resultSpecs, setResultSpecs] = useState<ScenarioSpec[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [committedSchedules, setCommittedSchedules] = useState<AnnuityScheduleOut[]>([]);
+  const [committedSchedules, setCommittedSchedules] = useState<AnnuityScheduleListOut[]>([]);
 
   const loadSchedules = useCallback(async () => {
     try {

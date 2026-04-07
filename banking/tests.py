@@ -270,6 +270,84 @@ class UploadStatementDeduplicationTest(TestCase):
         self.assertEqual(BankStatementImport.objects.count(), 1)
         self.assertEqual(mock_delay.call_count, 1)
 
+    @patch("banking.tasks.extract_transactions_task.delay")
+    def test_non_pdf_single_upload_returns_400(self, mock_delay):
+        invalid_file = SimpleUploadedFile("statement.txt", b"not-a-pdf", content_type="text/plain")
+
+        response = self.client.post(
+            f"/api/banking/products/{self.product.id}/statements/upload",
+            data={"file": invalid_file, "document_date": "2026-03-22"},
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "Only PDF files are accepted.")
+        self.assertEqual(BankStatementImport.objects.count(), 0)
+        self.assertEqual(mock_delay.call_count, 0)
+
+    @patch("banking.tasks.extract_transactions_task.delay")
+    def test_non_pdf_batch_upload_returns_400(self, mock_delay):
+        invalid_file = SimpleUploadedFile("batch.txt", b"not-a-pdf", content_type="text/plain")
+
+        response = self.client.post(
+            f"/api/banking/products/{self.product.id}/statements/batch-upload",
+            data={"files": [invalid_file]},
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "Only PDF files are accepted.")
+        self.assertEqual(BankStatementImport.objects.count(), 0)
+        self.assertEqual(mock_delay.call_count, 0)
+
+    @patch("banking.tasks.extract_transactions_task.delay")
+    def test_non_pdf_consolidated_upload_returns_400(self, mock_delay):
+        invalid_file = SimpleUploadedFile("consolidated.txt", b"not-a-pdf", content_type="text/plain")
+
+        response = self.client.post(
+            f"/api/banking/institutions/{self.institution.id}/statements/upload",
+            data={"file": invalid_file, "document_date": "2026-03-22"},
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "Only PDF files are accepted.")
+        self.assertEqual(BankStatementImport.objects.count(), 0)
+        self.assertEqual(mock_delay.call_count, 0)
+
+    @patch("banking.api.BankStatementImport.objects.create", side_effect=RuntimeError("sensitive DB details"))
+    @patch("banking.tasks.extract_transactions_task.delay")
+    def test_single_upload_unexpected_error_returns_generic_500(self, mock_delay, _mock_create):
+        payload_bytes = b"%PDF-1.4 force-create-failure"
+        file_one = SimpleUploadedFile("statement.pdf", payload_bytes, content_type="application/pdf")
+
+        response = self.client.post(
+            f"/api/banking/products/{self.product.id}/statements/upload",
+            data={"file": file_one, "document_date": "2026-03-22"},
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["detail"], "Internal server error.")
+        self.assertEqual(mock_delay.call_count, 0)
+
+    @patch("banking.api.BankStatementImport.objects.create", side_effect=RuntimeError("sensitive DB details"))
+    @patch("banking.tasks.extract_transactions_task.delay")
+    def test_consolidated_upload_unexpected_error_returns_generic_500(self, mock_delay, _mock_create):
+        payload_bytes = b"%PDF-1.4 force-create-failure"
+        file_one = SimpleUploadedFile("consolidated.pdf", payload_bytes, content_type="application/pdf")
+
+        response = self.client.post(
+            f"/api/banking/institutions/{self.institution.id}/statements/upload",
+            data={"file": file_one, "document_date": "2026-03-22"},
+            **self.auth,
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["detail"], "Internal server error.")
+        self.assertEqual(mock_delay.call_count, 0)
+
+
 
 class ConsolidatedIngestionIntegrationTest(TestCase):
     """

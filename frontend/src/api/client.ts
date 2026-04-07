@@ -725,6 +725,19 @@ export interface AnnuityScheduleOut {
   periods: AnnuityPeriodOut[];
 }
 
+export interface AnnuityScheduleListOut {
+  id: number;
+  name: string;
+  schedule_type: string;
+  principal_amount: number;
+  annual_rate: number;
+  n_periods: number;
+  payment_frequency: string;
+  start_date: string;
+  computed_payment: number;
+  created_at: string;
+}
+
 export async function commitSchedule(
   spec: ScenarioSpec,
   linked_journal_entry_id?: number,
@@ -741,9 +754,15 @@ export async function commitSchedule(
   return res.json();
 }
 
-export async function fetchSchedules(): Promise<AnnuityScheduleOut[]> {
+export async function fetchSchedules(): Promise<AnnuityScheduleListOut[]> {
   const res = await fetch(`${API_URL}/planning/schedules`, { headers: getAuthHeader() });
   if (!res.ok) throw new Error('Failed to fetch schedules');
+  return res.json();
+}
+
+export async function fetchSchedule(scheduleId: number): Promise<AnnuityScheduleOut> {
+  const res = await fetch(`${API_URL}/planning/schedules/${scheduleId}`, { headers: getAuthHeader() });
+  if (!res.ok) throw new Error('Failed to fetch schedule details');
   return res.json();
 }
 

@@ -30,6 +30,7 @@ from .schemas import (
 from django.db.models import Q
 from .models import FinancialInstitution, FinancialProduct, BankStatementImport, StagedTransaction
 from .services import provision_financial_product, approve_staged_transaction
+from .validators import validate_pdf_magic_bytes
 
 router = Router(auth=JWTAuth())
 
@@ -123,9 +124,18 @@ def batch_upload_statements(request, product_id: int, files: List[UploadedFile] 
         "failed": []
     }
 
+    validated_files = []
     for file in files:
+        file_content = file.read()
         try:
-            file_content = file.read()
+            validate_pdf_magic_bytes(file_content)
+        except ValueError as exc:
+            raise HttpError(400, str(exc))
+        file.seek(0)
+        validated_files.append((file, file_content))
+
+    for file, file_content in validated_files:
+        try:
             file_hash = hashlib.sha256(file_content).hexdigest()
             file.seek(0)
 
@@ -198,6 +208,7 @@ def upload_consolidated_statement(
             )
 
         file_content = file.read()
+        validate_pdf_magic_bytes(file_content)
         file_hash = hashlib.sha256(file_content).hexdigest()
         file.seek(0)
 
@@ -220,9 +231,11 @@ def upload_consolidated_statement(
         return statement
     except HttpError:
         raise
-    except Exception as e:
+    except ValueError as exc:
+        raise HttpError(400, str(exc))
+    except Exception:
         logger.exception(f"[UPLOAD] Unexpected error during consolidated upload for institution {institution_id}")
-        raise HttpError(500, f"Internal server error: {str(e)}")
+        raise HttpError(500, "Internal server error.")
 
 
 @router.post("/products/{product_id}/statements/upload", response=StatementUploadOut)
@@ -235,6 +248,7 @@ def upload_statement(request, product_id: int, file: File[UploadedFile], documen
         product = get_object_or_404(FinancialProduct, id=product_id, family=user.family)
 
         file_content = file.read()
+        validate_pdf_magic_bytes(file_content)
         file_hash = hashlib.sha256(file_content).hexdigest()
         file.seek(0)
 
@@ -259,9 +273,11 @@ def upload_statement(request, product_id: int, file: File[UploadedFile], documen
         return statement
     except HttpError:
         raise
-    except Exception as e:
+    except ValueError as exc:
+        raise HttpError(400, str(exc))
+    except Exception:
         logger.exception(f"[UPLOAD] Unexpected error during upload of {file.name}")
-        raise HttpError(500, f"Internal server error: {str(e)}")
+        raise HttpError(500, "Internal server error.")
 
 
 @router.get("/products/{product_id}/statements", response=List[StatementImportOut])

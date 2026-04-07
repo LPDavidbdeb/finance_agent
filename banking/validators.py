@@ -1,5 +1,11 @@
 from decimal import Decimal, InvalidOperation
 
+
+def validate_pdf_magic_bytes(file_content: bytes) -> None:
+    """Raise ValueError when uploaded bytes do not match a PDF signature."""
+    if not file_content.startswith(b"%PDF"):
+        raise ValueError("Only PDF files are accepted.")
+
 def validate_statement_math(raw_json: dict) -> list[str]:
     """
     Performs strict mathematical validation on the extracted statement data.
