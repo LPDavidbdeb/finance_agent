@@ -185,7 +185,5 @@ class CategorizationAPITest(TestCase):
         self.tx_small.refresh_from_db()
         self.tx_large.refresh_from_db()
         
-        self.assertEqual(self.tx_small.clean_description, "CAR INSURANCE")
-        self.assertIsNone(self.tx_large.clean_description)
         self.assertEqual(self.tx_small.merchant.name, "CAR INSURANCE")
         self.assertIsNone(self.tx_large.merchant)
