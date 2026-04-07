@@ -36,6 +36,7 @@ class TransactionMappingRule(models.Model):
     institution = models.ForeignKey('banking.FinancialInstitution', on_delete=models.CASCADE, null=True, blank=True, related_name='mapping_rules')
     min_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     max_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    linked_schedule = models.ForeignKey('planning.AnnuitySchedule', on_delete=models.SET_NULL, null=True, blank=True, related_name='mapping_rules')
 
     def save(self, *args, **kwargs):
         if self.search_text:
