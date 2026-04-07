@@ -1,7 +1,7 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from decimal import Decimal
-from .models import AnnuitySchedule
+from .models import AnnuitySchedule, AnnuityRateHistory
 from categorization.models import Merchant, TransactionMappingRule
 
 @receiver(post_save, sender=AnnuitySchedule)
@@ -39,3 +39,17 @@ def create_loan_mapping_rule(sender, instance, created, **kwargs):
         max_amount=instance.computed_payment + variance,
         linked_schedule=instance
     )
+
+@receiver(post_save, sender=AnnuityRateHistory)
+def trigger_reamortization(sender, instance, created, **kwargs):
+    """
+    Phase 5: Dynamic Re-Amortization Trigger.
+    Trigger recalculation whenever a new rate is added to history.
+    """
+    if created:
+        from .services import AnnuityService
+        AnnuityService.recalculate_schedule(
+            instance.annuity_schedule,
+            instance.effective_date,
+            instance.annual_rate
+        )

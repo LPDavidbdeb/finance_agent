@@ -72,26 +72,85 @@ class AnnuityService:
         )
 
         # Create initial rate history
+        # This will trigger the trigger_reamortization signal, which calls recalculate_schedule
+        # to generate the initial set of AnnuityPeriod rows.
         AnnuityRateHistory.objects.create(
             annuity_schedule=schedule,
             effective_date=spec.start_date,
             annual_rate=spec.annual_rate
         )
 
+        return schedule
+
+    @staticmethod
+    @transaction.atomic
+    def recalculate_schedule(schedule: AnnuitySchedule, effective_date: date, new_rate: Decimal):
+        """
+        Phase 5: Dynamic Re-Amortization.
+        Determines remaining balance and regenerates the tail of the schedule.
+        """
+        # 1. Identify the last period that MUST stay.
+        # This is the last period that is either PAID or is UNPAID but occurs BEFORE the new rate takes effect.
+        last_staying_period = schedule.periods.filter(
+            models.Q(is_paid=True) | models.Q(payment_date__lt=effective_date)
+        ).order_by('-period_number').first()
+
+        if last_staying_period:
+            remaining_principal = last_staying_period.balance_after
+            last_period_num = last_staying_period.period_number
+            last_payment_date = last_staying_period.payment_date
+        else:
+            remaining_principal = schedule.principal_amount
+            last_period_num = 0
+            last_payment_date = schedule.start_date
+
+        # 2. Delete all future, unpaid periods that are being replaced
+        schedule.periods.filter(
+            is_paid=False,
+            payment_date__gte=effective_date
+        ).delete()
+
+        # 3. Regenerate remaining periods
+        remaining_n = schedule.n_periods - last_period_num
+        if remaining_n <= 0:
+            return
+
+        freq = PaymentFrequency(schedule.payment_frequency)
+        
+        # Generate the remaining tail using the new rate
+        new_rows = generate_amortization_schedule(
+            remaining_principal,
+            new_rate,
+            remaining_n,
+            last_payment_date,
+            freq
+        )
+
         AnnuityPeriod.objects.bulk_create([
             AnnuityPeriod(
                 schedule=schedule,
-                period_number=row['period_number'],
+                period_number=last_period_num + row['period_number'],
                 payment_date=row['payment_date'],
                 payment_amount=row['payment_amount'],
                 interest_portion=row['interest_portion'],
                 principal_portion=row['principal_portion'],
                 balance_after=row['balance_after'],
             )
-            for row in schedule_dicts
+            for row in new_rows
         ])
 
-        return schedule
+        # 4. Update Schedule metadata and linked mapping rules
+        if new_rows:
+            new_pmt = new_rows[0]['payment_amount']
+            schedule.computed_payment = new_pmt
+            schedule.save(update_fields=['computed_payment'])
+
+            # Success Criteria: Update TransactionMappingRule bounds +/- $5.00
+            variance = Decimal("5.00")
+            schedule.mapping_rules.all().update(
+                min_amount=new_pmt - variance,
+                max_amount=new_pmt + variance
+            )
 
 class AmortizationReconciliationService:
     @staticmethod
