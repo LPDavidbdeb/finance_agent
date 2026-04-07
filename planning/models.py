@@ -48,6 +48,36 @@ class AnnuitySchedule(models.Model):
     def __str__(self):
         return f"{self.name} ({self.schedule_type})"
 
+    @property
+    def current_rate(self) -> Decimal:
+        """
+        Returns the most recent annual_rate from history.
+        Falls back to the static annual_rate field if no history exists.
+        """
+        latest = self.rate_history.order_by('-effective_date').first()
+        if latest:
+            return latest.annual_rate
+        return self.annual_rate
+
+
+class AnnuityRateHistory(models.Model):
+    """
+    Stores time-series interest rates for a schedule.
+    Supports floating-rate loans or sinking funds.
+    """
+    annuity_schedule = models.ForeignKey(
+        AnnuitySchedule, on_delete=models.CASCADE, related_name='rate_history'
+    )
+    effective_date = models.DateField()
+    annual_rate = models.DecimalField(max_digits=7, decimal_places=4)
+
+    class Meta:
+        ordering = ['-effective_date']
+        unique_together = [('annuity_schedule', 'effective_date')]
+
+    def __str__(self):
+        return f"{self.annuity_schedule.name} @ {self.annual_rate} ({self.effective_date})"
+
 
 class AnnuityPeriod(models.Model):
 

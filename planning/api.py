@@ -10,51 +10,9 @@ from .schemas import (
     CommitIn, AnnuityScheduleOut, AnnuityScheduleListOut, AnnuityPeriodOut,
 )
 from .models import AnnuitySchedule, AnnuityPeriod
-from finance_backend.utils.time_value import (
-    PaymentFrequency,
-    compute_pmt_loan,
-    compute_pmt_sinking_fund,
-    generate_amortization_schedule,
-    generate_sinking_fund_schedule,
-)
+from .services import AnnuityService
 
 router = Router(tags=["Planning"])
-
-_FREQ_MAP = {
-    PaymentFrequencyIn.MONTHLY: PaymentFrequency.MONTHLY,
-    PaymentFrequencyIn.BIWEEKLY: PaymentFrequency.BIWEEKLY,
-    PaymentFrequencyIn.WEEKLY: PaymentFrequency.WEEKLY,
-    PaymentFrequencyIn.ANNUALLY: PaymentFrequency.ANNUALLY,
-}
-
-_PERIODS_PER_YEAR = {
-    PaymentFrequency.MONTHLY: 12,
-    PaymentFrequency.BIWEEKLY: 26,
-    PaymentFrequency.WEEKLY: 52,
-    PaymentFrequency.ANNUALLY: 1,
-}
-
-
-def _compute_scenario(spec: ScenarioSpec) -> tuple[Decimal, list[dict]]:
-    """Return (pmt, schedule_dicts) for a scenario spec."""
-    freq = _FREQ_MAP[spec.payment_frequency]
-    n = spec.amortization_years * _PERIODS_PER_YEAR[freq]
-
-    if spec.type == ScenarioType.LOAN_AMORTIZATION:
-        pmt = compute_pmt_loan(spec.principal, spec.annual_rate, n, freq)
-        schedule_dicts = generate_amortization_schedule(
-            spec.principal, spec.annual_rate, n, spec.start_date, freq
-        )
-    else:
-        current_balance = spec.current_balance or Decimal('0')
-        pmt = compute_pmt_sinking_fund(
-            spec.principal - current_balance, spec.annual_rate, n, freq
-        )
-        schedule_dicts = generate_sinking_fund_schedule(
-            spec.principal, spec.annual_rate, n, spec.start_date, current_balance, freq
-        )
-
-    return pmt, schedule_dicts, n
 
 
 # ── Simulation (stateless) ────────────────────────────────────────────────────
@@ -69,7 +27,7 @@ def simulate(request, scenarios: List[ScenarioSpec]):
     baseline_pmt: Decimal | None = None
 
     for spec in scenarios:
-        pmt, schedule_dicts, _ = _compute_scenario(spec)
+        pmt, schedule_dicts, _ = AnnuityService.compute_scenario(spec)
         schedule = [PeriodRow(**row) for row in schedule_dicts]
         total_interest = sum(row.interest_portion for row in schedule)
         total_cost = sum(row.payment_amount for row in schedule)
@@ -102,8 +60,6 @@ def commit_schedule(request, payload: CommitIn):
     spec = payload.spec
     family = request.auth.family
 
-    pmt, schedule_dicts, n_periods = _compute_scenario(spec)
-
     # Optionally validate the linked JE belongs to this family
     linked_je = None
     if payload.linked_journal_entry_id:
@@ -115,34 +71,10 @@ def commit_schedule(request, payload: CommitIn):
         except JournalEntry.DoesNotExist:
             raise HttpError(404, "Journal entry not found in your family.")
 
-    with transaction.atomic():
-        schedule = AnnuitySchedule.objects.create(
-            family=family,
-            name=spec.name,
-            schedule_type=spec.type.value,
-            principal_amount=spec.principal,
-            annual_rate=spec.annual_rate,
-            n_periods=n_periods,
-            payment_frequency=spec.payment_frequency.value,
-            start_date=spec.start_date,
-            computed_payment=pmt,
-            linked_journal_entry=linked_je,
-        )
-
-        AnnuityPeriod.objects.bulk_create([
-            AnnuityPeriod(
-                schedule=schedule,
-                period_number=row['period_number'],
-                payment_date=row['payment_date'],
-                payment_amount=row['payment_amount'],
-                interest_portion=row['interest_portion'],
-                principal_portion=row['principal_portion'],
-                balance_after=row['balance_after'],
-            )
-            for row in schedule_dicts
-        ])
+    schedule = AnnuityService.commit_schedule(family, spec, linked_je)
 
     return _schedule_to_out(schedule, include_periods=True)
+
 
 
 @router.get("/schedules", response=List[AnnuityScheduleListOut])
