@@ -27,9 +27,14 @@ def create_loan_mapping_rule(sender, instance, created, **kwargs):
     # Success Criteria: min/max bounds set to computed_payment +/- $5.00
     variance = Decimal("5.00")
     
+    # If the name is "Financing: XYZ", we also want to match "XYZ"
+    search_text = instance.name
+    if search_text.startswith("Financing: "):
+        search_text = search_text.replace("Financing: ", "", 1)
+
     TransactionMappingRule.objects.create(
         merchant=merchant,
-        search_text=instance.name,
+        search_text=search_text,
         min_amount=instance.computed_payment - variance,
         max_amount=instance.computed_payment + variance,
         linked_schedule=instance

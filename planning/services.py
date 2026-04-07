@@ -1,8 +1,10 @@
 from decimal import Decimal
-from typing import List, Dict, Any
-from django.db import transaction
+from typing import List, Dict, Any, Optional
+from datetime import date, timedelta
+from django.db import transaction, models
 from .models import AnnuitySchedule, AnnuityRateHistory, AnnuityPeriod
 from .schemas import ScenarioSpec, ScenarioType, PaymentFrequencyIn
+from accounting.models import Account, JournalEntry, TransactionLine
 from finance_backend.utils.time_value import (
     PaymentFrequency,
     compute_pmt_loan,
@@ -90,3 +92,115 @@ class AnnuityService:
         ])
 
         return schedule
+
+class AmortizationReconciliationService:
+    @staticmethod
+    @transaction.atomic
+    def reconcile_amortization_payment(staged_tx, rule, user) -> Optional[JournalEntry]:
+        """
+        Phase 4: Payment Stripping.
+        Matches a StagedTransaction to an AnnuityPeriod and creates a 3-line compound entry.
+        """
+        schedule = rule.linked_schedule
+        if not schedule:
+            return None
+
+        # 1. Find the oldest unpaid AnnuityPeriod within ± 5-day window
+        window_start = staged_tx.bank_date - timedelta(days=5)
+        window_end = staged_tx.bank_date + timedelta(days=5)
+        
+        period = schedule.periods.filter(
+            is_paid=False,
+            payment_date__range=(window_start, window_end)
+        ).order_by('period_number').first()
+        
+        if not period:
+            return None
+
+        # 2. Identify accounts
+        resolved_product = staged_tx.financial_product or staged_tx.statement_import.financial_product
+        source_account = resolved_product.account
+        family = resolved_product.family
+
+        # Liability Account (from schedule's originating JE)
+        orig_je = schedule.linked_journal_entry
+        if not orig_je:
+            # Fallback: find any liability account linked to tangible assets of this schedule
+            from assets.models import TangibleAsset
+            asset = TangibleAsset.objects.filter(annuity_schedule=schedule).first()
+            if asset:
+                # This is actually an ASSET account. We need the liability one.
+                # If no linked_je, we might have to search for a liability account with similar name?
+                # For now, we enforce linked_je exists as per Phase 2.
+                raise ValueError(f"Schedule {schedule.id} has no linked originating journal entry.")
+            else:
+                raise ValueError(f"Schedule {schedule.id} has no linked originating journal entry.")
+        
+        liability_line = orig_je.lines.filter(account__account_type=Account.AccountType.LIABILITY).first()
+        if not liability_line:
+            raise ValueError(f"Originating JE for schedule {schedule.id} has no liability account line.")
+        liability_account = liability_line.account
+        
+        # Interest Expense Account
+        # Prioritize accounts linked to this family over global ones.
+        interest_account = Account.objects.filter(
+            models.Q(family=family) | models.Q(family__isnull=True),
+            account_type=Account.AccountType.EXPENSE,
+            name__icontains='interest'
+        ).annotate(
+            is_family_specific=models.Case(
+                models.When(family=family, then=models.Value(1)),
+                default=models.Value(0),
+                output_field=models.IntegerField(),
+            )
+        ).order_by('-is_family_specific', 'id').first()
+
+        if not interest_account:
+            # Create a generic one if missing? Or just fail?
+            # Let's try to find "Mortgage interest cost" as seen in shell
+            interest_account = Account.objects.filter(name__icontains='Mortgage interest cost').first()
+            if not interest_account:
+                raise ValueError("No 'Interest' expense account found for this family.")
+
+        # 3. Construct the 3-line compound JournalEntry
+        journal_entry = JournalEntry.objects.create(
+            family=family,
+            date=staged_tx.bank_date,
+            description=f"Loan Payment: {schedule.name} (Period {period.period_number})",
+            is_reconciled=True
+        )
+
+        # Line 1: Credit (-) the Bank Account (Total payment amount)
+        # Note: staged_tx.amount is negative for outflows in Assets
+        total_payment = abs(staged_tx.amount)
+        TransactionLine.objects.create(
+            journal_entry=journal_entry,
+            account=source_account,
+            amount=-total_payment
+        )
+
+        # Line 2: Debit (+) the Liability Account (Principal portion)
+        TransactionLine.objects.create(
+            journal_entry=journal_entry,
+            account=liability_account,
+            amount=period.principal_portion
+        )
+
+        # Line 3: Debit (+) the Interest Expense Account (Interest portion)
+        TransactionLine.objects.create(
+            journal_entry=journal_entry,
+            account=interest_account,
+            amount=period.interest_portion
+        )
+
+        # 4. State Update
+        period.is_paid = True
+        period.journal_entry = journal_entry
+        period.save(update_fields=['is_paid', 'journal_entry'])
+
+        staged_tx.status = staged_tx.Status.RECONCILED
+        staged_tx.journal_entry = journal_entry
+        staged_tx.merchant = rule.merchant
+        staged_tx.save(update_fields=['status', 'journal_entry', 'merchant'])
+
+        return journal_entry

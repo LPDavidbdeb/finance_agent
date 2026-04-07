@@ -147,6 +147,24 @@ def approve_staged_transaction(transaction_id: int, target_account_id: int, user
     if staged_tx.status != StagedTransaction.Status.UNPROCESSED:
         raise ValueError(f"Transaction is already processed (Status: {staged_tx.status}).")
 
+    # --- Phase 4: Smart Categorization Interception ---
+    # If the transaction matches a rule with a linked schedule, we use the 
+    # compound entry logic (AmortizationReconciliationService).
+    from categorization.services import find_matching_rule
+    from planning.services import AmortizationReconciliationService
+    
+    rule = find_matching_rule(
+        staged_tx.raw_description,
+        resolved_product.institution_id,
+        family.id,
+        transaction_amount=staged_tx.amount
+    )
+    
+    if rule and rule.linked_schedule:
+        je = AmortizationReconciliationService.reconcile_amortization_payment(staged_tx, rule, user)
+        if je:
+            return je
+
     source_account = resolved_product.account
     try:
         # Allow accounts that belong to the family OR are global (None)
