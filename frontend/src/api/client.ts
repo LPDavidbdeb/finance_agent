@@ -1,7 +1,7 @@
 const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 const API_URL = isDevelopment 
-  ? "http://localhost:8000/api" 
-  : `http://${window.location.hostname}:8000/api`;
+  ? "http://localhost:8001/api" 
+  : `http://${window.location.hostname}:8001/api`;
 
 // Helper to get the auth header
 function getAuthHeader() {
@@ -823,4 +823,3 @@ export async function changePassword(
     throw new Error(data.detail || 'Failed to change password');
   }
 }
-

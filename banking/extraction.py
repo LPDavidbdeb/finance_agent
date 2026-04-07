@@ -257,50 +257,72 @@ def extract_transactions_from_statement(import_id: int, user):
             except Exception as e:
                 logger.exception(f"Unexpected error during auto-approval for transaction {tx.id}: {str(e)}")
 
-        # Historical auto-routing: for statements older than 3 months, route all
+        # Historical auto-routing: for statements older than 2 months, route all
         # remaining unprocessed transactions rather than leaving them in staging.
-        # Payments go to Internal Transfers (balance sheet movement, not an expense).
-        # Everything else goes to Uncategorized Expenses (expense is real, category unknown).
-        cutoff_date = date.today() - relativedelta(months=3)
+        cutoff_date = date.today() - relativedelta(months=2)
         statement_date = statement_import.document_date
 
         if statement_date and statement_date < cutoff_date:
+            from django.db import models
             if statement_import.financial_product:
                 family = statement_import.financial_product.family
             else:
                 # Multi-product import: derive family from the first product under the institution.
                 first_product = FinancialProduct.objects.filter(institution=institution).first()
                 family = first_product.family if first_product else None
-            uncategorized = Account.objects.filter(
-                family=family, name__iexact='Uncategorized Expenses'
-            ).first()
-            internal_transfer = Account.objects.filter(
-                family=family, name__iexact='Internal Transfers'
-            ).first()
 
-            if not uncategorized:
-                logger.warning(
-                    f"'Uncategorized Expenses' account not found for family {family.id}. "
-                    "Skipping historical auto-routing. Run rebuild_accounting_master to create it."
-                )
-            else:
-                remaining = StagedTransaction.objects.filter(
-                    statement_import=statement_import,
-                    status=StagedTransaction.Status.UNPROCESSED
-                )
-                for tx in remaining:
-                    is_payment = 'PAIEMENT' in tx.raw_description.upper()
-                    target = internal_transfer if (is_payment and internal_transfer) else uncategorized
-                    try:
-                        approve_staged_transaction(
-                            transaction_id=tx.id,
-                            target_account_id=target.id,
-                            user=user
-                        )
-                    except (PermissionError, ValueError) as e:
-                        logger.warning(f"Historical auto-routing skipped for tx {tx.id}: {str(e)}")
-                    except Exception as e:
-                        logger.exception(f"Unexpected error during historical auto-routing for tx {tx.id}: {str(e)}")
+            # Look up the fallback accounts (Global or Family-Specific)
+            def get_fallback(name):
+                return Account.objects.filter(
+                    models.Q(family=family) | models.Q(family__isnull=True),
+                    name__iexact=name
+                ).first()
+
+            acc_transfers = get_fallback('Internal Transfers')
+            acc_expenses = get_fallback('UNCATEGORIZED EXPENSES')
+            acc_revenus = get_fallback('UNCATEGORIZED REVENUS')
+
+            remaining = StagedTransaction.objects.filter(
+                statement_import=statement_import,
+                status=StagedTransaction.Status.UNPROCESSED
+            )
+            for tx in remaining:
+                try:
+                    # 1. Determine destination based on description and sign
+                    target = acc_expenses # Default
+                    desc_upper = tx.raw_description.upper()
+                    is_transfer = any(k in desc_upper for k in ['PAIEMENT', 'PRÉLÈVEMENT', 'VIREMENT', 'TRANSFER'])
+                    
+                    if is_transfer and acc_transfers:
+                        target = acc_transfers
+                    else:
+                        # Determine if it's an inflow (Revenue) or outflow (Expense)
+                        # Based on our verified logic:
+                        # Asset (Checking/WS): Inflow is Positive
+                        # Liability (Visa): Inflow (Payment/Refund) is Negative
+                        is_inflow = False
+                        p_type = tx.financial_product.product_type if tx.financial_product else 'CHECKING'
+                        
+                        if p_type == 'CREDIT_CARD':
+                            is_inflow = tx.amount < 0
+                        else:
+                            is_inflow = tx.amount > 0
+                        
+                        if is_inflow and acc_revenus:
+                            target = acc_revenus
+
+                    if not target:
+                        continue
+
+                    approve_staged_transaction(
+                        transaction_id=tx.id,
+                        target_account_id=target.id,
+                        user=user
+                    )
+                except (PermissionError, ValueError) as e:
+                    logger.warning(f"Historical auto-routing skipped for tx {tx.id}: {str(e)}")
+                except Exception as e:
+                    logger.exception(f"Unexpected error during historical auto-routing for tx {tx.id}: {str(e)}")
 
         statement_import.processed_by_python = True
         statement_import.status = BankStatementImport.Status.COMPLETED

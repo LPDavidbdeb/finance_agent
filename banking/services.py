@@ -1,5 +1,5 @@
 from decimal import Decimal
-from django.db import transaction
+from django.db import transaction, models
 from .models import FinancialProduct, FinancialInstitution, BankStatementImport, StagedTransaction
 from accounting.models import Account, JournalEntry, TransactionLine
 from users.models import Family, FamilyMember
@@ -66,24 +66,51 @@ def _resolve_entry_accounts(source_account: Account, target_account: Account, am
     source_type = source_account.account_type
     target_type = target_account.account_type
 
-    # Cross-balance-sheet transfer: source outflow and target inflow.
+    # --- Routing Logic ---
+
+    # Case 1: Transfer between balance sheet accounts (Asset/Liability/Equity)
     if target_type in {Account.AccountType.ASSET, Account.AccountType.LIABILITY, Account.AccountType.EQUITY}:
-        if amount < 0:
-            return target_account, source_account
-        return source_account, target_account
+        # Logic: We determine which account is receiving value (Debit) vs giving value (Credit)
+        
+        if source_type == Account.AccountType.LIABILITY:
+            # Liability Source (Convention: Purchase=+, Payment=-)
+            if amount > 0: # Purchase/Transfer-Out (Increase Debt)
+                return target_account, source_account
+            return source_account, target_account # Payment/Transfer-In (Decrease Debt)
+        else:
+            # Asset Source (Convention: Inflow=+, Outflow=-)
+            if amount < 0: # Outflow (Transfer to somewhere else)
+                return target_account, source_account
+            return source_account, target_account # Inflow (Transfer from somewhere else)
 
-    # P&L categories: the category line should reflect economic intent.
+    # Case 2: P&L - Expenses
     if target_type == Account.AccountType.EXPENSE:
-        # Purchase/outflow -> Debit expense; Refund/inflow -> Credit expense.
-        if amount < 0:
-            return target_account, source_account
-        return source_account, target_account
-
-    if target_type == Account.AccountType.INCOME:
-        # Income/inflow -> Credit income; reversal/outflow -> Debit income.
-        if amount > 0:
+        if source_type == Account.AccountType.LIABILITY:
+            # Purchase (+): Debit Expense, Credit Liability
+            # Refund (-): Debit Liability, Credit Expense
+            if amount > 0:
+                return target_account, source_account
             return source_account, target_account
-        return target_account, source_account
+        else:
+            # Asset Source (Debit Card):
+            # Purchase (-): Debit Expense, Credit Asset
+            # Refund (+): Debit Asset, Credit Expense
+            if amount < 0:
+                return target_account, source_account
+            return source_account, target_account
+
+    # Case 3: P&L - Revenue
+    if target_type == Account.AccountType.REVENUE:
+        if source_type == Account.AccountType.LIABILITY:
+            # Inflow (- on CC? rare): Credit Revenue, Debit Liability
+            if amount < 0:
+                return source_account, target_account
+            return target_account, source_account
+        else:
+            # Asset Source: Inflow (+) -> Debit Asset, Credit Revenue
+            if amount > 0:
+                return source_account, target_account
+            return target_account, source_account
 
     raise ValueError(f"Unsupported target account type: {target_type}")
 
@@ -122,9 +149,13 @@ def approve_staged_transaction(transaction_id: int, target_account_id: int, user
 
     source_account = resolved_product.account
     try:
-        target_account = Account.objects.get(id=target_account_id, family=family)
+        # Allow accounts that belong to the family OR are global (None)
+        target_account = Account.objects.get(
+            models.Q(family=family) | models.Q(family__isnull=True),
+            id=target_account_id
+        )
     except Account.DoesNotExist:
-        raise ValueError("Target account not found for this family.")
+        raise ValueError("Target account not found or access denied.")
 
     journal_entry = JournalEntry.objects.create(
         family=family,

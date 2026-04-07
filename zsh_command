@@ -1,0 +1,20 @@
+./scripts/devstack.zsh start
+./scripts/devstack.zsh status
+./scripts/devstack.zsh restart
+./scripts/devstack.zsh stop
+
+
+Notes
+Redis startup is auto-handled with fallback logic:
+tries brew services start redis
+then brew services start redis@7
+then redis-server
+Django/Celery/Vite run in background with logs under logs/dev/:
+logs/dev/django.log
+logs/dev/celery.log
+logs/dev/vite.log
+logs/dev/redis.log (if local redis-server path is used)
+Validation I ran
+zsh -n scripts/devstack.zsh (syntax check) ✅
+./scripts/devstack.zsh status (runtime check) ✅
+It reported Redis running and the other services stopped at check time.

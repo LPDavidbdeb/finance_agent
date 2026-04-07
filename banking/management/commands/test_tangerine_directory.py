@@ -1,15 +1,18 @@
 """
-Dry-run validation command for the Tangerine consolidated ingestion pipeline.
+Batch ingestion command for the Tangerine consolidated pipeline.
 
 Loops through every .pdf in a directory (chronologically by filename), creates a
 BankStatementImport for each one, runs the full extraction pipeline synchronously,
-prints a per-file summary, then rolls the entire database transaction back so the
-local database is never polluted.
+and prints a per-file summary.
+
+By default this is a DRY RUN — all database writes are rolled back at the end.
+Pass --commit to persist permanently.
 
 Usage:
-    python manage.py test_tangerine_directory
+    python manage.py test_tangerine_directory                          # dry-run
+    python manage.py test_tangerine_directory --commit                 # persist
     python manage.py test_tangerine_directory --dir /path/to/pdfs
-    python manage.py test_tangerine_directory --dir /path/to/pdfs --family-id <uuid>
+    python manage.py test_tangerine_directory --dir /path/to/pdfs --family-id <uuid> --commit
 """
 
 import os
@@ -23,8 +26,8 @@ DEFAULT_DIR = "/Users/Louis-Philippe/Sites/709ruebeaudoin/data/Tangerine"
 
 class Command(BaseCommand):
     help = (
-        "Dry-run: parse every Tangerine PDF in a directory through the "
-        "full extraction pipeline, print a per-file summary, then roll back."
+        "Batch-ingest every Tangerine PDF in a directory through the full extraction "
+        "pipeline and print a per-file summary. Dry-run by default; use --commit to persist."
     )
 
     def add_arguments(self, parser):
@@ -38,10 +41,17 @@ class Command(BaseCommand):
             default=None,
             help="Family UUID to use for auto-spawned products. Defaults to first family.",
         )
+        parser.add_argument(
+            "--commit",
+            action="store_true",
+            default=False,
+            help="Persist all changes to the database. Without this flag the run is a dry-run.",
+        )
 
     def handle(self, *args, **options):
         pdf_dir = options["dir"]
         family_id = options["family_id"]
+        commit = options["commit"]
 
         if not os.path.isdir(pdf_dir):
             raise CommandError(f"Directory not found: {pdf_dir}")
@@ -57,9 +67,14 @@ class Command(BaseCommand):
                 f"Found {len(pdf_files)} PDF(s) in {pdf_dir}"
             )
         )
-        self.stdout.write(
-            self.style.WARNING("All database writes will be rolled back after the run.\n")
-        )
+        if commit:
+            self.stdout.write(
+                self.style.SUCCESS("--commit flag set. Changes will be PERSISTED.\n")
+            )
+        else:
+            self.stdout.write(
+                self.style.WARNING("Dry-run mode. All database writes will be rolled back.\nPass --commit to persist.\n")
+            )
 
         # Import inside handle() to avoid import-time Django setup issues
         from django.contrib.auth import get_user_model
@@ -193,8 +208,8 @@ class Command(BaseCommand):
                     f"  Products total (would-be) : {products_total}"
                 )
 
-                # Force rollback — no permanent writes
-                raise _Rollback()
+                if not commit:
+                    raise _Rollback()
 
         except _Rollback:
             self.stdout.write(

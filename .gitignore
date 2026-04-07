@@ -6,6 +6,7 @@
 # Project Specific
 venv/
 SYSTEM_MEMORY.md
+.dev/
 
 # Python #
 ##########
@@ -67,3 +68,5 @@ Icon
 .Trashes
 finance_agent.json
 finance_agent.dump
+
+zsh_command

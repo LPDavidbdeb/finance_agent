@@ -14,8 +14,8 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
     def _extract_payment_table(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> tuple[
         pd.DataFrame, bool]:
         """
-        NEW LOGIC: Extracts only the payments using the 100% success rate test logic.
-        Looks specifically at the first column for the date.
+        Extracts only the payments.
+        In Liability logic: Payments are NEGATIVE (decreases debt).
         """
         df.columns = [str(x).upper() for x in df.columns]
 
@@ -43,7 +43,6 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
         date_pattern = r'^(\d{2})\s(\d{2})'
 
         for idx, row in df.iterrows():
-            # Get description
             desc_val = row[desc_col]
             if isinstance(desc_val, pd.Series):
                 desc_val = desc_val.iloc[0] if len(desc_val) > 0 else ""
@@ -52,37 +51,27 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
             if 'PAIEMENT' not in desc.upper() and 'PRÉLÈVEMENT' not in desc.upper():
                 continue
 
-            # Get first column value
             first_col_val = row[first_col]
             if isinstance(first_col_val, pd.Series):
                 first_col_val = first_col_val.iloc[0] if len(first_col_val) > 0 else ""
             first_col_str = str(first_col_val).strip()
 
-            # Get amount
             amount_val = row[amount_col]
             if isinstance(amount_val, pd.Series):
                 amount_val = amount_val.iloc[0] if len(amount_val) > 0 else ""
             raw_amount = str(amount_val).strip()
 
-            # Extract using first column
             match = re.match(date_pattern, first_col_str)
             if match:
                 tx_days, tx_months = int(match.group(1)), int(match.group(2))
-
-                # Apply standard rollover logic
                 tx_years = statement_year - 1 if (statement_month == 1 and tx_months == 12) else statement_year
 
-                # Clean amount using the same logic as your regular transactions
-                has_cr = bool(re.search(r'\bCR\b', raw_amount, re.IGNORECASE))
-                has_minus = '-' in raw_amount
-                amount_magnitude = raw_amount.replace('%', '').replace(' ', '').replace(',', '.').upper().replace('CR',
-                                                                                                                  '').replace(
-                    '-', '').strip()
+                amount_magnitude = raw_amount.replace('%', '').replace(' ', '').replace(',', '.').upper().replace('CR', '').replace('-', '').strip()
 
                 try:
                     parsed_amount = float(amount_magnitude)
-                    # Payments (CR or -) = positive amount (reduces liability)
-                    final_amount = parsed_amount * (-1 if has_cr or has_minus else 1)
+                    # FORCE NEGATIVE for payments (Liability reduction)
+                    final_amount = -abs(parsed_amount)
 
                     payments.append({
                         'date': pd.Timestamp(year=tx_years, month=tx_months, day=tx_days),
@@ -94,16 +83,13 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
                     continue
 
         df_clean = pd.DataFrame(payments, columns=['date', 'description', 'amount', 'account_identifier'])
-        df_transactions = df_clean[['date', 'description', 'amount', 'account_identifier']].dropna(
-            subset=['date', 'amount'])
-
-        return df_transactions, False
+        return df_clean.dropna(subset=['date', 'amount']), False
 
     def _extract_regular_transactions(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> tuple[
         pd.DataFrame, bool]:
         """
-        YOUR EXACT WORKING SCRIPT: Extracts regular purchases.
-        Unmodified and perfectly intact.
+        Extracts regular purchases.
+        In Liability logic: Purchases are POSITIVE (increases debt).
         """
         df.columns = [str(x).upper() for x in df.columns]
 
@@ -127,35 +113,23 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
         desc_col = next((col for col in df_clean.columns if 'DESCRIPTION' in col), 'DESCRIPTION')
         amount_col = next((col for col in df_clean.columns if 'MONTANT' in col), 'MONTANT')
 
-        # Exclude payment rows — handled separately by _extract_payment_table to avoid duplication
         desc_upper = df_clean[desc_col].astype(str).str.upper()
         payment_mask = desc_upper.str.contains('PAIEMENT', na=False) | desc_upper.str.contains('PRÉLÈVEMENT', na=False)
         df_clean = df_clean[~payment_mask].reset_index(drop=True)
 
-        # Extract dates from description column (primary method for regular transactions)
         extracted_dates = df_clean[desc_col].astype(str).str.extract(date_pattern)
         valid_rows = extracted_dates[0].notna() & extracted_dates[1].notna()
-
         extracted_dates = extracted_dates[valid_rows]
 
-        # Rollover logic: If statement is in January and transaction is in December, it's from previous year
         tx_months = extracted_dates[1].astype(int)
         tx_days = extracted_dates[0].astype(int)
         tx_years = np.where((statement_month == 1) & (tx_months == 12), statement_year - 1, statement_year)
 
-        df_clean['date'] = pd.to_datetime(
-            dict(year=tx_years, month=tx_months, day=tx_days),
-            errors='coerce'
-        )
+        df_clean['date'] = pd.to_datetime(dict(year=tx_years, month=tx_months, day=tx_days), errors='coerce')
 
-        # Clean description: Remove date patterns to get the actual description text
-        # Handles "DD MM DESCRIPTION", "DD MM DD MM DESCRIPTION", and "DD DESCRIPTION" (payment rows) formats
         descriptions = df_clean[desc_col].astype(str).copy()
-        # First try removing double date pattern (DD MM DD MM)
         descriptions = descriptions.str.replace(r'^\d{2}\s+\d{2}\s+\d{2}\s+\d{2}\s+', '', regex=True)
-        # Then remove single date pattern (DD MM)
         descriptions = descriptions.str.replace(r'^\d{2}\s+\d{2}\s+', '', regex=True)
-        # Finally remove leading single day for payment rows (DD PAIEMENT...)
         descriptions = descriptions.str.replace(r'^\d{2}\s+', '', regex=True)
         df_clean['description'] = descriptions.str.strip()
 
@@ -174,28 +148,19 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
         )
         parsed_amount = pd.to_numeric(amount_magnitude, errors='coerce')
 
-        # Purchases (no CR, no minus) = positive amount (expense on the statement)
-        # Credits/payments (CR or -) = negative amount (reduces the statement balance)
+        # LIABILITY LOGIC:
+        # Regular Purchase (no CR) = Positive
+        # Refund/Credit (CR) = Negative
         df_clean['amount'] = parsed_amount * np.where(has_cr | has_minus, -1, 1)
         df_clean['account_identifier'] = 'CREDIT_CARD'
 
-        return df_clean[['date', 'description', 'amount', 'account_identifier']].dropna(
-            subset=['date', 'amount']), False
+        return df_clean[['date', 'description', 'amount', 'account_identifier']].dropna(subset=['date', 'amount']), False
 
     def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> tuple[
         pd.DataFrame, bool]:
-        """
-        The orchestrator: Runs both extractions independently and merges the DataFrames.
-        """
-        # 1. Extract regular transactions into a DataFrame
         df_transactions, _ = self._extract_regular_transactions(df.copy(), statement_year, statement_month)
-
-        # 2. Extract payments into a DataFrame
         df_payments, _ = self._extract_payment_table(df.copy(), statement_year, statement_month)
-
-        # 3. Merge the two DataFrames safely
         df_merged = pd.concat([df_transactions, df_payments], ignore_index=True)
-
         return df_merged, False
 
 
@@ -255,6 +220,7 @@ class MasterCardWealthSimpleExtractor(BasePDFExtractor):
 
                 temp_df = self.clean_amount_col(["Charged ($)", "Credit ($)"], temp_df)
                 temp_df['date'] = pd.to_datetime(temp_df['Date'], format='%Y-%m-%d', errors='coerce')
+                # Wealthsimple is an ASSET (Cash Flow logic): Inflow (+) / Outflow (-)
                 temp_df['amount'] = temp_df['Credit ($)'] - temp_df['Charged ($)']
                 temp_df['description'] = temp_df['Description']
                 temp_df['account_identifier'] = 'SAVINGS'
@@ -311,7 +277,6 @@ class CompteDesjardinsExtractor(BasePDFExtractor):
             try:
                 d = int(d_m[0])
                 m = date_dict[d_m[1]]
-                # Rollover logic
                 year = statement_year - 1 if (statement_month == 1 and m == 12) else statement_year
                 return datetime(year, m, d)
             except Exception:
@@ -330,7 +295,6 @@ class CompteDesjardinsExtractor(BasePDFExtractor):
 
     def process_compte_operations_courrantes(self, df, statement_year, statement_month):
         df_copy = df.copy()
-        # Normalize columns for identification
         df_copy.columns = [str(c).strip() for c in df_copy.columns]
         
         try:
@@ -415,6 +379,7 @@ class CompteDesjardinsExtractor(BasePDFExtractor):
         if df_legacy.empty:
             return pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier'])
 
+        # CHECKING/SAVINGS is ASSET logic: Dépôt (+) / Retrait (-)
         df_legacy['amount'] = df_legacy['CREDIT'].fillna(0) - df_legacy['DEBIT'].fillna(0)
         df_legacy.rename(columns={'DATE': 'date', 'DESCRIPTION': 'description'}, inplace=True)
         df_legacy['account_identifier'] = df_legacy['description'].apply(
@@ -444,6 +409,7 @@ class CompteDesjardinsExtractor(BasePDFExtractor):
         credit_val = df_dyn[credit_col] if credit_col else 0
         frais_val = df_dyn[frais_col] if frais_col else 0
         
+        # ASSET logic: Inflow (+) / Outflow (-)
         df_dyn['amount'] = credit_val - debit_val - frais_val
         df_dyn['description'] = df_dyn[desc_col]
         df_dyn['account_identifier'] = df_dyn['description'].apply(
@@ -482,77 +448,28 @@ class CompteDesjardinsExtractor(BasePDFExtractor):
 
 
 class TangerineExtractor(BasePDFExtractor):
-    """
-    Multi-product extractor for Tangerine consolidated statements.
-
-    Uses a two-pass strategy (pdfplumber only — no tabula):
-
-      Pass 1 — Product-type roster (pages 1-2)
-        Locate the "Compte(s) en un coup d'oeil" summary and build a mapping
-        account_number → FinancialProduct.ProductType from keywords
-        ('épargne', 'CELI', 'CPG', 'chèque').
-
-      Pass 2 — Text-line ledger extraction (all pages)
-        Concatenate all page texts.  Find every 'Détails - ... - NNNN' header
-        with finditer (multiple per page supported).  For each section, parse
-        lines of the form 'DD.MM.YYYY description amount balance'.
-        Sign is inferred from the balance change (balance increases → positive
-        inflow; balance decreases → negative outflow).  "Solde d'ouverture" /
-        "Solde" marker lines are used for anchoring and then excluded.
-
-    Tangerine statements use a text-layout format with no ruled table borders,
-    so tabula cannot extract them reliably.
-
-    Output DataFrame contract — every row has these five columns:
-      date                  pd.Timestamp
-      description           str
-      amount                float  (positive = inflow, negative = outflow)
-      account_number        str    — Tangerine account number (digits only)
-      inferred_product_type str    — one of FinancialProduct.ProductType values
-    """
-
     OUTPUT_COLUMNS = ['date', 'description', 'amount', 'account_number', 'inferred_product_type']
     _DEFAULT_PRODUCT_TYPE = 'CHECKING'
     _HEADER_RE = re.compile(r'Détails\s+-\s+.+?\s+-\s+(\d+)', re.IGNORECASE)
     _BALANCE_MARKERS = frozenset(["solde d'ouverture", 'solde'])
 
-    def tabula_parameters(self) -> dict:  # satisfies BasePDFExtractor ABC
+    def tabula_parameters(self) -> dict:
         return {}
-
-    # ------------------------------------------------------------------
-    # Public entry point (overrides BasePDFExtractor.extract entirely)
-    # ------------------------------------------------------------------
 
     def extract(self, pdf_path: str, statement_year: int, statement_month: int) -> tuple[pd.DataFrame, bool]:
         import pdfplumber
-
         try:
             product_types = self._pass1_infer_product_types(pdf_path, pdfplumber)
-            logger.info(f"[TangerineExtractor] Pass 1 roster: {product_types}")
-
             all_dfs = self._pass2_extract_from_text(pdf_path, pdfplumber, product_types)
-
             if not all_dfs:
-                logger.warning("[TangerineExtractor] No section headers found. Returning empty DataFrame.")
                 return pd.DataFrame(columns=self.OUTPUT_COLUMNS), False
-
             combined = pd.concat(all_dfs, ignore_index=True)
-            logger.info(f"[TangerineExtractor] Extracted {len(combined)} transactions across {len(all_dfs)} section(s).")
             return combined[self.OUTPUT_COLUMNS], False
-
         except Exception as e:
             logger.exception(f"[TangerineExtractor] Extraction failed: {e}")
             return pd.DataFrame(columns=self.OUTPUT_COLUMNS), False
 
-    # ------------------------------------------------------------------
-    # Pass 1: build account_number → ProductType dict from summary page
-    # ------------------------------------------------------------------
-
     def _pass1_infer_product_types(self, pdf_path: str, pdfplumber_module) -> dict:
-        """
-        Scan the first two pages for the 'Compte(s) en un coup d'oeil' summary.
-        Returns { digits_only_account_number: ProductType_string }.
-        """
         product_types = {}
         with pdfplumber_module.open(pdf_path) as pdf:
             for page in pdf.pages[:2]:
@@ -573,118 +490,56 @@ class TangerineExtractor(BasePDFExtractor):
                         product_types[account_number] = 'SAVINGS'
                     elif 'chèque' in line_lower or 'cheque' in line_lower:
                         product_types[account_number] = 'CHECKING'
-                break  # Summary found — no need to continue to page 2
+                break
         return product_types
 
-    # ------------------------------------------------------------------
-    # Pass 2: text-line extraction across all sections
-    # ------------------------------------------------------------------
-
-    def _pass2_extract_from_text(
-        self, pdf_path: str, pdfplumber_module, product_types: dict
-    ) -> list:
-        """
-        Concatenate all page texts, find every 'Détails - ... - NNNN' header
-        with finditer (handles multiple sections per page), then parse each
-        section's transaction lines.
-        """
+    def _pass2_extract_from_text(self, pdf_path: str, pdfplumber_module, product_types: dict) -> list:
         with pdfplumber_module.open(pdf_path) as pdf:
             full_text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
-
         sections = list(self._HEADER_RE.finditer(full_text))
         if not sections:
             return []
-
         all_dfs = []
         for i, match in enumerate(sections):
             account_number = match.group(1)
             section_start = match.end()
             section_end = sections[i + 1].start() if i + 1 < len(sections) else len(full_text)
             section_text = full_text[section_start:section_end]
-
             df = self._parse_section_text(section_text, account_number, product_types)
             if df is not None and not df.empty:
                 all_dfs.append(df)
-
         return all_dfs
 
-    def _parse_section_text(
-        self, text: str, account_number: str, product_types: dict
-    ):
-        """
-        Parse lines of the form 'DD.MM.YYYY description amount balance'.
-
-        Sign is derived from balance change:
-          balance_after - balance_before > 0  →  positive (inflow)
-          balance_after - balance_before < 0  →  negative (outflow)
-
-        "Solde d'ouverture" / "Solde" marker lines are used only as balance
-        anchors and are excluded from the output.
-        """
+    def _parse_section_text(self, text: str, account_number: str, product_types: dict):
         product_type = product_types.get(account_number, self._DEFAULT_PRODUCT_TYPE)
-
-        # French decimal numbers may use non-breaking spaces as thousands separators.
         _MONEY = r'(?:[\d\u00a0\u202f ]+,\d{2})'
-        TX_RE = re.compile(
-            r'^(\d{2})\.(\d{2})\.(\d{4})\s+'  # DD.MM.YYYY
-            r'(.+)\s+'                          # description (greedy — absorbs any embedded ref numbers)
-            r'(' + _MONEY + r')\s+'             # amount (absolute, last-but-one money token)
-            r'(' + _MONEY + r')\s*$'            # running balance (last money token)
-        )
+        TX_RE = re.compile(r'^(\d{2})\.(\d{2})\.(\d{4})\s+(.+)\s+(' + _MONEY + r')\s+(' + _MONEY + r')\s*$')
 
         def _parse_fr(s: str) -> float:
-            # Strip all space variants and convert French comma decimal
-            return float(
-                s.replace('\u00a0', '').replace('\u202f', '').replace(' ', '').replace(',', '.')
-            )
+            return float(s.replace('\u00a0', '').replace('\u202f', '').replace(' ', '').replace(',', '.'))
 
         parsed = []
         for line in text.split('\n'):
             m = TX_RE.match(line.strip())
-            if not m:
-                continue
+            if not m: continue
             try:
                 tx_date = pd.Timestamp(year=int(m.group(3)), month=int(m.group(2)), day=int(m.group(1)))
-            except ValueError:
-                continue
+            except ValueError: continue
             parsed.append((tx_date, m.group(4).strip(), m.group(5), m.group(6)))
 
-        if not parsed:
-            return None
-
-        rows = []
-        prev_balance = None
+        if not parsed: return None
+        rows, prev_balance = [], None
         for tx_date, description, raw_amount, raw_balance in parsed:
             balance = _parse_fr(raw_balance)
             if description.lower() in self._BALANCE_MARKERS:
                 prev_balance = balance
                 continue
-
             magnitude = _parse_fr(raw_amount)
-            if prev_balance is not None and magnitude != 0:
-                sign = 1.0 if round(balance - prev_balance, 4) >= 0 else -1.0
-            else:
-                sign = 1.0
-
+            # ASSET logic: Inflow (+) / Outflow (-)
+            sign = 1.0 if prev_balance is not None and round(balance - prev_balance, 4) >= 0 else -1.0
             prev_balance = balance
-            rows.append({
-                'date': tx_date,
-                'description': description,
-                'amount': magnitude * sign,
-                'account_number': account_number,
-                'inferred_product_type': product_type,
-            })
+            rows.append({'date': tx_date, 'description': description, 'amount': magnitude * sign, 'account_number': account_number, 'inferred_product_type': product_type})
+        return pd.DataFrame(rows)
 
-        return pd.DataFrame(rows) if rows else None
-
-    # ------------------------------------------------------------------
-    # process_dataframe — satisfies ABC contract but is never called
-    # because extract() is fully overridden above.
-    # ------------------------------------------------------------------
-
-    def process_dataframe(
-        self, df: pd.DataFrame, statement_year: int, statement_month: int
-    ) -> tuple[pd.DataFrame, bool]:
-        raise NotImplementedError(
-            "TangerineExtractor overrides extract() directly and does not use process_dataframe."
-        )
+    def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> tuple[pd.DataFrame, bool]:
+        raise NotImplementedError("TangerineExtractor overrides extract() directly.")
