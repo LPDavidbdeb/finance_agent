@@ -163,13 +163,17 @@ status_line() {
 }
 
 start_all() {
+  local backend_port
+  backend_port=$(grep "^BACKEND_PORT=" "$ROOT_DIR/.env.local" | cut -d'=' -f2 || echo "8001")
+  backend_port=${backend_port:-8001}
+
   start_redis
-  start_bg_process "Django" "$DJANGO_PID" "$LOG_DIR/django.log" "$ROOT_DIR" "$ROOT_DIR/venv/bin/python manage.py runserver"
+  start_bg_process "Django" "$DJANGO_PID" "$LOG_DIR/django.log" "$ROOT_DIR" "$ROOT_DIR/venv/bin/python manage.py runserver $backend_port"
   start_bg_process "Celery" "$CELERY_PID" "$LOG_DIR/celery.log" "$ROOT_DIR" "$ROOT_DIR/venv/bin/celery -A finance_backend worker -l info"
   start_bg_process "Vite" "$VITE_PID" "$LOG_DIR/vite.log" "$ROOT_DIR/frontend" "npm run dev -- --host 0.0.0.0 --port 5173"
 
   echo ""
-  echo "Services started. Logs are in $LOG_DIR"
+  echo "Services started. Logs are in $LOG_DIR (Port: $backend_port)"
 }
 
 stop_all() {

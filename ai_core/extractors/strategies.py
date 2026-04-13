@@ -134,7 +134,25 @@ class VisaDesjardinsExtractor(BasePDFExtractor):
         df_clean['description'] = descriptions.str.strip()
 
         raw_amount = df_clean[amount_col].astype(str)
-        has_cr = raw_amount.str.contains(r'\bCR\b', case=False, regex=True)
+        
+        # 1. Surgical CR detection: at the end of amount OR in the immediate next column
+        has_cr = raw_amount.str.strip().str.endswith('CR') | raw_amount.str.strip().str.endswith('cr')
+        
+        try:
+            amount_col_idx = df_clean.columns.get_loc(amount_col)
+            if amount_col_idx + 1 < len(df_clean.columns):
+                next_col_val = df_clean.iloc[:, amount_col_idx + 1].astype(str).str.strip()
+                has_cr = has_cr | (next_col_val == 'CR') | (next_col_val == 'cr')
+        except:
+            pass
+
+        # 2. Bonidollars hint: If there are bonidollars, it's NOT a refund (usually)
+        boni_col = next((col for col in df_clean.columns if 'BONI' in col), None)
+        if boni_col:
+            has_boni = df_clean[boni_col].astype(str).str.contains('%', na=False)
+            # If it has Boni, it's NOT a credit, even if we thought we saw CR
+            has_cr = has_cr & ~has_boni
+
         has_minus = raw_amount.str.contains('-', regex=False)
 
         amount_magnitude = (
@@ -178,19 +196,30 @@ class MasterCardWealthSimpleExtractor(BasePDFExtractor):
         return df
 
     def clean_amount_col(self, cash_col_name_list, df):
-        caracter_list = ["$", ",", '-']
+        caracter_list = ["$", " "]
         for col_name in cash_col_name_list:
             amount_list = []
             for amount in df[col_name]:
                 if pd.notna(amount) and amount != "":
-                    amount = str(amount)
+                    amount = str(amount).strip()
+                    # Handle "1 661,24 $" or "-1 661,24 $" or "1,661.24 $" (standard)
+                    # 1. Remove currency and spaces
                     for caracter in caracter_list:
                         amount = amount.replace(caracter, "")
+                    
+                    # 2. If there's a comma AND no dot, replace comma with dot
+                    if ',' in amount and '.' not in amount:
+                        amount = amount.replace(',', '.')
+                    # 3. If there's a comma AND a dot, it's thousands (e.g., 1,234.56), so strip comma
+                    elif ',' in amount and '.' in amount:
+                        amount = amount.replace(',', '')
+                    
                     try:
                         amount = float(amount)
                     except:
                         try:
-                            amount = float(amount[1:])
+                            # Try again stripping leading non-digit chars if float fails
+                            amount = float(re.sub(r'^[^\d-]+', '', amount))
                         except:
                             amount = 0.0
                 else:
@@ -266,185 +295,207 @@ class CompteDesjardinsExtractor(BasePDFExtractor):
 
     def to_date(self, date_str, statement_year, statement_month):
         from datetime import datetime
+        # Extended dictionary to support both full and short French month names
         date_dict = {
-            "MAI": 5, 'JUN': 6, 'JUL': 7, 'AOU': 8, 'SEP': 9, 'OCT': 10,
-            'NOV': 11, 'DEC': 12, 'JAN': 1, "FEV": 2, "MAR": 3, "AVR": 4,
-            "JUIN": 6, "JUIL": 7, "AOÛT": 8, "SEPT": 9, "FÉV": 2
+            "JAN": 1, "JANV": 1, "JANVIER": 1,
+            "FEB": 2, "FEV": 2, "FÉV": 2, "FÉVR": 2, "FÉVRIER": 2,
+            "MAR": 3, "MARS": 3,
+            "APR": 4, "AVR": 4, "AVRI": 4, "AVRIL": 4,
+            "MAY": 5, "MAI": 5,
+            "JUN": 6, "JUIN": 6,
+            "JUL": 7, "JUIL": 7, "JUILLET": 7,
+            "AUG": 8, "AOU": 8, "AOÛ": 8, "AOÛT": 8,
+            "SEP": 9, "SEPT": 9, "SEPTEMBRE": 9,
+            "OCT": 10, "OCTO": 10, "OCTOBRE": 10,
+            "NOV": 11, "NOVE": 11, "NOVEMBRE": 11,
+            "DEC": 12, "DÉC": 12, "DÉCE": 12, "DÉCEMBRE": 12
         }
 
-        if isinstance(date_str, str) and date_str != "":
-            d_m = date_str.split()
-            try:
-                d = int(d_m[0])
-                m = date_dict[d_m[1]]
-                year = statement_year - 1 if (statement_month == 1 and m == 12) else statement_year
-                return datetime(year, m, d)
-            except Exception:
-                return None
+        if isinstance(date_str, str) and date_str.strip() != "":
+            parts = date_str.strip().split()
+            if len(parts) >= 2:
+                try:
+                    d = int(parts[0])
+                    m_str = parts[1].upper().replace('.', '')
+                    m = date_dict.get(m_str)
+                    if m:
+                        year = statement_year - 1 if (statement_month == 1 and m == 12) else statement_year
+                        return datetime(year, m, d)
+                except Exception:
+                    pass
+            elif len(parts) == 1:
+                # Fallback: only day provided (e.g. "31")
+                try:
+                    d = int(parts[0])
+                    return datetime(statement_year, statement_month, d)
+                except:
+                    pass
         return None
 
-    def set_col_to_numeric(self, df, col_list):
-        for col in col_list:
-            if col not in df.columns: continue
-            df[col] = df[col].apply(lambda x: x.replace(' ', '') if isinstance(x, str) else x)
-            df[col] = df[col].apply(lambda x: x.replace(',', '') if isinstance(x, str) else x)
-            try:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-            except Exception:
-                pass
-
-    def process_compte_operations_courrantes(self, df, statement_year, statement_month):
-        df_copy = df.copy()
-        df_copy.columns = [str(c).strip() for c in df_copy.columns]
+    def _clean_amount(self, val):
+        if pd.isna(val) or val == "" or val == "None":
+            return 0.0
+        s = str(val).strip().replace(' ', '').replace('$', '').replace('\xa0', '')
+        if not s:
+            return 0.0
+        # Handle French decimal comma
+        if ',' in s and '.' not in s:
+            s = s.replace(',', '.')
+        elif ',' in s and '.' in s:
+            s = s.replace(',', '')
+        
+        # Handle 'CR' suffix
+        is_credit = 'CR' in s.upper()
+        s = s.upper().replace('CR', '').replace('-', '')
         
         try:
-            Unnamed_col_index = df_copy.columns.to_list().index('Unnamed: 0')
-            if Unnamed_col_index == 3:
-                df_copy = df_copy.drop(['Unnamed: 0', 'Description'], axis=1)
-                df_copy = df_copy.rename(columns={'Code': 'Description'})
-                if 'Date' in df_copy.columns:
-                    df_copy = df_copy.loc[~((df_copy['Description'] == 'Solde reporté') | df_copy['Date'].isna())]
-                df_copy["Code"] = df_copy["Description"].str.split().str[0]
-                df_copy['Code'] = df_copy['Code'].replace('IVMWVirement', 'IVMW')
-                df_copy['Description'] = df_copy.apply(
-                    lambda row: row['Description'].replace(row['Code'], '') if pd.notna(row['Description']) and pd.notna(
-                        row['Code']) else None, axis=1)
-            elif Unnamed_col_index == 2:
-                df_copy = df_copy.drop('Description', axis=1)
-                df_copy = df_copy.rename(columns={'Unnamed: 0': 'Description'})
-                if 'Date' in df_copy.columns:
-                    df_copy = df_copy.loc[~((df_copy['Description'] == 'Solde reporté') | df_copy['Date'].isna())]
-        except (ValueError, KeyError):
-            pass
-
-        self.set_col_to_numeric(df_copy, ['Retrait', 'Dépôt', 'Solde'])
-        if 'Date' in df_copy.columns:
-            df_copy["Date"] = df_copy["Date"].apply(lambda d: self.to_date(d, statement_year, statement_month))
-        
-        df_copy = df_copy.rename(columns={"Solde": "SOLDE", "Date": "DATE", "Retrait": "DEBIT", "Dépôt": "CREDIT",
-                                "Description": "DESCRIPTION"})
-        return df_copy
-
-    def process_compte_celi(self, df, statement_year, statement_month):
-        df_copy = df.copy()
-        column_names = df_copy.columns.to_list()
-        nombre_de_colone = len(column_names)
-        new_row = pd.DataFrame([column_names], columns=column_names)
-        df_copy = pd.concat([new_row, df_copy], ignore_index=True)
-
-        if nombre_de_colone == 5:
-            df_copy.columns = ['Date', 'Code', 'Description', 'Transaction', 'Solde']
-            df_copy["Solde"] = pd.to_numeric(df_copy["Solde"].astype(str).str.replace(" ", ""), errors='coerce')
-            df_copy["Solde"] = df_copy["Solde"].fillna(0)
-            difference = df_copy["Solde"].diff()
-            df_copy = df_copy.replace(to_replace=r'.*Unnamed.*', value='', regex=True)
-
-            liste_de_depot, liste_de_retrait = [], []
-            for k, v in df_copy.iterrows():
-                if v["Description"] != "Solde reporté" and v["Description"] != "Fermeture de compte":
-                    if difference[k] > 0:
-                        liste_de_depot.append(v['Transaction'])
-                        liste_de_retrait.append(0)
-                    elif difference[k] < 0:
-                        liste_de_depot.append(0)
-                        liste_de_retrait.append(v['Transaction'])
-                    else:
-                        liste_de_depot.append(0); liste_de_retrait.append(0)
-                else:
-                    liste_de_depot.append(0); liste_de_retrait.append(0)
-
-            df_copy['Retrait'], df_copy['Dépôt'] = liste_de_retrait, liste_de_depot
-            df_copy = df_copy.drop('Transaction', axis=1)
-        elif nombre_de_colone == 6:
-            df_copy.columns = ['Date', 'Code', 'Description', 'Retrait', 'Dépôt', 'Solde']
-
-        self.set_col_to_numeric(df_copy, ['Retrait', 'Dépôt'])
-        if 'Date' in df_copy.columns:
-            df_copy["Date"] = df_copy["Date"].apply(lambda d: self.to_date(d, statement_year, statement_month))
-        
-        if 'Description' in df_copy.columns and 'Date' in df_copy.columns:
-            df_copy = df_copy.loc[~((df_copy['Description'] == 'Solde reporté') | df_copy['Date'].isna())]
-            
-        df_copy = df_copy.rename(columns={"Solde": "SOLDE", "Date": "DATE", "Retrait": "DEBIT", "Dépôt": "CREDIT",
-                                "Description": "DESCRIPTION"})
-        return df_copy
-
-    def process_legacy(self, df, statement_year, statement_month) -> pd.DataFrame:
-        cols = [str(c).upper() for c in df.columns]
-        if 'RETRAIT' in cols and 'DÉPÔT' in cols:
-            df_legacy = self.process_compte_operations_courrantes(df, statement_year, statement_month)
-        else:
-            df_legacy = self.process_compte_celi(df, statement_year, statement_month)
-
-        if df_legacy.empty:
-            return pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier'])
-
-        # CHECKING/SAVINGS is ASSET logic: Dépôt (+) / Retrait (-)
-        df_legacy['amount'] = df_legacy['CREDIT'].fillna(0) - df_legacy['DEBIT'].fillna(0)
-        df_legacy.rename(columns={'DATE': 'date', 'DESCRIPTION': 'description'}, inplace=True)
-        df_legacy['account_identifier'] = df_legacy['description'].apply(
-            lambda x: 'SAVINGS' if any(k in str(x).upper() for k in ['CELI', 'EPARGNE']) else 'CHECKING'
-        )
-        return df_legacy[['date', 'description', 'amount', 'account_identifier']]
-
-    def process_dynamic(self, df, statement_year, statement_month) -> pd.DataFrame:
-        df.columns = [str(c).upper() for c in df.columns]
-        date_col = next((c for c in df.columns if 'DATE' in c), None)
-        desc_col = next((c for c in df.columns if 'DESCRIPTION' in c), None)
-        debit_col = next((c for c in df.columns if 'RETRAIT' in c), None)
-        credit_col = next((c for c in df.columns if 'DÉPÔT' in c or 'DEPOT' in c), None)
-        frais_col = next((c for c in df.columns if 'FRAIS' in c), None)
-
-        if not date_col or not desc_col: return pd.DataFrame()
-
-        df_dyn = df.copy()
-        df_dyn['date'] = df_dyn[date_col].apply(lambda d: self.to_date(d, statement_year, statement_month))
-        df_dyn = df_dyn.dropna(subset=['date'])
-        
-        for col in [debit_col, credit_col, frais_col]:
-            if col:
-                df_dyn[col] = pd.to_numeric(df_dyn[col].astype(str).str.replace('[ ,$]', '', regex=True), errors='coerce').fillna(0)
-
-        debit_val = df_dyn[debit_col] if debit_col else 0
-        credit_val = df_dyn[credit_col] if credit_col else 0
-        frais_val = df_dyn[frais_col] if frais_col else 0
-        
-        # ASSET logic: Inflow (+) / Outflow (-)
-        df_dyn['amount'] = credit_val - debit_val - frais_val
-        df_dyn['description'] = df_dyn[desc_col]
-        df_dyn['account_identifier'] = df_dyn['description'].apply(
-            lambda x: 'SAVINGS' if any(k in str(x).upper() for k in ['CELI', 'EPARGNE']) else 'CHECKING'
-        )
-        return df_dyn[['date', 'description', 'amount', 'account_identifier']]
+            magnitude = float(s)
+            return -magnitude if is_credit else magnitude
+        except ValueError:
+            # Try to extract the first number found in string
+            import re
+            match = re.search(r'[\d.]+', s)
+            if match:
+                try:
+                    magnitude = float(match.group())
+                    return -magnitude if is_credit else magnitude
+                except:
+                    pass
+        return 0.0
 
     def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> tuple[pd.DataFrame, bool]:
-        import logging
-        logger = logging.getLogger(__name__)
+        df_work = df.copy()
+        # Clean columns: uppercase, no newlines, no whitespace
+        df_work.columns = [str(c).upper().replace('\r', ' ').replace('\n', ' ').strip() for c in df_work.columns]
+        
+        # 1. Identify key columns
+        date_col = next((c for c in df_work.columns if 'DATE' in c), None)
+        desc_col = next((c for c in df_work.columns if 'DESCRIPTION' in c or 'UNNAMED: 0' in c), None)
+        # If both Unnamed: 0 and Description exist, prefer Description for text, but watch for shifts
+        if 'DESCRIPTION' in df_work.columns and 'UNNAMED: 0' in df_work.columns:
+            desc_col = 'UNNAMED: 0' # In Desjardins PDFs, Unnamed: 0 often holds the actual text
+            
+        retrait_col = next((c for c in df_work.columns if 'RETRAIT' in c or 'CHARGED' in c), None)
+        depot_col = next((c for c in df_work.columns if 'DÉPÔT' in c or 'DEPOT' in c or 'CREDIT' in c), None)
+        frais_col = next((c for c in df_work.columns if 'FRAIS' in c), None)
+        transaction_col = next((c for c in df_work.columns if 'TRANSACTION' in c), None)
+        
+        # 2. Extract rows
+        rows = []
+        df_list = df_work.to_dict('records')
+        i = 0
+        while i < len(df_list):
+            row = df_list[i]
+            
+            # Try to find a date in ANY column
+            parsed_date = None
+            date_found_in_col = None
+            
+            for c in df_work.columns:
+                parsed_date = self.to_date(str(row[c]), statement_year, statement_month)
+                if parsed_date:
+                    date_found_in_col = c
+                    break
+            
+            if not parsed_date:
+                i += 1
+                continue
+                
+            # Description discovery
+            description = "Unknown"
+            text_candidates = []
+            for c in df_work.columns:
+                if c == date_found_in_col: continue
+                val = str(row[c]).strip()
+                if val and val.lower() != 'nan':
+                    alpha_count = sum(1 for char in val if char.isalpha())
+                    text_candidates.append((c, val, alpha_count))
+            text_candidates.sort(key=lambda x: x[2], reverse=True)
+            if text_candidates:
+                if text_candidates[0][2] <= 3 and len(text_candidates) > 1 and text_candidates[1][2] > 0:
+                    description = f"{text_candidates[0][1]} {text_candidates[1][1]}".strip()
+                else:
+                    description = text_candidates[0][1]
+            
+            if any(k in description.upper() for k in ['SOLDE REPORTÉ', 'SOLDE REPORTER']):
+                i += 1
+                continue
 
-        try:
-            df_legacy = self.process_legacy(df.copy(), statement_year, statement_month)
-        except Exception as e:
-            logger.error(f"Legacy extraction failed: {e}")
-            df_legacy = pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier'])
+            # Amounts discovery
+            retrait = self._clean_amount(row.get(retrait_col)) if retrait_col else 0.0
+            depot = self._clean_amount(row.get(depot_col)) if depot_col else 0.0
+            frais = self._clean_amount(row.get(frais_col)) if frais_col else 0.0
+            
+            # --- LOOK AHEAD for multi-line transactions ---
+            # If all amounts are 0 and there's a next row, check if the next row has the amount
+            if retrait == 0 and depot == 0 and frais == 0 and i + 1 < len(df_list):
+                next_row = df_list[i+1]
+                # A row is a candidate if it doesn't have its own date
+                has_own_date = any(self.to_date(str(next_row[c]), statement_year, statement_month) for c in df_work.columns)
+                
+                if not has_own_date:
+                    # Look for amounts in the next row
+                    n_retrait = self._clean_amount(next_row.get(retrait_col)) if retrait_col else 0.0
+                    n_depot = self._clean_amount(next_row.get(depot_col)) if depot_col else 0.0
+                    n_frais = self._clean_amount(next_row.get(frais_col)) if frais_col else 0.0
+                    
+                    if n_retrait != 0 or n_depot != 0 or n_frais != 0:
+                        retrait, depot, frais = n_retrait, n_depot, n_frais
+                        # Also merge description if the next row has text
+                        next_text = " ".join([str(next_row[c]) for c in df_work.columns if str(next_row[c]).lower() != 'nan' and not str(next_row[c]).replace('.','').isdigit()])
+                        if len(next_text.strip()) > 2:
+                            description = f"{description} {next_text.strip()}".strip()
+                        i += 1 # Consume the next row
+                    else:
+                        # Search the entire next row for ANY number if standard cols are empty
+                        for c in df_work.columns:
+                            val = self._clean_amount(next_row[c])
+                            if val != 0:
+                                # Heuristic: skip if it's the last column (likely SOLDE)
+                                if list(df_work.columns).index(c) == len(df_work.columns) - 1:
+                                    continue
+                                if val > 0: depot = val
+                                else: retrait = abs(val)
+                                # Merge text from next row
+                                next_text = " ".join([str(next_row[col]) for col in df_work.columns if col != c and str(next_row[col]).lower() != 'nan'])
+                                description = f"{description} {next_text.strip()}".strip()
+                                i += 1 # Consume
+                                break
 
-        try:
-            df_dynamic = self.process_dynamic(df.copy(), statement_year, statement_month)
-        except Exception as e:
-            logger.error(f"Dynamic extraction failed: {e}")
-            df_dynamic = pd.DataFrame()
+            # If still 0, look for ANY number in current row
+            if retrait == 0 and depot == 0 and frais == 0:
+                for c in df_work.columns:
+                    if c == date_found_in_col: continue
+                    val = self._clean_amount(row[c])
+                    if val != 0:
+                        if list(df_work.columns).index(c) == len(df_work.columns) - 1:
+                            continue
+                        if val > 0: depot = val
+                        else: retrait = abs(val)
+                        break
 
-        legacy_count, dynamic_count = len(df_legacy), len(df_dynamic)
-        legacy_sum = df_legacy['amount'].sum() if not df_legacy.empty else 0
-        dynamic_sum = df_dynamic['amount'].sum() if not df_dynamic.empty else 0
+            # ASSET logic: Inflow (+) / Outflow (-)
+            amount = depot - retrait - frais
+            
+            # Skip purely informational $0.00 transactions
+            if amount == 0:
+                i += 1
+                continue
 
-        mismatch = False
-        if legacy_count != dynamic_count or abs(legacy_sum - dynamic_sum) > 0.01:
-            logger.warning(f"SHADOW MODE MISMATCH: Legacy found {legacy_count} rows (Sum: {legacy_sum}), Dynamic found {dynamic_count} rows (Sum: {dynamic_sum}).")
-            mismatch = True
-        else:
-            logger.info("SHADOW MODE MATCH: Both extractors yielded identical high-level results.")
+            rows.append({
+                'date': parsed_date,
+                'description': description,
+                'amount': amount,
+                'account_identifier': 'SAVINGS' if any(k in description.upper() for k in ['CELI', 'EPARGNE']) else 'CHECKING'
+            })
+            i += 1
 
-        return df_legacy, mismatch
+        res_df = pd.DataFrame(rows)
+        if res_df.empty:
+            return pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier']), False
+            
+        return res_df, False
+
 
 
 class TangerineExtractor(BasePDFExtractor):

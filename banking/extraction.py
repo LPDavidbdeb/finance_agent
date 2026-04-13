@@ -1,3 +1,4 @@
+from django.db import models, transaction
 from .models import BankStatementImport, StagedTransaction, FinancialProduct
 from .services import approve_staged_transaction, provision_financial_product
 from ai_core.extractors.factory import PDFExtractorFactory
@@ -71,6 +72,17 @@ def get_statement_date_from_pdf(pdf_path: str) -> tuple[int, int]:
                 match4 = re.search(pattern4, text)
                 if match4:
                     return int(match4.group(1)), int(match4.group(2))
+
+                # Pattern 5: French Wealthsimple (DD mois - DD mois YYYY)
+                # Example: "1 mars - 31 mars 2026" or "1 mars — 31 mars 2026"
+                pattern5 = r'\d{1,2}\s+([a-zA-ZûéÉÀàâÂêÊîÎôÔûÛëËïÏüÜ]+)\s+[-—]\s+\d{1,2}\s+[a-zA-ZûéÉÀàâÂêÊîÎôÔûÛëËïÏüÜ]+\s+(\d{4})'
+                match5 = re.search(pattern5, text, re.IGNORECASE)
+                if match5:
+                    month_name = match5.group(1).lower()
+                    month = MONTH_MAP.get(month_name)
+                    year = int(match5.group(2))
+                    if month:
+                        return year, month
     except Exception as e:
         logger.warning(f"Failed to extract date from PDF {pdf_path}: {e}")
     
@@ -238,7 +250,10 @@ def extract_transactions_from_statement(import_id: int, user):
         if staged_transactions:
             StagedTransaction.objects.bulk_create(staged_transactions, batch_size=1000)
 
-        # Auto-approve transactions with a predicted account
+        # --- Step 5: Automated Routing & Staging Control ---
+        # 1. Immediate Auto-Approval for Mapped Transactions
+        # Any transaction that matched a Merchant Rule and has a predicted_account
+        # is routed directly to its destination.
         auto_approve_queryset = StagedTransaction.objects.filter(
             statement_import_id=import_id,
             predicted_account__isnull=False,
@@ -253,76 +268,74 @@ def extract_transactions_from_statement(import_id: int, user):
                     user=user
                 )
             except (PermissionError, ValueError) as e:
-                logger.warning(f"Auto-approval skipped for transaction {tx.id}: {str(e)}")
+                logger.warning(f"[AUTO-ROUTE] Skipped mapped tx {tx.id}: {str(e)}")
             except Exception as e:
-                logger.exception(f"Unexpected error during auto-approval for transaction {tx.id}: {str(e)}")
+                logger.exception(f"[AUTO-ROUTE] Critical failure for mapped tx {tx.id}")
 
-        # Historical auto-routing: for statements older than 2 months, route all
-        # remaining unprocessed transactions rather than leaving them in staging.
-        cutoff_date = date.today() - relativedelta(months=2)
-        statement_date = statement_import.document_date
+        # 2. Age-Based Routing for Unmapped Transactions
+        # Unmapped transactions < 3 months old stay in staging for manual review.
+        # Unmapped transactions >= 3 months old are auto-routed to fallbacks to keep the queue clean.
+        
+        cutoff_date = date.today() - relativedelta(months=3)
+        
+        # Resolve family for fallback account lookups
+        if statement_import.financial_product:
+            family = statement_import.financial_product.family
+        else:
+            first_product = FinancialProduct.objects.filter(institution=institution).first()
+            family = first_product.family if first_product else None
 
-        if statement_date and statement_date < cutoff_date:
-            from django.db import models
-            if statement_import.financial_product:
-                family = statement_import.financial_product.family
-            else:
-                # Multi-product import: derive family from the first product under the institution.
-                first_product = FinancialProduct.objects.filter(institution=institution).first()
-                family = first_product.family if first_product else None
+        # Resolve fallback accounts
+        def get_fallback(name):
+            return Account.objects.filter(
+                models.Q(family=family) | models.Q(family__isnull=True),
+                name__iexact=name
+            ).first()
 
-            # Look up the fallback accounts (Global or Family-Specific)
-            def get_fallback(name):
-                return Account.objects.filter(
-                    models.Q(family=family) | models.Q(family__isnull=True),
-                    name__iexact=name
-                ).first()
+        acc_transfers = get_fallback('Internal Transfers')
+        acc_expenses = get_fallback('UNCATEGORIZED EXPENSES')
+        acc_revenus = get_fallback('UNCATEGORIZED REVENUS')
 
-            acc_transfers = get_fallback('Internal Transfers')
-            acc_expenses = get_fallback('UNCATEGORIZED EXPENSES')
-            acc_revenus = get_fallback('UNCATEGORIZED REVENUS')
+        remaining_unmapped = StagedTransaction.objects.filter(
+            statement_import=statement_import,
+            status=StagedTransaction.Status.UNPROCESSED,
+            bank_date__lt=cutoff_date
+        )
 
-            remaining = StagedTransaction.objects.filter(
-                statement_import=statement_import,
-                status=StagedTransaction.Status.UNPROCESSED
-            )
-            for tx in remaining:
-                try:
-                    # 1. Determine destination based on description and sign
-                    target = acc_expenses # Default
-                    desc_upper = tx.raw_description.upper()
-                    is_transfer = any(k in desc_upper for k in ['PAIEMENT', 'PRÉLÈVEMENT', 'VIREMENT', 'TRANSFER'])
-                    
-                    if is_transfer and acc_transfers:
-                        target = acc_transfers
+        for tx in remaining_unmapped:
+            try:
+                # Handle zero-amount noise
+                if tx.amount == 0:
+                    tx.delete()
+                    continue
+
+                # Determine destination based on description and sign
+                target = acc_expenses # Default
+                desc_upper = tx.raw_description.upper()
+                is_transfer = any(k in desc_upper for k in ['PAIEMENT', 'PRÉLÈVEMENT', 'VIREMENT', 'TRANSFER', 'PYMT'])
+                
+                if is_transfer and acc_transfers:
+                    target = acc_transfers
+                else:
+                    # Inflow vs Outflow logic
+                    is_inflow = False
+                    p_type = tx.financial_product.product_type if tx.financial_product else 'CHECKING'
+                    if p_type == 'CREDIT_CARD':
+                        is_inflow = tx.amount < 0
                     else:
-                        # Determine if it's an inflow (Revenue) or outflow (Expense)
-                        # Based on our verified logic:
-                        # Asset (Checking/WS): Inflow is Positive
-                        # Liability (Visa): Inflow (Payment/Refund) is Negative
-                        is_inflow = False
-                        p_type = tx.financial_product.product_type if tx.financial_product else 'CHECKING'
-                        
-                        if p_type == 'CREDIT_CARD':
-                            is_inflow = tx.amount < 0
-                        else:
-                            is_inflow = tx.amount > 0
-                        
-                        if is_inflow and acc_revenus:
-                            target = acc_revenus
+                        is_inflow = tx.amount > 0
+                    
+                    if is_inflow and acc_revenus:
+                        target = acc_revenus
 
-                    if not target:
-                        continue
-
+                if target:
                     approve_staged_transaction(
                         transaction_id=tx.id,
                         target_account_id=target.id,
                         user=user
                     )
-                except (PermissionError, ValueError) as e:
-                    logger.warning(f"Historical auto-routing skipped for tx {tx.id}: {str(e)}")
-                except Exception as e:
-                    logger.exception(f"Unexpected error during historical auto-routing for tx {tx.id}: {str(e)}")
+            except Exception as e:
+                logger.warning(f"[AUTO-ROUTE] Skipped old unmapped tx {tx.id}: {str(e)}")
 
         statement_import.processed_by_python = True
         statement_import.status = BankStatementImport.Status.COMPLETED

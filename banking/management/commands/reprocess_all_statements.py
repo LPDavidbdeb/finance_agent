@@ -1,10 +1,9 @@
-from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
+from django.core.management.base import BaseCommand
 from django.db.models import Q
 from users.models import Family
 from banking.models import BankStatementImport, StagedTransaction
 from banking.extraction import extract_transactions_from_statement
-import logging
+from banking.consistency import build_transaction_consistency_report, render_transaction_consistency_report
 
 class Command(BaseCommand):
     help = "Reprocesses all BankStatementImport records to recreate StagedTransactions and Ledger entries."
@@ -119,8 +118,7 @@ class Command(BaseCommand):
                     stmt.save(update_fields=['institution', 'financial_product'])
 
                 # Reset status so extraction runs cleanly
-                stmt.status = BankStatementImport.Status.STAGED
-                stmt.save(update_fields=['status'])
+                BankStatementImport.objects.filter(id=stmt.id).update(status=BankStatementImport.Status.STAGED)
 
                 extract_transactions_from_statement(stmt.id, user)
 
@@ -140,3 +138,19 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"\nREPROCESS COMPLETE."))
         self.stdout.write(f"  Processed: {processed_count}")
         self.stdout.write(f"  Failed:    {failed_count}")
+
+        # Post-run consistency analysis for the exact statement scope that was processed.
+        consistency_report = build_transaction_consistency_report(statements_to_process)
+        self.stdout.write("\n" + "=" * 80)
+        for line in render_transaction_consistency_report(consistency_report):
+            self.stdout.write(line)
+
+        if consistency_report.is_clean:
+            self.stdout.write(self.style.SUCCESS("  Routing and ledger integrity checks passed."))
+        else:
+            self.stdout.write(
+                self.style.WARNING(
+                    "  Some consistency issues were detected; inspect the counts above."
+                )
+            )
+

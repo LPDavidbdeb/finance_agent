@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { fetchStatementImport, fetchStatementImportTransactions } from '../api/client';
+import { fetchStatementImport, fetchStatementImportTransactions, BASE_URL } from '../api/client';
 import { Loader2, ArrowLeft, FileText, Download, ExternalLink, AlertCircle, CheckCircle2, Clock, ChevronUp, ChevronDown } from 'lucide-react';
 
 interface StagedTransaction {
@@ -149,7 +149,7 @@ export const StatementDetail: React.FC = () => {
   };
 
   const pdfUrl = statement.file_url 
-    ? (statement.file_url.startsWith('http') ? statement.file_url : `http://localhost:8000${statement.file_url}`)
+    ? (statement.file_url.startsWith('http') ? statement.file_url : `${BASE_URL}${statement.file_url}`)
     : null;
 
   const SortIcon = ({ column }: { column: keyof StagedTransaction }) => {

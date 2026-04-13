@@ -1,7 +1,6 @@
-const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const API_URL = isDevelopment 
-  ? "http://localhost:8001/api" 
-  : `http://${window.location.hostname}:8001/api`;
+// Centralized API configuration from environment variables
+export const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8001/api`;
+export const BASE_URL = import.meta.env.VITE_BASE_URL || `http://${window.location.hostname}:8001`;
 
 // Helper to get the auth header
 function getAuthHeader() {

@@ -145,6 +145,7 @@ def batch_upload_statements(request, product_id: int, files: List[UploadedFile] 
 
             statement = BankStatementImport.objects.create(
                 financial_product=product,
+                institution=product.institution,
                 file=file,
                 file_hash=file_hash,
                 status=BankStatementImport.Status.STAGED,
@@ -258,6 +259,7 @@ def upload_statement(request, product_id: int, file: File[UploadedFile], documen
 
         statement = BankStatementImport.objects.create(
             financial_product=product,
+            institution=product.institution,
             file=file,
             file_hash=file_hash,
             document_date=document_date,
