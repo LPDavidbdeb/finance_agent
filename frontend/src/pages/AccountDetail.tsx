@@ -11,7 +11,7 @@ import {
   ArrowLeft, Store, Layers, Loader2,
   TrendingUp, TrendingDown, Zap,
   Activity, BarChart3, Calendar, ChevronRight,
-  ArrowRightLeft, PlusCircle, X
+  ArrowRightLeft, PlusCircle, X, FileText
 } from 'lucide-react';
 import { InlineReroutePanel, RerouteMerchant } from '../components/InlineReroutePanel';
 import { CreateRuleModal } from '../components/CreateRuleModal';
@@ -176,13 +176,21 @@ const BannerTable: React.FC<BannerTableProps> = ({ transactions, flatAccounts, m
                             <th className="px-4 py-2 text-left font-bold uppercase tracking-wider">From</th>
                             <th className="px-4 py-2 text-left font-bold uppercase tracking-wider">Routed To</th>
                             <th className="px-4 py-2 text-right font-bold uppercase tracking-wider">Amount</th>
+                            <th className="px-4 py-2 text-center font-bold uppercase tracking-wider">Stmt</th>
                             <th className="px-4 py-2 text-right font-bold uppercase tracking-wider">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {banner.txs.map((tx: any) => (
                             <React.Fragment key={tx.journal_entry_id}>
-                              <tr className="hover:bg-white transition-colors">
+                              <tr 
+                                className={`hover:bg-white transition-colors ${tx.statement_id ? 'cursor-pointer' : ''}`}
+                                onClick={() => {
+                                  if (tx.statement_id) {
+                                    window.open(`/dashboard/statements/${tx.statement_id}?highlight=${tx.journal_entry_id}`, '_blank');
+                                  }
+                                }}
+                              >
                                 <td className="px-10 py-2.5 font-mono text-slate-500">{tx.date}</td>
                                 <td className="px-4 py-2.5 text-slate-600">{tx.source_account}</td>
                                 <td className="px-4 py-2.5">
@@ -193,18 +201,30 @@ const BannerTable: React.FC<BannerTableProps> = ({ transactions, flatAccounts, m
                                 <td className="px-4 py-2.5 text-right font-mono font-black text-slate-900">
                                   ${tx.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                 </td>
-                                <td className="px-4 py-2.5 text-right">
+                                <td className="px-4 py-2.5 text-center">
+                                  {tx.statement_id && (
+                                    <div className="text-slate-300 group-hover:text-blue-500">
+                                      <FileText className="h-3.5 w-3.5" />
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2.5 text-right" onClick={e => e.stopPropagation()}>
                                   <div className="flex items-center justify-end gap-1">
                                     <Button
                                       variant="outline"
                                       size="sm"
                                       className="h-6 text-[10px] gap-1 px-2"
-                                      onClick={() => { setRuleModalTx(tx); setReroutingEntry(null); }}
+                                      onClick={(e) => { 
+                                        e.stopPropagation();
+                                        setRuleModalTx(tx); 
+                                        setReroutingEntry(null); 
+                                      }}
                                     >
                                       <PlusCircle className="h-2.5 w-2.5" /> Rule
                                     </Button>
                                     <button
-                                      onClick={() => {
+                                      onClick={(e) => {
+                                        e.stopPropagation();
                                         setReroutingEntry(reroutingEntry === tx.journal_entry_id ? null : tx.journal_entry_id);
                                       }}
                                       className="p-1 rounded hover:bg-blue-100 text-slate-400 hover:text-blue-600 transition-colors border border-slate-200"
@@ -509,7 +529,7 @@ export const AccountDetail: React.FC = () => {
                 </CardHeader>
                 <CardContent className="pt-6">
                   <div className="h-[200px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                       <BarChart
                         data={sortedTrends}
                         onClick={(e: any) => {
@@ -631,7 +651,7 @@ export const AccountDetail: React.FC = () => {
             </CardHeader>
             <CardContent className="pt-6">
               <div className="h-[350px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                   <BarChart
                     data={chartData}
                     onClick={(data) => { if (data?.activeLabel) setSelectedMonth(data.activeLabel as string); }}

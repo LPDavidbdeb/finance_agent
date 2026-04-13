@@ -130,6 +130,7 @@ class AccountTransactionOut(Schema):
     routed_to: str
     routed_to_id: int
     institution_id: Optional[int] = None
+    statement_id: Optional[int] = None
 
 class RerouteIn(Schema):
     new_account_id: Optional[int] = None

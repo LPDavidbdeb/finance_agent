@@ -1,87 +1,66 @@
-# Nuclear Reset Command - FIXED
+# Nuclear Reset & Reseed Procedure
 
-## What It Does
+This document formalizes the standard procedure for wiping all transactional data and regenerating the ledger from source PDF statements. This is useful when extraction logic has been updated or when debugging data integrity issues.
 
-Safely deletes ALL transactional data from your accounting system:
-- ❌ Deletes all `JournalEntry` records
-- ❌ Deletes all `TransactionLine` records  
-- ❌ Deletes all `StagedTransaction` records
-- ✅ Keeps all PDFs in `/media/statements/`
-- ✅ Keeps all `BankStatementImport` records (just resets their status)
-- ✅ Keeps your account chart of accounts
+## ⚠️ Important: Scope
+- **DELETES**: All `JournalEntry`, `TransactionLine`, and `StagedTransaction` records.
+- **KEEPS**: 
+  - Source PDF files in `/media/statements/`
+  - `BankStatementImport` records (metadata only)
+  - Chart of Accounts (Account tree structure)
+  - Merchant Categorization Rules
+  - Family and User records
 
-## Usage
+---
 
-### Step 1: Dry Run (See what will be deleted)
+## Step 1: The Wipe (ledger_reset)
+This command clears the transactional slate. It handles dependencies correctly and resets database sequences so new transactions start from ID 1.
+After completion, it prints a post-reset consistency check so you can confirm the ledger was fully wiped.
+
+### 1.1 Dry Run (Recommended)
+Verify how many records will be affected without actually deleting them.
 ```bash
 python manage.py ledger_reset --dry-run
 ```
 
-Expected output:
-```
-Summary of records to be deleted:
-  TransactionLine:  XXXX
-  JournalEntry:     XXXX
-  StagedTransaction: XXXX
-
-DRY RUN COMPLETE. No data was mutated.
-```
-
-### Step 2: Execute (Actually delete everything)
+### 1.2 Execute
+Perform the destructive reset.
 ```bash
 python manage.py ledger_reset --confirm
 ```
 
-Expected output:
-```
-DESTRUCTIVE RESET STARTED...
-  Processing 709rueBeaudoin (dacbb90a-406b-4645-87d2-419645aead0a)...
-    - Deleted XXXX TransactionLines
-    - Deleted XXXX JournalEntries
-    - Deleted XXXX StagedTransactions
-    - Reset XX BankStatementImports to STAGED
+---
 
-RESET COMPLETE in X.XXs
-```
+## Step 2: The Reseed (reprocess_all_statements)
+This command goes through every `BankStatementImport` record, finds the associated PDF, and re-runs the entire extraction pipeline.
+When it finishes, it prints a consistency analysis covering:
+- auto-routed transactions matched by categorization rules
+- fallback-routed transactions older than 3 months
+- recent transactions left for manual review
+- zero-amount exceptions and any ledger integrity issues
 
-## Safety Features
+### Why this works:
+- It uses the latest **Extractor logic** (including fixed CR/Refund detection).
+- It applies the **3-Month Rule**:
+  - Transactions matched to rules are auto-approved to the ledger.
+  - Unmapped transactions **< 3 months old** stay in the Staging area for review.
+  - Unmapped transactions **>= 3 months old** are auto-approved to fallback accounts (UNCATEGORIZED) to keep the ledger complete.
 
-✅ Requires either `--dry-run` OR `--confirm` (not both, not neither)  
-✅ Uses atomic transactions (all-or-nothing per deletion step)  
-✅ Deletes in proper dependency order:
-  1. TransactionLine (foreign key to JournalEntry)
-  2. JournalEntry (foreign key from StagedTransaction)
-  3. StagedTransaction (links back to statement)
-  
-✅ Resets statement status to `STAGED` for re-processing  
-
-## After Reset
-
-Your database will be:
-- Empty of all transactional data
-- Ready for re-import from PDFs
-- All BankStatementImport records reset to `STAGED` status
-
-Then you can:
+### 2.1 Start Reprocessing
 ```bash
 python manage.py reprocess_all_statements
 ```
 
-to re-extract all transactions from PDFs.
-
 ---
 
-## The Fix Applied
+## Summary of Commands
+| Action | Command |
+| :--- | :--- |
+| **Reset** | `python manage.py ledger_reset --confirm` |
+| **Reseed** | `python manage.py reprocess_all_statements` |
 
-Changed line 79 from:
-```python
-status='PENDING'  # ❌ Invalid status value
-```
-
-To:
-```python
-status=BankStatementImport.Status.STAGED  # ✅ Valid enum value
-```
-
-This is now the nuclear option that actually works.
-
+## Specialized Reprocessing (Optional)
+If you only want to reprocess specific statements:
+- **By Family**: `python manage.py reprocess_all_statements --family-id <UUID>`
+- **By Date**: `python manage.py reprocess_all_statements --since 2025-01-01`
+- **Tangerine Only**: `python manage.py reprocess_all_statements --tangerine`

@@ -9,10 +9,12 @@ from decimal import Decimal
 from datetime import date
 
 import pandas as pd
+from dateutil.relativedelta import relativedelta
 
 from users.models import Family, FamilyMember
 from accounting.models import Account, JournalEntry, TransactionLine
 from banking.models import FinancialInstitution, FinancialProduct, BankStatementImport, StagedTransaction
+from banking.consistency import build_transaction_consistency_report
 from banking.services import approve_staged_transaction
 from banking.extraction import extract_transactions_from_statement
 from finance_backend.api import api
@@ -214,6 +216,106 @@ class ApproveStagedTransactionTest(TestCase):
 
         self.assertEqual(debit_line.account, visa_account)
         self.assertEqual(credit_line.account, checking_account)
+
+
+class TransactionConsistencyReportTest(TestCase):
+    def setUp(self):
+        self.family = Family.objects.create(name="Family Report")
+        self.user = User.objects.create_user(email="report@example.com", password="password", family=self.family)
+        self.member = FamilyMember.objects.create(
+            family=self.family,
+            first_name="Robin",
+            last_name="Report",
+            date_of_birth="1985-01-01",
+            sex="M",
+            role="PARENT",
+        )
+        self.institution = FinancialInstitution.objects.create(name="Report Bank")
+        self.source_account = Account.objects.create(
+            name="Report Checking",
+            account_type=Account.AccountType.ASSET,
+            family=self.family,
+        )
+        self.product = FinancialProduct.objects.create(
+            institution=self.institution,
+            family=self.family,
+            owner=self.member,
+            account=self.source_account,
+            product_type=FinancialProduct.ProductType.CHECKING,
+        )
+        self.statement = BankStatementImport.objects.create(financial_product=self.product)
+
+        self.rule_account = Account.objects.create(
+            name="Groceries",
+            account_type=Account.AccountType.EXPENSE,
+            family=self.family,
+        )
+        self.uncategorized_account = Account.objects.create(
+            name="UNCATEGORIZED EXPENSES",
+            account_type=Account.AccountType.EXPENSE,
+            family=self.family,
+        )
+
+    def test_report_classifies_routed_manual_and_zero_amount_transactions(self):
+        recent_date = date.today() - relativedelta(months=1)
+        old_date = date.today() - relativedelta(months=4)
+
+        routed = StagedTransaction.objects.create(
+            statement_import=self.statement,
+            financial_product=self.product,
+            bank_date=recent_date,
+            raw_description="Auto routed grocery",
+            amount=Decimal("-25.00"),
+            predicted_account=self.rule_account,
+            status=StagedTransaction.Status.UNPROCESSED,
+        )
+        approve_staged_transaction(routed.id, self.rule_account.id, self.user)
+
+        fallback = StagedTransaction.objects.create(
+            statement_import=self.statement,
+            financial_product=self.product,
+            bank_date=old_date,
+            raw_description="Fallback food",
+            amount=Decimal("-40.00"),
+            status=StagedTransaction.Status.UNPROCESSED,
+        )
+        approve_staged_transaction(fallback.id, self.uncategorized_account.id, self.user)
+
+        StagedTransaction.objects.create(
+            statement_import=self.statement,
+            financial_product=self.product,
+            bank_date=recent_date,
+            raw_description="Needs review",
+            amount=Decimal("-15.00"),
+            status=StagedTransaction.Status.UNPROCESSED,
+        )
+
+        StagedTransaction.objects.create(
+            statement_import=self.statement,
+            financial_product=self.product,
+            bank_date=old_date,
+            raw_description="Zero amount edge case",
+            amount=Decimal("0.00"),
+            status=StagedTransaction.Status.UNPROCESSED,
+        )
+
+        report = build_transaction_consistency_report([self.statement])
+
+        self.assertEqual(report.statement_count, 1)
+        self.assertEqual(report.staged_transaction_count, 4)
+        self.assertEqual(report.journal_entry_count, 2)
+        self.assertEqual(report.transaction_line_count, 4)
+        self.assertEqual(report.balanced_journal_entry_count, 2)
+        self.assertEqual(report.unbalanced_journal_entry_count, 0)
+        self.assertEqual(report.auto_routed_count, 1)
+        self.assertEqual(report.fallback_routed_count, 1)
+        self.assertEqual(report.manual_review_queue_count, 1)
+        self.assertEqual(report.zero_amount_unprocessed_count, 1)
+        self.assertEqual(report.old_unresolved_nonzero_count, 0)
+        self.assertEqual(report.predicted_but_unprocessed_nonzero_count, 0)
+        self.assertEqual(report.reconciled_without_journal_entry_count, 0)
+        self.assertEqual(report.recent_reconciled_without_prediction_count, 0)
+        self.assertTrue(report.is_clean)
 
 class UploadStatementDeduplicationTest(TestCase):
     def setUp(self):

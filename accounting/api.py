@@ -595,7 +595,8 @@ def get_account_transactions(request, account_id: int, year: Optional[int] = Non
     if year:
         qs = qs.filter(date__year=year)
 
-    entries = qs.distinct().prefetch_related('lines__account').order_by('-date')[:500]
+    # Prefetch staged transactions to avoid N+1 queries
+    entries = qs.distinct().prefetch_related('lines__account', 'staged_transactions').order_by('-date')[:500]
 
     fp_account_map = {
         fp.account_id: fp.institution_id
@@ -611,6 +612,11 @@ def get_account_transactions(request, account_id: int, year: Optional[int] = Non
         category_line = next((l for l in lines if l.account_id in descendant_ids), None)
         if not category_line:
             continue
+        
+        # Resolve statement_id if available
+        st_tx = entry.staged_transactions.first()
+        statement_id = st_tx.statement_import_id if st_tx else None
+
         results.append({
             'journal_entry_id': entry.id,
             'date': entry.date,
@@ -620,6 +626,7 @@ def get_account_transactions(request, account_id: int, year: Optional[int] = Non
             'routed_to': category_line.account.name,
             'routed_to_id': category_line.account_id,
             'institution_id': fp_account_map.get(source_line.account_id) if source_line else None,
+            'statement_id': statement_id,
         })
 
     return results
