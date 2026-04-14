@@ -71,6 +71,43 @@ class TransactionLine(models.Model):
 # LAYER 3: Insight Fact Store (Append-Only Versioned Log)
 # =========================================================================
 
+class AnalysisRun(models.Model):
+    """
+    Cohesive execution record for one analytics pipeline run.
+
+    This model groups InsightFact rows that were computed together so the system
+    can answer "what did we believe at run X" deterministically.
+    """
+
+    class Status(models.TextChoices):
+        RUNNING = 'RUNNING', 'Running'
+        SUCCEEDED = 'SUCCEEDED', 'Succeeded'
+        FAILED = 'FAILED', 'Failed'
+
+    family = models.ForeignKey(
+        Family,
+        on_delete=models.CASCADE,
+        related_name='analysis_runs',
+        help_text="Tenant boundary for this analytical run"
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
+    version = models.CharField(max_length=32, default='v1')
+    started_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    completed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    source_refreshed_at = models.DateTimeField(null=True, blank=True)
+    insights_created = models.IntegerField(default=0)
+    error_message = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['-started_at']
+        indexes = [
+            models.Index(fields=['family', '-started_at']),
+            models.Index(fields=['status', '-started_at']),
+        ]
+
+    def __str__(self):
+        return f"Run {self.id} ({self.status}) - {self.family.name}"
+
 class InsightFact(models.Model):
     """
     OLAP Layer 3: Versioned append-only log of computed insights for auditability and historicity.
@@ -89,6 +126,14 @@ class InsightFact(models.Model):
         on_delete=models.CASCADE,
         related_name='insight_facts',
         help_text="The spending category this insight describes"
+    )
+    analysis_run = models.ForeignKey(
+        AnalysisRun,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='insight_facts',
+        help_text="Pipeline execution that produced this insight"
     )
     computed_at = models.DateTimeField(
         auto_now_add=True,

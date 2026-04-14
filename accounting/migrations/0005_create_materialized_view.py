@@ -16,7 +16,7 @@ class Migration(migrations.Migration):
             -- This view aggregates validated journal entries by category and month
             CREATE MATERIALIZED VIEW accounting_categorymonthlystat AS
             SELECT
-                ROW_NUMBER() OVER (ORDER BY account_id, month) AS id,
+                ROW_NUMBER() OVER (ORDER BY account_id, DATE_TRUNC('month', je.date)) AS id,
                 account_id AS category_id,
                 DATE_TRUNC('month', je.date)::date AS month,
                 SUM(CASE 

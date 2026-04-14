@@ -959,10 +959,29 @@ export async function triggerAnalyticsEngine() {
   return res.json();
 }
 
+export interface AnalysisInsightRow {
+  id: string;
+  categoryName: string;
+  insight_score: number;
+  materiality_pct: number;
+  processType: 'DETERMINISTIC' | 'STOCHASTIC' | 'EPISODIC';
+  expertSummary: string;
+  causal_volume_pct: number | null;
+  causal_price_pct: number | null;
+}
+
 export interface EngineStatus {
   status: "idle" | "syncing";
-  last_computed_at: string;
+  last_computed_at: string | null;
   total_facts: number;
+}
+
+export interface LatestInsightsSnapshot {
+  run_id: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  total_insights: number;
+  insights: AnalysisInsightRow[];
 }
 
 export async function getEngineStatus(): Promise<EngineStatus> {
@@ -975,3 +994,15 @@ export async function getEngineStatus(): Promise<EngineStatus> {
   }
   return res.json();
 }
+
+export async function fetchLatestInsightsSnapshot(): Promise<LatestInsightsSnapshot> {
+  const res = await fetch(`${API_URL}/analysis/insights/latest/`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to fetch latest insights snapshot");
+  }
+  return res.json();
+}
+

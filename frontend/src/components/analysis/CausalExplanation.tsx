@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowUpIcon, ArrowDownIcon } from "lucide-react";
+import { ArrowUp, ArrowDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 interface CausalExplanationProps {
@@ -13,7 +13,7 @@ const CausalExplanation: React.FC<CausalExplanationProps> = ({ volume_pct, price
   
   const renderFactor = (label: string, value: number) => {
     const isPositive = value >= 0;
-    const Icon = isPositive ? ArrowUpIcon : ArrowDownIcon;
+    const Icon = isPositive ? ArrowUp : ArrowDown;
     const colorClass = isPositive ? "text-red-600" : "text-green-600";
     
     return (

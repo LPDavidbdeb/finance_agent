@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 
 interface EngineControlPanelProps {
-  lastComputedAt: string | Date;
+  lastComputedAt: string | Date | null;
   totalFactsCached: number;
   onRefresh?: () => void;
 }
@@ -25,7 +25,7 @@ const EngineControlPanel: React.FC<EngineControlPanelProps> = ({
 }) => {
   const [status, setStatus] = useState<EngineStatus>({
     status: "idle",
-    last_computed_at: initialLastComputed.toString(),
+    last_computed_at: initialLastComputed ? initialLastComputed.toString() : null,
     total_facts: initialTotalFacts
   });
   const [showSuccess, setShowSuccess] = useState(false);
@@ -79,7 +79,9 @@ const EngineControlPanel: React.FC<EngineControlPanelProps> = ({
     return () => stopPolling();
   }, []);
 
-  const formattedDate = new Date(status.last_computed_at).toLocaleString();
+  const formattedDate = status.last_computed_at
+    ? new Date(status.last_computed_at).toLocaleString()
+    : "Not computed yet";
 
   return (
     <Card className="w-full border-slate-200 shadow-sm overflow-hidden bg-white">

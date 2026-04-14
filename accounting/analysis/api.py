@@ -1,7 +1,13 @@
-from ninja import Router
+from ninja import Router, errors
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from ninja_jwt.authentication import JWTAuth
+from datetime import datetime
+from django.core.cache import cache
+from django.db.models import OuterRef, Subquery
+
+from accounting.models import AnalysisRun, InsightFact
+from accounting.tasks import rebuild_financial_insights, INSIGHTS_SYNC_CACHE_KEY
 
 from accounting.analysis.insights import InsightEngine, CategoryProfile
 from accounting.analysis.trend import TrendResult
@@ -40,6 +46,24 @@ class InsightResponseSchema(BaseModel):
     class Config:
         """Pydantic configuration."""
         from_attributes = True
+
+
+class EngineStatusSchema(BaseModel):
+    """Status payload returned by the ETL orchestration API."""
+
+    status: str = Field(..., description="syncing or idle")
+    last_computed_at: Optional[datetime] = Field(None, description="Most recent InsightFact timestamp")
+    total_facts: int = Field(..., description="Total number of InsightFact rows")
+
+
+class LatestInsightsSnapshotSchema(BaseModel):
+    """Latest coherent insight snapshot for a family."""
+
+    run_id: Optional[int] = Field(None, description="Latest successful AnalysisRun id")
+    started_at: Optional[datetime] = Field(None, description="Run start timestamp")
+    completed_at: Optional[datetime] = Field(None, description="Run completion timestamp")
+    total_insights: int = Field(..., description="Number of insight rows in this snapshot")
+    insights: List[InsightResponseSchema] = Field(default_factory=list)
 
 
 # =========================================================================
@@ -81,30 +105,121 @@ def get_top_insights(request, top_n: int = 5):
     top_n = min(int(top_n), 20)
     top_n = max(top_n, 1)
 
-    # For now, use mock data (in production, would load from database)
-    # TODO: Load actual CategoryProfile objects from database for user's family
-    mock_profiles = _create_mock_profiles()
+    user = request.auth
+    family = getattr(user, "family", None)
+    if family is None:
+        return []
 
-    # Rank using InsightEngine
-    engine = InsightEngine()
-    ranked_insights = engine.get_top_insights(mock_profiles, top_n=top_n)
+    latest_fact_for_category = InsightFact.objects.filter(
+        category_id=OuterRef("category_id"),
+        category__family=family,
+    ).order_by("-computed_at", "-id").values("id")[:1]
 
-    # Convert to response schema
-    response = [
+    latest_facts = (
+        InsightFact.objects
+        .filter(category__family=family, id=Subquery(latest_fact_for_category))
+        .select_related("category")
+        .order_by("-insight_score", "category__name")[:top_n]
+    )
+
+    return [
         InsightResponseSchema(
-            id=insight['category_name'],
-            categoryName=insight['category_name'],
-            insight_score=insight['insight_score'],
-            materiality_pct=insight['materiality_pct'],
-            processType=_get_process_type_string(insight),
-            expertSummary=insight['summary'],
-            causal_volume_pct=_extract_causal_volume(insight),
-            causal_price_pct=_extract_causal_price(insight),
+            id=str(fact.category_id),
+            categoryName=fact.category.name,
+            insight_score=fact.insight_score,
+            materiality_pct=fact.materiality_pct,
+            processType=fact.process_type,
+            expertSummary=fact.expert_summary,
+            causal_volume_pct=fact.causal_volume_pct,
+            causal_price_pct=fact.causal_price_pct,
         )
-        for insight in ranked_insights
+        for fact in latest_facts
     ]
 
-    return response
+
+@router.post("/engine/trigger/")
+def trigger_engine_sync(request):
+    """Trigger asynchronous ETL rebuild for financial insights."""
+    user = request.auth
+    family = getattr(user, "family", None)
+    if family is None:
+        raise errors.HttpError(400, "User is not associated with a family.")
+
+    try:
+        rebuild_financial_insights.delay(family_id=family.id)
+        return {"message": "Sync started"}
+    except Exception:
+        # If the broker is unavailable, still run the pipeline synchronously so the
+        # UI remains functional in local/dev environments.
+        rebuild_financial_insights.apply(kwargs={"family_id": family.id})
+        return {"message": "Sync started locally"}
+
+
+@router.get("/insights/latest/", response=LatestInsightsSnapshotSchema)
+def get_latest_insights_snapshot(request):
+    """Return latest successful coherent run snapshot for the logged-in user's family."""
+    user = request.auth
+    family = getattr(user, "family", None)
+    if family is None:
+        return LatestInsightsSnapshotSchema(run_id=None, started_at=None, completed_at=None, total_insights=0, insights=[])
+
+    run = (
+        AnalysisRun.objects
+        .filter(family=family, status=AnalysisRun.Status.SUCCEEDED)
+        .order_by("-started_at", "-id")
+        .first()
+    )
+
+    if run is None:
+        return LatestInsightsSnapshotSchema(run_id=None, started_at=None, completed_at=None, total_insights=0, insights=[])
+
+    facts = (
+        InsightFact.objects
+        .filter(analysis_run=run)
+        .select_related("category")
+        .order_by("-insight_score", "category__name")
+    )
+
+    insights = [
+        InsightResponseSchema(
+            id=str(fact.category_id),
+            categoryName=fact.category.name,
+            insight_score=fact.insight_score,
+            materiality_pct=fact.materiality_pct,
+            processType=fact.process_type,
+            expertSummary=fact.expert_summary,
+            causal_volume_pct=fact.causal_volume_pct,
+            causal_price_pct=fact.causal_price_pct,
+        )
+        for fact in facts
+    ]
+
+    return LatestInsightsSnapshotSchema(
+        run_id=run.id,
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        total_insights=len(insights),
+        insights=insights,
+    )
+
+
+@router.get("/engine/status/", response=EngineStatusSchema)
+def get_engine_status(request):
+    """Return ETL sync state and InsightFact warehouse metadata."""
+    is_syncing = bool(cache.get(INSIGHTS_SYNC_CACHE_KEY, False))
+    user = request.auth
+    family = getattr(user, "family", None)
+    if family is None:
+        return EngineStatusSchema(status="syncing" if is_syncing else "idle", last_computed_at=None, total_facts=0)
+
+    scoped_facts = InsightFact.objects.filter(category__family=family)
+    latest_fact = scoped_facts.order_by("-computed_at", "-id").first()
+
+    return EngineStatusSchema(
+        status="syncing" if is_syncing else "idle",
+        last_computed_at=latest_fact.computed_at if latest_fact else None,
+        total_facts=scoped_facts.count(),
+    )
 
 
 def _create_mock_profiles() -> List[CategoryProfile]:

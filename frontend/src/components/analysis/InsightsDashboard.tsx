@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import InsightCard from "./InsightCard";
 import { ProcessType } from "./DiagnosticBadges";
-import { SlidersHorizontal, ArrowDownWideZap, Percent } from "lucide-react";
+import { SlidersHorizontal, ArrowDownWideNarrow, Percent } from "lucide-react";
 
 export interface InsightData {
   id: string;
@@ -53,7 +53,7 @@ const InsightsDashboard: React.FC<InsightsDashboardProps> = ({ data }) => {
             onClick={() => setSortMethod("SEVERITY")}
             className="flex items-center gap-2 h-8 px-3 text-xs"
           >
-            <ArrowDownWideZap size={14} />
+            <ArrowDownWideNarrow size={14} />
             Severity
           </Button>
           <Button

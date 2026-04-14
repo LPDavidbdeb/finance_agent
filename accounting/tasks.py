@@ -1,17 +1,20 @@
 import pandas as pd
 import logging
 from decimal import Decimal
+from django.utils import timezone
 from django.db import connection
 from django.db.models import Sum
+from django.core.cache import cache
 from celery import shared_task
 
-from accounting.models import Account, CategoryMonthlyStat, InsightFact
+from accounting.models import Account, AnalysisRun, CategoryMonthlyStat, InsightFact
 from accounting.analysis.classification import ProcessClassifier
 from accounting.analysis.trend import TrendAnalyzer
-from accounting.analysis.volatility import VolatilityAnalyzer
+from accounting.analysis.volatility import VolatilityAnalyzer, VolatilityResult
 from accounting.analysis.insights import InsightEngine, CategoryProfile
 
 logger = logging.getLogger(__name__)
+INSIGHTS_SYNC_CACHE_KEY = "insights_is_syncing"
 
 
 @shared_task(bind=True)
@@ -37,6 +40,8 @@ def rebuild_financial_insights(self, family_id=None):
     Returns:
         dict: Summary of insights computed {'families_processed': n, 'insights_created': n}
     """
+    cache.set(INSIGHTS_SYNC_CACHE_KEY, True, timeout=3600)
+
     try:
         logger.info("Starting rebuild_financial_insights pipeline")
 
@@ -44,34 +49,61 @@ def rebuild_financial_insights(self, family_id=None):
         logger.info("Step 1: Refreshing Materialized View")
         _refresh_materialized_view()
 
+        source_refreshed_at = timezone.now()
+
         # Step 2-4: Process all families (or specific family)
         families = _get_families_to_process(family_id)
         total_insights_created = 0
+        runs_created = 0
 
         for family in families:
             logger.info(f"Processing family: {family.name}")
+            analysis_run = AnalysisRun.objects.create(
+                family=family,
+                status=AnalysisRun.Status.RUNNING,
+                source_refreshed_at=source_refreshed_at,
+            )
+            runs_created += 1
 
-            # Step 2: EXTRACT
-            logger.info(f"Step 2: Extracting data for family {family.id}")
-            category_dataframes = _extract_category_data(family)
+            try:
+                # Step 2: EXTRACT
+                logger.info(f"Step 2: Extracting data for family {family.id}")
+                category_dataframes = _extract_category_data(family)
 
-            if not category_dataframes:
-                logger.warning(f"No data extracted for family {family.id}")
-                continue
+                if not category_dataframes:
+                    logger.warning(f"No data extracted for family {family.id}")
+                    analysis_run.status = AnalysisRun.Status.SUCCEEDED
+                    analysis_run.insights_created = 0
+                    analysis_run.completed_at = timezone.now()
+                    analysis_run.save(update_fields=['status', 'insights_created', 'completed_at'])
+                    continue
 
-            # Step 3: TRANSFORM
-            logger.info(f"Step 3: Transforming data through analytics pipeline")
-            category_profiles = _transform_through_pipeline(family, category_dataframes)
+                # Step 3: TRANSFORM
+                logger.info(f"Step 3: Transforming data through analytics pipeline")
+                category_profiles = _transform_through_pipeline(family, category_dataframes)
 
-            # Step 4: LOAD
-            logger.info(f"Step 4: Loading insights to InsightFact")
-            insights_created = _load_insights(category_profiles)
-            total_insights_created += insights_created
-            logger.info(f"Created {insights_created} insights for family {family.id}")
+                # Step 4: LOAD
+                logger.info(f"Step 4: Loading insights to InsightFact")
+                insights_created = _load_insights(category_profiles, analysis_run=analysis_run)
+                total_insights_created += insights_created
+
+                analysis_run.status = AnalysisRun.Status.SUCCEEDED
+                analysis_run.insights_created = insights_created
+                analysis_run.completed_at = timezone.now()
+                analysis_run.save(update_fields=['status', 'insights_created', 'completed_at'])
+
+                logger.info(f"Created {insights_created} insights for family {family.id}")
+            except Exception as family_exc:
+                analysis_run.status = AnalysisRun.Status.FAILED
+                analysis_run.error_message = str(family_exc)
+                analysis_run.completed_at = timezone.now()
+                analysis_run.save(update_fields=['status', 'error_message', 'completed_at'])
+                raise
 
         result = {
             'families_processed': len(families),
-            'insights_created': total_insights_created
+            'insights_created': total_insights_created,
+            'analysis_runs_created': runs_created,
         }
         logger.info(f"Pipeline completed successfully: {result}")
         return result
@@ -79,6 +111,9 @@ def rebuild_financial_insights(self, family_id=None):
     except Exception as e:
         logger.error(f"Error in rebuild_financial_insights: {str(e)}", exc_info=True)
         raise
+    finally:
+        cache.set(INSIGHTS_SYNC_CACHE_KEY, False, timeout=3600)
+        logger.info("Insights sync state reset to idle")
 
 
 def _refresh_materialized_view():
@@ -199,7 +234,6 @@ def _transform_through_pipeline(family, category_dataframes):
     classifier = ProcessClassifier()
     trend_analyzer = TrendAnalyzer()
     volatility_analyzer = VolatilityAnalyzer()
-    causal_analyzer = CausalAnalyzer()
     projection_engine = ProjectionEngine()
 
     # Get materiality (total spend by category)
@@ -288,7 +322,7 @@ def _transform_through_pipeline(family, category_dataframes):
     return category_profiles
 
 
-def _load_insights(category_profiles):
+def _load_insights(category_profiles, analysis_run=None):
     """
     Step 4: Load CategoryProfile results into InsightFact (append-only).
 
@@ -306,6 +340,7 @@ def _load_insights(category_profiles):
     for profile in category_profiles:
         insight_fact = InsightFact(
             category_id=profile._account_id,
+            analysis_run=analysis_run,
             insight_score=profile.insight_score,
             materiality_pct=profile.materiality_pct,
             process_type=profile.process_type.value,
