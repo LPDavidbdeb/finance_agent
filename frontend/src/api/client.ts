@@ -933,3 +933,45 @@ export async function changePassword(
     throw new Error(data.detail || 'Failed to change password');
   }
 }
+
+// --- Analysis API ---
+
+export async function fetchTopInsights() {
+  const res = await fetch(`${API_URL}/analysis/insights/top`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to fetch top financial insights");
+  }
+  return res.json();
+}
+
+export async function triggerAnalyticsEngine() {
+  const res = await fetch(`${API_URL}/analysis/engine/trigger`, {
+    method: "POST",
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to trigger analytics engine");
+  }
+  return res.json();
+}
+
+export interface EngineStatus {
+  status: "idle" | "syncing";
+  last_computed_at: string;
+  total_facts: number;
+}
+
+export async function getEngineStatus(): Promise<EngineStatus> {
+  const res = await fetch(`${API_URL}/analysis/engine/status`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to fetch analytics engine status");
+  }
+  return res.json();
+}

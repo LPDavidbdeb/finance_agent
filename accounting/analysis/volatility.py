@@ -89,9 +89,9 @@ class VolatilityAnalyzer:
                 
             z_scores[f"{window_size}m"] = float(z)
             
-            # Requirement: Z-score > 2.0 (standard)
-            # Increase strictness to 3.0 to avoid steady growth false positives
-            if abs(z) > 3.0:
+            # Requirement: Z-score > threshold (standard)
+            # Threshold is typically 3.0 to avoid steady growth false positives
+            if abs(z) > self.z_threshold:
                 confirmed_breaks += 1
 
         # Requirement: Flag True ONLY IF Z > 2.0 across multiple windows (>= 2)
