@@ -21,6 +21,7 @@ const StatementDetail = lazy(() => import('./pages/StatementDetail').then(module
 const MaintenancePage = lazy(() => import('./pages/MaintenancePage').then(module => ({ default: module.MaintenancePage })));
 const SimulationPage = lazy(() => import('./pages/SimulationPage').then(module => ({ default: module.SimulationPage })));
 const StatementCoverage = lazy(() => import('./pages/StatementCoverage').then(module => ({ default: module.StatementCoverage })));
+const QualityReportsPage = lazy(() => import('./pages/QualityReportsPage').then(module => ({ default: module.QualityReportsPage })));
 
 // Lazy-load complex shared components
 const InstitutionManager = lazy(() => import('./components/InstitutionManager').then(module => ({ default: module.InstitutionManager })));
@@ -56,6 +57,7 @@ function App() {
                 <Route path="/dashboard/statements/:id" element={<StatementDetail />} />
                 <Route path="/dashboard/simulate" element={<SimulationPage />} />
                 <Route path="/dashboard/statement-coverage" element={<StatementCoverage />} />
+                <Route path="/dashboard/quality" element={<QualityReportsPage />} />
                 <Route path="/maintenance" element={<MaintenancePage />} />
                 <Route path="/settings/banks" element={<InstitutionManager />} />
                 <Route path="/ledger" element={<AccountTree />} />

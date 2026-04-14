@@ -28,6 +28,12 @@ finance_agent/
 ├── planning/                 # Stateless simulation engine (no models yet)
 │   ├── api.py                # POST /planning/simulate — N-scenario amortization/sinking fund
 │   └── schemas.py            # ScenarioSpec, ScenarioResult, PeriodRow
+├── quality/                  # Consistency report runs, findings, and investigation hooks
+│   ├── api.py                # Persisted report run + findings endpoints (Django Ninja)
+│   ├── models.py             # ConsistencyReportRun, ConsistencyReportFinding
+│   ├── schemas.py            # API schemas for report runs/findings
+│   ├── services.py           # Persist/report rendering helpers
+│   └── tests.py              # Report persistence regression tests
 ├── ai_core/                  # AI extraction strategies
 │   └── extractors/
 │       ├── factory.py
@@ -35,7 +41,7 @@ finance_agent/
 │       └── base.py
 └── frontend/                 # React 18 + TypeScript + Vite
     └── src/
-        ├── pages/            # Dashboard, FamilyManager, MerchantManager, AccountDetail, etc.
+        ├── pages/            # Dashboard, FamilyManager, MerchantManager, QualityReportsPage, AccountDetail, etc.
         ├── components/       # Reusable UI components (Shadcn UI patterns)
         ├── context/          # AuthContext
         └── api/              # client.ts — API calls to backend

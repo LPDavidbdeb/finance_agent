@@ -48,7 +48,7 @@ export const MerchantManager: React.FC = () => {
     try {
       await updateMerchantAccount(editingMerchant.id, account.id);
       toast({
-        title: "Category Updated",
+        title: "Route Updated",
         description: `Successfully assigned ${account.name} to ${editingMerchant.name}.`,
       });
       setEditingMerchant(null);
@@ -57,7 +57,7 @@ export const MerchantManager: React.FC = () => {
       toast({
         variant: "destructive",
         title: "Update Failed",
-        description: err.message || "Could not update category.",
+        description: err.message || "Could not update route.",
       });
     }
   };
@@ -104,7 +104,7 @@ export const MerchantManager: React.FC = () => {
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">Merchants</h1>
           <p className="text-slate-500 mt-1">
-            Manage the default accounting categories for your identified merchants.
+            Manage the default routes for your identified merchants.
           </p>
         </div>
       </div>
@@ -132,7 +132,7 @@ export const MerchantManager: React.FC = () => {
               <thead className="bg-slate-50">
                 <tr>
                   <th className="px-4 py-3 text-left font-medium text-slate-700">Merchant Name</th>
-                  <th className="px-4 py-3 text-left font-medium text-slate-700">Current Category</th>
+                  <th className="px-4 py-3 text-left font-medium text-slate-700">Current Route</th>
                   <th className="px-4 py-3 text-left font-medium text-slate-700">Unique Provider</th>
                   <th className="px-4 py-3 text-right font-medium text-slate-700">Actions</th>
                 </tr>
@@ -157,7 +157,7 @@ export const MerchantManager: React.FC = () => {
                         <span className="text-slate-700">{merchant.default_account_name}</span>
                       ) : (
                         <Badge variant="destructive" className="bg-red-100 text-red-800 border-red-200">
-                          Category Missing
+                          Route Missing
                         </Badge>
                       )}
                     </td>
@@ -172,14 +172,14 @@ export const MerchantManager: React.FC = () => {
                     </td>
                     <td className="px-4 py-3 text-right space-x-2 whitespace-nowrap">
                       <Button variant="outline" size="sm" onClick={() => setEditingMerchant(merchant)} disabled={processingIds.includes(merchant.id)}>
-                        Edit Category
+                        Edit Route
                       </Button>
                       <Button 
                         variant="secondary" 
                         size="sm" 
                         onClick={() => handleSyncHistory(merchant)} 
                         disabled={!merchant.default_account_id || processingIds.includes(merchant.id)}
-                        title="Apply category to historical transactions"
+                        title="Apply route to historical transactions"
                       >
                         {processingIds.includes(merchant.id) ? <Loader2 className="h-4 w-4 animate-spin" /> : <History className="h-4 w-4" />}
                       </Button>
@@ -197,9 +197,9 @@ export const MerchantManager: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
           <Card className="w-full max-w-2xl mx-auto shadow-2xl max-h-[90vh] flex flex-col">
             <CardHeader className="border-b">
-              <CardTitle>Select Category for {editingMerchant.name}</CardTitle>
+              <CardTitle>Select Route for {editingMerchant.name}</CardTitle>
               <CardDescription>
-                Choose the default accounting post for this merchant.
+                Choose the default account route for this merchant.
               </CardDescription>
             </CardHeader>
             <CardContent className="overflow-y-auto p-6">

@@ -87,6 +87,9 @@ class StagedTransactionOut(Schema):
     predicted_account_id: Optional[int] = None
     predicted_account_name: Optional[str] = None
     reconciled_account_name: Optional[str] = None
+    journal_entry_id: Optional[int] = None
+    financial_product_id: Optional[int] = None
+    institution_id: Optional[int] = None
 
     @staticmethod
     def resolve_clean_description(obj):
@@ -115,6 +118,23 @@ class StagedTransactionOut(Schema):
             if not hasattr(line.account, 'financial_product'):
                 return line.account.name
         return None
+
+    @staticmethod
+    def resolve_journal_entry_id(obj):
+        return obj.journal_entry_id
+
+    @staticmethod
+    def resolve_financial_product_id(obj):
+        if obj.financial_product_id:
+            return obj.financial_product_id
+        if obj.statement_import and obj.statement_import.financial_product_id:
+            return obj.statement_import.financial_product_id
+        return None
+
+    @staticmethod
+    def resolve_institution_id(obj):
+        product = obj.financial_product or (obj.statement_import.financial_product if obj.statement_import else None)
+        return product.institution_id if product else None
 
 class StatementMonthOut(Schema):
     month: date

@@ -61,6 +61,8 @@ class CFAInsightsOut(Schema):
 class YearlyTrendOut(Schema):
     year: int
     total: float
+    realized_total: float = 0.0
+    estimated_total: float = 0.0
     monthly_avg: float
     pct_of_income: float = 0.0
     breakdown: dict = {} # Map of child_name -> amount

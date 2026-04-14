@@ -3,7 +3,10 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction, connection, models
 from users.models import Family
 from banking.models import StagedTransaction, BankStatementImport
+from banking.consistency import build_transaction_consistency_report
 from accounting.models import JournalEntry, TransactionLine
+from quality.models import ConsistencyReportRun
+from quality.services import create_consistency_report_run
 
 class Command(BaseCommand):
     help = "Safely resets derived transactional layers (TransactionLine, JournalEntry, StagedTransaction)."
@@ -36,9 +39,10 @@ class Command(BaseCommand):
                 raise CommandError(f"Invalid family ID format: {e}")
         else:
             families = Family.objects.all()
+        families = list(families)
 
-        self.stdout.write(f"Scoped Families: {families.count()}")
-        
+        self.stdout.write(f"Scoped Families: {len(families)}")
+
         # 1. Collect counts
         stats = []
         for family in families:
@@ -77,6 +81,7 @@ class Command(BaseCommand):
         # 2. Destructive execution
         start_time = time.time()
         self.stdout.write(self.style.WARNING("\nDESTRUCTIVE RESET STARTED..."))
+        statements_reset_by_family: dict[str, int] = {}
 
         for family in families:
             self.stdout.write(f"  Processing {family.name} ({family.id})...")
@@ -104,13 +109,14 @@ class Command(BaseCommand):
             with transaction.atomic():
                 stmt_reset = BankStatementImport.objects.filter(
                     models.Q(financial_product__family=family) |
-                    models.Q(institution__products__family=family)
+                    models.Q(financial_product__isnull=True, institution__products__family=family)
                 ).distinct().update(
                     status=BankStatementImport.Status.STAGED, 
                     processed_by_python=False,
                     processed_by_ai=False,
                     validation_errors=None
                 )
+                statements_reset_by_family[str(family.id)] = stmt_reset
                 self.stdout.write(f"    - Reset {stmt_reset} BankStatementImports to STAGED")
 
         # Reset primary key sequences so IDs start from 1 on the next insert
@@ -140,12 +146,32 @@ class Command(BaseCommand):
         self.stdout.write(f"  Remaining JournalEntry: {remaining_jes}")
         self.stdout.write(f"  Remaining TransactionLine: {remaining_lines}")
         self.stdout.write(f"  Remaining StagedTransaction: {remaining_staged}")
-        self.stdout.write(f"  Statements reset to STAGED: {stmt_reset}")
+        self.stdout.write(f"  Statements reset to STAGED: {sum(statements_reset_by_family.values())}")
 
         if remaining_lines == remaining_jes == remaining_staged == 0:
             self.stdout.write(self.style.SUCCESS("  Ledger wipe verified."))
         else:
             self.stdout.write(self.style.ERROR("  Ledger wipe incomplete."))
+
+        # Persist one reset report per family for auditability and investigation.
+        stats_by_family = {str(s['id']): s for s in stats}
+        for family in families:
+            scoped_statements = BankStatementImport.objects.filter(
+                models.Q(financial_product__family=family) |
+                models.Q(financial_product__isnull=True, institution__products__family=family)
+            ).distinct()
+            consistency_report = build_transaction_consistency_report(scoped_statements)
+            run = create_consistency_report_run(
+                family=family,
+                trigger_source=ConsistencyReportRun.TriggerSource.LEDGER_RESET,
+                report=consistency_report,
+                scope={
+                    'family_id': str(family.id),
+                    'deleted_before_reset': stats_by_family.get(str(family.id), {}),
+                    'statements_reset': statements_reset_by_family.get(str(family.id), 0),
+                },
+            )
+            self.stdout.write(f"  Consistency Report Run: {run.id} (Family: {family.name})")
 
         elapsed = time.time() - start_time
         self.stdout.write(self.style.SUCCESS(f"\nRESET COMPLETE in {elapsed:.2f}s"))

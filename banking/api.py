@@ -304,7 +304,13 @@ def get_statement_import_transactions(request, import_id: int):
     statement = _get_statement_for_family(import_id, user.family)
     return StagedTransaction.objects.filter(
         statement_import=statement
-    ).select_related('predicted_account', 'journal_entry').prefetch_related('journal_entry__lines__account').order_by("bank_date")
+    ).select_related(
+        'predicted_account',
+        'journal_entry',
+        'financial_product',
+        'statement_import__financial_product',
+        'statement_import__financial_product__institution',
+    ).prefetch_related('journal_entry__lines__account').order_by("bank_date")
 
 
 @router.delete("/imports/{import_id}")
@@ -324,7 +330,13 @@ def list_staged_transactions(request, product_id: int):
     return StagedTransaction.objects.filter(
         statement_import__financial_product=product,
         status=StagedTransaction.Status.UNPROCESSED
-    ).select_related('predicted_account', 'journal_entry').prefetch_related('journal_entry__lines__account').order_by("-bank_date")
+    ).select_related(
+        'predicted_account',
+        'journal_entry',
+        'financial_product',
+        'statement_import__financial_product',
+        'statement_import__financial_product__institution',
+    ).prefetch_related('journal_entry__lines__account').order_by("-bank_date")
 
 
 @router.get("/products/{product_id}/statement-months", response=List[StatementMonthOut])

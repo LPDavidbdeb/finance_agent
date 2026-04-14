@@ -4,6 +4,8 @@ from users.models import Family
 from banking.models import BankStatementImport, StagedTransaction
 from banking.extraction import extract_transactions_from_statement
 from banking.consistency import build_transaction_consistency_report, render_transaction_consistency_report
+from quality.models import ConsistencyReportRun
+from quality.services import create_consistency_report_run
 
 class Command(BaseCommand):
     help = "Reprocesses all BankStatementImport records to recreate StagedTransactions and Ledger entries."
@@ -24,6 +26,19 @@ class Command(BaseCommand):
                 'consolidated path (TangerineExtractor).'
             ),
         )
+
+    def _resolve_statement_family(self, statement: BankStatementImport, family_id: str | None):
+        if statement.financial_product:
+            return statement.financial_product.family
+        if family_id:
+            return Family.objects.filter(id=family_id).first()
+        if statement.institution_id:
+            family_ids = list(
+                statement.institution.products.values_list('family_id', flat=True).distinct()
+            )
+            if len(family_ids) == 1:
+                return Family.objects.filter(id=family_ids[0]).first()
+        return None
 
     def handle(self, *args, **options):
         family_id = options['family_id']
@@ -139,18 +154,54 @@ class Command(BaseCommand):
         self.stdout.write(f"  Processed: {processed_count}")
         self.stdout.write(f"  Failed:    {failed_count}")
 
-        # Post-run consistency analysis for the exact statement scope that was processed.
-        consistency_report = build_transaction_consistency_report(statements_to_process)
-        self.stdout.write("\n" + "=" * 80)
-        for line in render_transaction_consistency_report(consistency_report):
-            self.stdout.write(line)
-
-        if consistency_report.is_clean:
-            self.stdout.write(self.style.SUCCESS("  Routing and ledger integrity checks passed."))
-        else:
-            self.stdout.write(
-                self.style.WARNING(
-                    "  Some consistency issues were detected; inspect the counts above."
+        # Persist a report per family so findings remain tenant-scoped and investigable from the UI.
+        statements_by_family: dict[int, list[int]] = {}
+        for stmt in statements_to_process:
+            family = self._resolve_statement_family(stmt, family_id)
+            if not family:
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"Skipping report persistence for statement {stmt.id}: family could not be resolved."
+                    )
                 )
+                continue
+            statements_by_family.setdefault(family.id, []).append(stmt.id)
+
+        if not statements_by_family:
+            self.stdout.write(self.style.WARNING("No family-scoped statements found for report persistence."))
+            return
+
+        for fam_id, stmt_ids in statements_by_family.items():
+            family = Family.objects.get(id=fam_id)
+            scoped_statements = BankStatementImport.objects.filter(id__in=stmt_ids)
+            consistency_report = build_transaction_consistency_report(scoped_statements)
+
+            run = create_consistency_report_run(
+                family=family,
+                trigger_source=ConsistencyReportRun.TriggerSource.REPROCESS,
+                report=consistency_report,
+                scope={
+                    'statement_ids': stmt_ids,
+                    'family_id': str(family.id),
+                    'since': since,
+                    'limit': limit,
+                    'tangerine': tangerine_mode,
+                    'processed_count': processed_count,
+                    'failed_count': failed_count,
+                },
             )
+
+            self.stdout.write("\n" + "=" * 80)
+            self.stdout.write(f"Consistency Report Run: {run.id} (Family: {family.name})")
+            for line in render_transaction_consistency_report(consistency_report):
+                self.stdout.write(line)
+
+            if consistency_report.is_clean:
+                self.stdout.write(self.style.SUCCESS("  Routing and ledger integrity checks passed."))
+            else:
+                self.stdout.write(
+                    self.style.WARNING(
+                        "  Some consistency issues were detected; inspect this run's findings."
+                    )
+                )
 

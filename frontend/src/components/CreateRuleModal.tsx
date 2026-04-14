@@ -6,6 +6,7 @@ import { Label } from './ui/label';
 import { createAndApplyRule, fetchMerchants } from '../api/client';
 import { AccountTree } from './AccountTree';
 import { Loader2 } from 'lucide-react';
+import { TRANSACTION_ROUTING_RULE_LABEL } from '../utils/transactionVocabulary';
 
 interface Account {
   id: number;
@@ -143,9 +144,9 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
       return;
     }
 
-    // Validation: If unique provider, must have a category
+    // Validation: If unique provider, must have a route
     if (formData.is_unique_provider && !formData.target_account_id && !selectedMerchant) {
-      setError("Unique merchants must have a default category.");
+      setError("Unique merchants must have a default route.");
       return;
     }
 
@@ -162,8 +163,9 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
       const result = await createAndApplyRule(payload);
       onSuccess(result.updated_count);
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Failed to create rule.');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to create routing rule.';
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -173,8 +175,8 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
       <Card className="w-full max-w-5xl mx-auto shadow-2xl">
         <CardHeader className="border-b border-slate-200">
-          <CardTitle>Create Mapping Rule</CardTitle>
-          <CardDescription>Define transaction matching criteria and assign to a category.</CardDescription>
+          <CardTitle>{TRANSACTION_ROUTING_RULE_LABEL}</CardTitle>
+          <CardDescription>Define transaction matching criteria and route it to an account.</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           <div className="grid grid-cols-2 gap-0 min-h-[600px]">
@@ -183,7 +185,7 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div className="space-y-2">
                   <Label htmlFor="search_text" className="text-xs font-bold uppercase text-slate-500">
-                    Search Text (Branch Description)
+                    Search Text (Routing Description)
                   </Label>
                   <Input
                     id="search_text"
@@ -222,7 +224,7 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
                         >
                           <div className="font-bold">{m.name}</div>
                           <div className="text-[10px] text-slate-500">
-                            {m.is_unique_provider ? `Category: ${m.default_account_name || 'None'}` : 'Multi-category Provider'}
+                            {m.is_unique_provider ? `Route: ${m.default_account_name || 'None'}` : 'Multi-route Provider'}
                           </div>
                         </button>
                       ))}
@@ -285,13 +287,13 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
                         onChange={(e) => setFormData(prev => ({ ...prev, is_unique_provider: !e.target.checked }))}
                       />
                       <Label htmlFor="is_unique" className="text-sm cursor-pointer">
-                        Multi-category provider (e.g. Amazon, Walmart)
+                        Multi-route provider (e.g. Amazon, Walmart)
                       </Label>
                     </div>
 
                     {formData.is_unique_provider && (
                       <div className="space-y-2 animate-in fade-in duration-200">
-                        <Label className="text-xs font-bold uppercase text-slate-500">Default Category</Label>
+                        <Label className="text-xs font-bold uppercase text-slate-500">Default Route</Label>
                         <Button
                           type="button"
                           variant="outline"
@@ -331,7 +333,7 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
                 <div>
                   <Label className="text-xs font-bold uppercase text-slate-500">Account Hierarchy</Label>
                   <p className="text-xs text-slate-600 mt-1">
-                    {formData.is_unique_provider ? 'Click to select a category' : 'N/A for multi-category providers'}
+                    {formData.is_unique_provider ? 'Click to select a route' : 'N/A for multi-route providers'}
                   </p>
                 </div>
 
@@ -346,7 +348,7 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
 
                 {!formData.is_unique_provider && (
                   <div className="bg-white border border-slate-200 rounded-md p-4 text-center text-slate-500 h-[520px] flex items-center justify-center">
-                    <p className="text-sm">Multi-category providers don't require a default account.</p>
+                    <p className="text-sm">Multi-route providers don't require a default account.</p>
                   </div>
                 )}
 

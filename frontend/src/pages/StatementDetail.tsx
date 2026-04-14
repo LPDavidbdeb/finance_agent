@@ -2,22 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { fetchStatementImport, fetchStatementImportTransactions, BASE_URL } from '../api/client';
-import { Loader2, ArrowLeft, FileText, Download, ExternalLink, AlertCircle, CheckCircle2, Clock, ChevronUp, ChevronDown } from 'lucide-react';
-
-interface StagedTransaction {
-  id: number;
-  bank_date: string;
-  raw_description: string;
-  clean_description?: string;
-  merchant_name?: string;
-  amount: number;
-  status: string;
-  statement_import_id: number;
-  predicted_account_name?: string;
-  reconciled_account_name?: string;
-  journal_entry_id?: number;
-}
+import { fetchStatementImport, fetchStatementImportTransactions, fetchAccountsFlat, fetchMerchants, approveTransaction, BASE_URL } from '../api/client';
+import { Loader2, ArrowLeft, FileText, Download, ExternalLink, AlertCircle, CheckCircle2, Clock, ChevronUp, ChevronDown, PlusCircle, Tag, ArrowRightLeft } from 'lucide-react';
+import { CreateRuleModal } from '../components/CreateRuleModal';
+import { AccountTree } from '../components/AccountTree';
+import { InlineReroutePanel, FlatAccount, RerouteMerchant } from '../components/InlineReroutePanel';
+import { useToast } from '../components/ui/use-toast';
+import { StagedTransactionView } from '../types/transactions';
+import { TRANSACTION_ROUTE_LABEL, TRANSACTION_ROUTED_LABEL, TRANSACTION_ROUTED_TO_LABEL } from '../utils/transactionVocabulary';
 
 interface StatementImport {
   id: number;
@@ -35,13 +27,24 @@ export const StatementDetail: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const highlightId = searchParams.get('highlight');
-  
+  const highlightTransactionId = searchParams.get('highlight_transaction');
+
   const [statement, setStatement] = useState<StatementImport | null>(null);
-  const [transactions, setTransactions] = useState<StagedTransaction[]>([]);
+  const [transactions, setTransactions] = useState<StagedTransactionView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
-  const [sortConfig, setSortConfig] = useState<{ key: keyof StagedTransaction; direction: 'asc' | 'desc' }>({
+  const [routingTxId, setRoutingTxId] = useState<number | null>(null);
+  const [isRoutingModalOpen, setIsRoutingModalOpen] = useState(false);
+  const [isRuleModalOpen, setIsRuleModalOpen] = useState(false);
+  const [ruleRawDescription, setRuleRawDescription] = useState('');
+  const [ruleInstitutionId, setRuleInstitutionId] = useState<number | null>(null);
+  const [routeLoading, setRouteLoading] = useState<Record<number, boolean>>({});
+  const [reroutingEntryId, setReroutingEntryId] = useState<number | null>(null);
+  const [flatAccounts, setFlatAccounts] = useState<FlatAccount[]>([]);
+  const [merchants, setMerchants] = useState<RerouteMerchant[]>([]);
+  const { toast } = useToast();
+
+  const [sortConfig, setSortConfig] = useState<{ key: keyof StagedTransactionView; direction: 'asc' | 'desc' }>({
     key: 'bank_date',
     direction: 'asc'
   });
@@ -53,6 +56,22 @@ export const StatementDetail: React.FC = () => {
       loadData(Number(id));
     }
   }, [id]);
+
+  useEffect(() => {
+    const loadRoutingContext = async () => {
+      try {
+        const [accounts, merchantList] = await Promise.all([
+          fetchAccountsFlat(),
+          fetchMerchants(),
+        ]);
+        setFlatAccounts(Array.isArray(accounts) ? (accounts as FlatAccount[]) : []);
+        setMerchants(Array.isArray(merchantList) ? (merchantList as RerouteMerchant[]) : []);
+      } catch {
+        // Non-fatal: routing modal remains unavailable until data can be fetched.
+      }
+    };
+    loadRoutingContext();
+  }, []);
 
   useEffect(() => {
     if (!loading && highlightId && highlightedRef.current) {
@@ -69,25 +88,78 @@ export const StatementDetail: React.FC = () => {
       ]);
       setStatement(stmt);
       setTransactions(txs);
-    } catch (err: any) {
-      setError(err.message || "Failed to load statement details.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to load statement details.';
+      setError(message);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSort = (key: keyof StagedTransaction) => {
+  const handleSort = (key: keyof StagedTransactionView) => {
     setSortConfig(prev => ({
       key,
       direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
     }));
   };
 
+  const openRoutingModal = (txId: number) => {
+    setRoutingTxId(txId);
+    setIsRoutingModalOpen(true);
+  };
+
+  const openRuleModal = (rawDescription: string, institutionId?: number) => {
+    if (!institutionId) {
+      toast({
+        variant: 'destructive',
+        title: 'Routing rule unavailable',
+        description: 'Institution context is missing for this transaction.',
+      });
+      return;
+    }
+    setRuleRawDescription(rawDescription);
+    setRuleInstitutionId(institutionId);
+    setIsRuleModalOpen(true);
+  };
+
+  const handleRoute = async (tx: StagedTransactionView, targetAccountId: number) => {
+    if (!tx.financial_product_id) {
+      toast({
+        variant: 'destructive',
+        title: 'Route Failed',
+        description: 'No linked product found for this transaction.',
+      });
+      return;
+    }
+
+    setRouteLoading((prev) => ({ ...prev, [tx.id]: true }));
+    try {
+      await approveTransaction(tx.financial_product_id, tx.id, targetAccountId);
+      toast({ title: 'Success', description: 'Transaction routed and reconciled.' });
+      await loadData(Number(id));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Route failed';
+      toast({ variant: 'destructive', title: 'Route Failed', description: message });
+    } finally {
+      setRouteLoading((prev) => ({ ...prev, [tx.id]: false }));
+      setIsRoutingModalOpen(false);
+      setRoutingTxId(null);
+    }
+  };
+
+  const handleRerouteSuccess = async () => {
+    setReroutingEntryId(null);
+    toast({ title: 'Success', description: 'Transaction re-routed.' });
+    if (id) {
+      await loadData(Number(id));
+    }
+  };
+
   const sortedTransactions = React.useMemo(() => {
     const sorted = [...transactions];
     sorted.sort((a, b) => {
-      let aValue: any;
-      let bValue: any;
+      let aValue: string | number | Date | undefined;
+      let bValue: string | number | Date | undefined;
 
       // Special case for description: Sort by the DISPLAY string (Merchant > Raw)
       if (sortConfig.key === 'raw_description') {
@@ -152,7 +224,7 @@ export const StatementDetail: React.FC = () => {
     ? (statement.file_url.startsWith('http') ? statement.file_url : `${BASE_URL}${statement.file_url}`)
     : null;
 
-  const SortIcon = ({ column }: { column: keyof StagedTransaction }) => {
+  const SortIcon = ({ column }: { column: keyof StagedTransactionView }) => {
     if (sortConfig.key !== column) return null;
     return sortConfig.direction === 'asc' 
       ? <ChevronUp className="h-3 w-3 ml-1 inline-block" /> 
@@ -230,15 +302,19 @@ export const StatementDetail: React.FC = () => {
                     >
                       Amount <SortIcon column="amount" />
                     </th>
-                    <th className="px-4 py-3 text-left font-bold uppercase text-[10px]">Ledger Account</th>
+                    <th className="px-4 py-3 text-left font-bold uppercase text-[10px]">Routing / Account</th>
+                    <th className="px-4 py-3 text-right font-bold uppercase text-[10px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {sortedTransactions.map((tx) => {
-                    const isHighlighted = highlightId && tx.journal_entry_id === Number(highlightId);
+                    const isHighlighted = Boolean(
+                      (highlightTransactionId && tx.id === Number(highlightTransactionId)) ||
+                      (highlightId && tx.journal_entry_id === Number(highlightId)),
+                    );
                     return (
+                      <React.Fragment key={tx.id}>
                       <tr 
-                        key={tx.id}
                         ref={isHighlighted ? highlightedRef : null}
                         className={`transition-colors ${
                           isHighlighted 
@@ -269,10 +345,65 @@ export const StatementDetail: React.FC = () => {
                               tx.status === 'RECONCILED' ? 'border-emerald-200 text-emerald-700 bg-emerald-50/50' : ''
                             }`}
                           >
-                            {tx.reconciled_account_name || tx.predicted_account_name || 'UNMAPPED'}
+                            {tx.reconciled_account_name || (tx.predicted_account_name ? `${TRANSACTION_ROUTED_TO_LABEL}: ${tx.predicted_account_name}` : 'UNROUTED')}
                           </Badge>
                         </td>
+                        <td className="px-4 py-3 text-right space-x-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openRuleModal(tx.raw_description, tx.institution_id)}
+                            disabled={tx.status === 'RECONCILED'}
+                            title="Create routing rule for this description"
+                          >
+                            <PlusCircle className="h-3.5 w-3.5 mr-1" />
+                            Create routing rule
+                          </Button>
+                          {tx.status === 'RECONCILED' ? (
+                            <>
+                              <Button size="sm" disabled>
+                                {TRANSACTION_ROUTED_LABEL}
+                              </Button>
+                              {tx.journal_entry_id && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setReroutingEntryId((prev) => (prev === tx.journal_entry_id ? null : tx.journal_entry_id!))}
+                                  title="Re-route transaction"
+                                >
+                                  <ArrowRightLeft className="h-3.5 w-3.5 mr-1" />
+                                  Re-route
+                                </Button>
+                              )}
+                            </>
+                          ) : (
+                            <Button
+                              size="sm"
+                              onClick={() => openRoutingModal(tx.id)}
+                              disabled={routeLoading[tx.id]}
+                            >
+                              <Tag className="h-3.5 w-3.5 mr-1" />
+                              {TRANSACTION_ROUTE_LABEL}
+                            </Button>
+                          )}
+                        </td>
                       </tr>
+                      {tx.journal_entry_id && reroutingEntryId === tx.journal_entry_id && (
+                        <tr>
+                          <td colSpan={5} className="px-6 py-3 bg-blue-50 border-l-4 border-blue-400">
+                            <InlineReroutePanel
+                              entryId={tx.journal_entry_id}
+                              flatAccounts={flatAccounts}
+                              merchants={merchants}
+                              onSuccess={() => {
+                                handleRerouteSuccess();
+                              }}
+                              onCancel={() => setReroutingEntryId(null)}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
@@ -299,6 +430,49 @@ export const StatementDetail: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {isRuleModalOpen && ruleInstitutionId !== null && (
+        <CreateRuleModal
+          isOpen={isRuleModalOpen}
+          onClose={() => setIsRuleModalOpen(false)}
+          onSuccess={async () => {
+            setIsRuleModalOpen(false);
+            await loadData(Number(id));
+          }}
+          rawDescription={ruleRawDescription}
+          institutionId={ruleInstitutionId}
+        />
+      )}
+
+      {isRoutingModalOpen && routingTxId !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="w-full max-w-2xl">
+            <div className="bg-white rounded-lg shadow-2xl border overflow-hidden">
+              <div className="border-b px-6 py-4">
+                <h3 className="text-base font-semibold">Route Transaction</h3>
+                <p className="text-sm text-slate-500">Select the destination account route for this transaction.</p>
+              </div>
+              <div className="p-6 max-h-[70vh] overflow-y-auto">
+                <AccountTree
+                  isSelectMode={true}
+                  onSelect={(account: { id: number }) => {
+                    const tx = transactions.find((candidate) => candidate.id === routingTxId);
+                    if (!tx) {
+                      return;
+                    }
+                    handleRoute(tx, account.id);
+                  }}
+                />
+                <div className="flex justify-end mt-6">
+                  <Button variant="outline" onClick={() => { setIsRoutingModalOpen(false); setRoutingTxId(null); }}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

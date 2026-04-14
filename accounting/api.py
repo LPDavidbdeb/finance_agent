@@ -754,7 +754,23 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
         })
 
     # 7. Math for CFA Insights
-    yoy_growth = (amt_current - amt_previous) / amt_previous if amt_previous > 0 else None
+    today = date.today()
+    today_year = today.year
+    
+    # Calculate days elapsed for current year annualization
+    jan_1_today = date(today_year, 1, 1)
+    days_elapsed = max((today - jan_1_today).days + 1, 1)
+    annual_multiplier = 365.25 / days_elapsed
+
+    revenue_descendants = root_revenue.get_descendants(include_self=True) if root_revenue else Account.objects.none()
+    
+    # logic_amt_current/previous used for the YoY stat
+    logic_amt_current = amt_current
+    logic_amt_previous = amt_previous
+    if year == today_year and not is_cumulative:
+        logic_amt_current = amt_current * annual_multiplier
+
+    yoy_growth = (logic_amt_current - logic_amt_previous) / logic_amt_previous if logic_amt_previous > 0 else None
     revenue_growth = (total_revenue_curr - total_revenue_prev) / total_revenue_prev if total_revenue_prev > 0 else 0
     drift = (yoy_growth - revenue_growth) if yoy_growth is not None else 0
     
@@ -783,17 +799,28 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
 
     # Historical trends — always anchored to today so the chart is a fixed map.
     # The selected `year` only controls the monthly detail; the map never shifts.
-    today_year = date.today().year
-    revenue_descendants = root_revenue.get_descendants(include_self=True) if root_revenue else Account.objects.none()
     historical_trends = []
     for y in range(today_year - 5, today_year + 1):
         y_total = get_sum(descendants, y, is_cumulative=is_cumulative)
         y_income = get_sum(revenue_descendants, y, is_cumulative=False)
+        
+        realized = y_total
+        estimated = 0.0
+        
+        if y == today_year and not is_cumulative and y_total > 0:
+            projected_full = y_total * annual_multiplier
+            estimated = projected_full - y_total
+            display_total = projected_full
+        else:
+            display_total = y_total
+
         historical_trends.append({
             "year": y,
-            "total": y_total,
-            "monthly_avg": y_total / 12,
-            "pct_of_income": round((y_total / y_income) * 100, 2) if y_income > 0 else 0.0,
+            "total": display_total,
+            "realized_total": realized,
+            "estimated_total": estimated,
+            "monthly_avg": (display_total / 12) if not (y == today_year and not is_cumulative) else (realized / (days_elapsed / (365.25/12))),
+            "pct_of_income": round((display_total / y_income) * 100, 2) if y_income > 0 else 0.0,
         })
     
     # avg_yearly_total for reference lines

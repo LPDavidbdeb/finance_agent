@@ -22,6 +22,7 @@ import {
   Loader2, Edit2, Check, X, ArrowLeft, Merge, Trash2, Tag,
   History, DollarSign, TrendingUp, Calendar, ChevronRight, Search, Wand2
 } from 'lucide-react';
+import { formatRoutingRuleSuccess } from '../utils/transactionVocabulary';
 
 interface MappingRule {
   id: number;
@@ -181,11 +182,11 @@ export const MerchantDetail: React.FC = () => {
   };
 
   const handleDeleteRule = async (ruleId: number) => {
-    if (!window.confirm('Delete this rule? All transactions matched by it will be re-routed to Uncategorized Expenses.')) return;
+    if (!window.confirm('Delete this routing rule? All transactions matched by it will be re-routed to Uncategorized Expenses.')) return;
     setDeletingRuleId(ruleId);
     try {
       await deleteRule(ruleId);
-      toast({ title: "Rule deleted", description: "Matched transactions have been moved to Uncategorized Expenses." });
+      toast({ title: "Routing rule deleted", description: "Matched transactions have been moved to Uncategorized Expenses." });
       if (merchant) loadData(merchant.id);
     } catch (err: any) {
       toast({ variant: "destructive", title: "Delete failed", description: err.message });
@@ -318,13 +319,13 @@ export const MerchantDetail: React.FC = () => {
             
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <Badge variant="outline" className="bg-slate-50 py-1 px-3 text-slate-600 border-slate-200 font-normal">
-                {merchant.is_unique_provider ? 'Unique Provider' : 'Multi-category Merchant'}
+                {merchant.is_unique_provider ? 'Unique Provider' : 'Multi-route Merchant'}
               </Badge>
               
               <div className="flex items-center gap-2 bg-blue-50 pl-3 pr-1 py-1 rounded-full border border-blue-100">
                 <Tag className="h-3.5 w-3.5 text-blue-600" />
                 <span className="text-sm font-semibold text-blue-800">
-                  {merchant.default_account_name || 'Uncategorized'}
+                  {merchant.default_account_name || 'Unrouted'}
                 </span>
                 <Button 
                   variant="ghost" 
@@ -748,8 +749,8 @@ export const MerchantDetail: React.FC = () => {
           }}
           onSuccess={(count) => {
             toast({ 
-              title: "Rule created", 
-              description: `Successfully mapped and auto-approved ${count} transactions.` 
+              title: "Routing rule created",
+              description: formatRoutingRuleSuccess(count)
             });
             loadData(Number(id));
             setOrphanedSearch('');

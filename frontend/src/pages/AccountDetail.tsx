@@ -61,6 +61,8 @@ interface CFAInsights {
 interface YearlyTrend {
   year: number;
   total: number;
+  realized_total: number;
+  estimated_total: number;
   monthly_avg: number;
   pct_of_income: number;
   breakdown: Record<string, number>;
@@ -220,7 +222,7 @@ const BannerTable: React.FC<BannerTableProps> = ({ transactions, flatAccounts, m
                                         setReroutingEntry(null); 
                                       }}
                                     >
-                                      <PlusCircle className="h-2.5 w-2.5" /> Rule
+                                      <PlusCircle className="h-2.5 w-2.5" /> Routing Rule
                                     </Button>
                                     <button
                                       onClick={(e) => {
@@ -228,7 +230,7 @@ const BannerTable: React.FC<BannerTableProps> = ({ transactions, flatAccounts, m
                                         setReroutingEntry(reroutingEntry === tx.journal_entry_id ? null : tx.journal_entry_id);
                                       }}
                                       className="p-1 rounded hover:bg-blue-100 text-slate-400 hover:text-blue-600 transition-colors border border-slate-200"
-                                      title="Re-route"
+                                      title="Re-route transaction"
                                     >
                                       <ArrowRightLeft className="h-3 w-3" />
                                     </button>
@@ -389,6 +391,10 @@ export const AccountDetail: React.FC = () => {
   if (error || !account) return <div className="p-20 text-center text-red-500">{error || "Account not found"}</div>;
 
   const { insights } = account;
+  const trendForYear = account.historical_trends.find(t => t.year === year);
+  const isAnnualized = year === currentYear && account.account_type === 'EXPENSE';
+  const displayTotal = isAnnualized ? (trendForYear?.total || insights.amount_current) : insights.amount_current;
+
   const growthColor = (insights.yoy_growth || 0) > 0 
     ? (account.account_type === 'REVENUE' ? 'text-emerald-600' : 'text-red-600') 
     : (account.account_type === 'REVENUE' ? 'text-red-600' : 'text-emerald-600');
@@ -426,9 +432,9 @@ export const AccountDetail: React.FC = () => {
             </div>
           )}
           <div className="text-right">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{isAnnualized ? 'Est. Total' : 'Total'}</p>
             <p className="text-xl font-black text-slate-900">
-              ${insights.amount_current.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              ${displayTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </p>
           </div>
           <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
@@ -448,14 +454,21 @@ export const AccountDetail: React.FC = () => {
 
       {/* Context Cards */}
       {(() => {
-        const monthlyAvgFocused = insights.amount_current / 12;
+        const trendForYear = account.historical_trends.find(t => t.year === year);
+        const monthlyAvgFocused = trendForYear ? trendForYear.monthly_avg : insights.amount_current / 12;
         const longRunMonthlyAvg = account.avg_monthly_avg;
         const monthlyDiff = monthlyAvgFocused - longRunMonthlyAvg;
+        
         const peakMonth = account.monthly_breakdown.reduce(
           (best, m, idx) => m.total > best.total ? { total: m.total, idx } : best,
           { total: 0, idx: 0 }
         );
-        const yoyDollars = insights.amount_current - insights.amount_previous;
+
+        const currentYear = new Date().getFullYear();
+        const isAnnualized = year === currentYear && account.account_type === 'EXPENSE';
+        const yoyDollars = isAnnualized 
+          ? (trendForYear?.total || 0) - insights.amount_previous
+          : insights.amount_current - insights.amount_previous;
 
         return (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -476,7 +489,7 @@ export const AccountDetail: React.FC = () => {
               title="Year-over-Year"
               value={`${yoyDollars >= 0 ? '+' : ''}$${Math.abs(yoyDollars).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
               subValue={insights.yoy_growth !== null && insights.yoy_growth !== undefined
-                ? `${(insights.yoy_growth * 100).toFixed(1)}% vs ${year - 1}`
+                ? `${(insights.yoy_growth * 100).toFixed(1)}% ${isAnnualized ? '(annualized) ' : ''}vs ${year - 1}`
                 : `vs ${year - 1}`}
               icon={yoyDollars >= 0 ? TrendingUp : TrendingDown}
               color={yoyDollars > 0
@@ -555,11 +568,12 @@ export const AccountDetail: React.FC = () => {
                         <RechartsTooltip
                           cursor={{ fill: '#f8fafc' }}
                           contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
-                          formatter={(value: any) =>
-                            isPct
-                              ? [`${Number(value).toFixed(1)}% of income`, '']
-                              : [`$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, '']
-                          }
+                          formatter={(value: any, name: any) => {
+                            const label = name === 'realized_total' ? 'Realized' : name === 'estimated_total' ? 'Estimated' : name;
+                            return isPct
+                              ? [`${Number(value).toFixed(1)}% of income`, label]
+                              : [`$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2 })}`, label];
+                          }}
                           labelFormatter={(label) => `${label}`}
                         />
                         <ReferenceLine
@@ -568,12 +582,21 @@ export const AccountDetail: React.FC = () => {
                           strokeDasharray="4 4"
                           label={{ position: 'right', value: 'Avg', fill: '#94a3b8', fontSize: 9, fontWeight: 'bold' }}
                         />
-                        <Bar dataKey={dataKey} radius={[4, 4, 0, 0]} maxBarSize={60}>
+                        <Bar dataKey="realized_total" stackId="a" radius={ (entry: any) => entry.estimated_total <= 0 ? [4, 4, 0, 0] : [0, 0, 0, 0] } maxBarSize={60}>
                           {sortedTrends.map((entry) => (
                             <Cell
                               key={entry.year}
                               fill={entry.year === year ? '#3b82f6' : '#cbd5e1'}
                               opacity={entry.year === year ? 1 : 0.7}
+                            />
+                          ))}
+                        </Bar>
+                        <Bar dataKey="estimated_total" stackId="a" radius={[4, 4, 0, 0]} maxBarSize={60}>
+                          {sortedTrends.map((entry) => (
+                            <Cell
+                              key={entry.year}
+                              fill={entry.year === year ? '#3b82f6' : '#cbd5e1'}
+                              opacity={0.4}
                             />
                           ))}
                         </Bar>
