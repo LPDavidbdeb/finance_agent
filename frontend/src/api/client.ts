@@ -801,6 +801,98 @@ export async function fetchStatementCoverage(): Promise<StatementCoverage> {
   return res.json();
 }
 
+// --- Quality API ---
+
+export type ConsistencySeverity = 'INFO' | 'WARNING' | 'ERROR';
+
+export interface ConsistencyReportRun {
+  id: number;
+  family_id: string;
+  trigger_source: string;
+  status: string;
+  scope: Record<string, unknown>;
+  summary: {
+    total_findings?: number;
+    by_severity?: Record<string, number>;
+    [key: string]: unknown;
+  };
+  error_message: string;
+  started_at: string;
+  finished_at: string | null;
+  finding_count: number;
+}
+
+export interface ConsistencyReportFinding {
+  id: number;
+  run_id: number;
+  severity: ConsistencySeverity;
+  category: string;
+  title: string;
+  message: string;
+  details: Record<string, unknown>;
+  statement_import_id: number | null;
+  staged_transaction_id: number | null;
+  journal_entry_id: number | null;
+  transaction_line_id: number | null;
+  created_at: string;
+}
+
+export interface ConsistencyUnresolvedTransaction {
+  id: number;
+  statement_import_id: number;
+  statement_import_label: string;
+  financial_product_id: number | null;
+  bank_date: string;
+  raw_description: string;
+  amount: string;
+  status: string;
+  predicted_account_id: number | null;
+  journal_entry_id: number | null;
+  cutoff_date: string;
+  days_past_cutoff: number;
+}
+
+export async function fetchConsistencyRuns(limit = 25): Promise<ConsistencyReportRun[]> {
+  const res = await fetch(`${API_URL}/quality/consistency-runs?limit=${limit}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error('Failed to fetch consistency runs');
+  return res.json();
+}
+
+export async function triggerConsistencyRun(statement_ids?: number[]): Promise<ConsistencyReportRun> {
+  const res = await fetch(`${API_URL}/quality/consistency-runs`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify({ statement_ids: statement_ids && statement_ids.length > 0 ? statement_ids : null }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(err.detail || 'Failed to trigger consistency run');
+  }
+  return res.json();
+}
+
+export async function fetchConsistencyFindings(
+  runId: number,
+  severity?: ConsistencySeverity,
+): Promise<ConsistencyReportFinding[]> {
+  const query = severity ? `?severity=${severity}` : '';
+  const res = await fetch(`${API_URL}/quality/consistency-runs/${runId}/findings${query}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error('Failed to fetch consistency findings');
+  return res.json();
+}
+
+export async function fetchConsistencyUnresolvedTransactions(runId: number): Promise<ConsistencyUnresolvedTransaction[]> {
+  const res = await fetch(`${API_URL}/quality/consistency-runs/${runId}/unresolved-transactions`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error('Failed to fetch unresolved transactions');
+  return res.json();
+}
+
 // --- Auth ---
 
 export interface ProcessingLogEntry {

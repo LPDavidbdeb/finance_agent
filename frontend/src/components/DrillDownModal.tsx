@@ -287,7 +287,7 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({ isOpen, onClose,
                                                   <button
                                                     onClick={() => setRuleTx(tx)}
                                                     className="p-1 rounded hover:bg-purple-100 text-slate-400 hover:text-purple-600 transition-colors"
-                                                    title="Create permanent mapping rule"
+                                                    title="Create permanent routing rule"
                                                   >
                                                     <Wand2 className="h-3 w-3" />
                                                   </button>

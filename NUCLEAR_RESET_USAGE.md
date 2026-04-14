@@ -64,3 +64,10 @@ If you only want to reprocess specific statements:
 - **By Family**: `python manage.py reprocess_all_statements --family-id <UUID>`
 - **By Date**: `python manage.py reprocess_all_statements --since 2025-01-01`
 - **Tangerine Only**: `python manage.py reprocess_all_statements --tangerine`
+
+## Zero-Amount Findings Workflow
+If the report shows `ZERO_AMOUNT_UNPROCESSED`, the expected behavior is to surface it as an informational investigation signal (not a hard failure).
+
+See the detailed workflow:
+- `ZERO_AMOUNT_WORKFLOW.md`
+

@@ -40,6 +40,7 @@ LOCAL_APPS = [
     'categorization',
     'planning.apps.PlanningConfig',
     'assets',
+    'quality.apps.QualityConfig',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + EXTERNAL_APPS + LOCAL_APPS

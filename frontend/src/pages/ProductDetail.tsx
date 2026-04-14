@@ -16,6 +16,10 @@ import { useAuth } from '../context/AuthContext';
 import { TransactionListTable } from '../components/TransactionListTable';
 import { useToast } from '../components/ui/use-toast';
 import { Calendar, Upload, Trash2, Loader2, Inbox } from 'lucide-react';
+import {
+  TRANSACTION_ROUTING_BACKLOG_DESCRIPTION,
+  TRANSACTION_ROUTING_BACKLOG_TITLE,
+} from '../utils/transactionVocabulary';
 
 type StatementImport = {
   id: number;
@@ -311,8 +315,8 @@ export const ProductDetail: React.FC = () => {
               <TransactionListTable 
                 productId={Number(id!)}
                 institutionId={product?.institution_id}
-                title="Action Required: Global Backlog"
-                description="Transactions that have been extracted but not yet categorized or approved."
+                title={TRANSACTION_ROUTING_BACKLOG_TITLE}
+                description={TRANSACTION_ROUTING_BACKLOG_DESCRIPTION}
                 fetchFn={fetchBacklog}
                 onDataChange={() => setRefreshTrigger(prev => prev + 1)}
                 refreshTrigger={refreshTrigger}

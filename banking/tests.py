@@ -110,7 +110,7 @@ class ApproveStagedTransactionTest(TestCase):
                 target_account_id=target_account_b.id,
                 user=self.user_a
             )
-        self.assertEqual(str(cm.exception), "Target account not found for this family.")
+        self.assertEqual(str(cm.exception), "Target account not found or access denied.")
 
     def test_approve_staged_transaction_already_processed(self):
         """Test that an already processed transaction cannot be approved again."""
@@ -125,7 +125,7 @@ class ApproveStagedTransactionTest(TestCase):
             )
         self.assertIn("already processed", str(cm.exception))
 
-    def test_liability_negative_purchase_increases_liability(self):
+    def test_liability_positive_purchase_increases_liability(self):
         liability_account = Account.objects.create(
             name="Visa", account_type=Account.AccountType.LIABILITY, family=self.family_a
         )
@@ -141,7 +141,7 @@ class ApproveStagedTransactionTest(TestCase):
             statement_import=cc_import,
             bank_date=date(2026, 3, 10),
             raw_description="Restaurant",
-            amount=Decimal("-775.00"),
+            amount=Decimal("775.00"),
             status=StagedTransaction.Status.UNPROCESSED,
         )
         expense_account = Account.objects.create(
@@ -155,7 +155,7 @@ class ApproveStagedTransactionTest(TestCase):
         self.assertEqual(debit_line.account, expense_account)
         self.assertEqual(credit_line.account, liability_account)
 
-    def test_liability_positive_refund_or_payment_reduces_liability(self):
+    def test_liability_negative_refund_or_payment_reduces_liability(self):
         liability_account = Account.objects.create(
             name="Visa 2", account_type=Account.AccountType.LIABILITY, family=self.family_a
         )
@@ -171,7 +171,7 @@ class ApproveStagedTransactionTest(TestCase):
             statement_import=cc_import,
             bank_date=date(2026, 3, 11),
             raw_description="Refund",
-            amount=Decimal("45.00"),
+            amount=Decimal("-45.00"),
             status=StagedTransaction.Status.UNPROCESSED,
         )
         expense_account = Account.objects.create(

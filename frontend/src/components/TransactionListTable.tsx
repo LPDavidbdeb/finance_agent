@@ -6,27 +6,21 @@ import { useToast } from './ui/use-toast';
 import { Badge } from './ui/badge';
 import { CreateRuleModal } from './CreateRuleModal';
 import { AccountTree } from './AccountTree';
+import {
+  TRANSACTION_ROUTE_LABEL,
+  TRANSACTION_ROUTED_LABEL,
+  TRANSACTION_ROUTED_TO_LABEL,
+  formatRoutingRuleSuccess,
+} from '../utils/transactionVocabulary';
 import { PlusCircle, Tag, Loader2 } from 'lucide-react';
-
-export interface StagedTransaction {
-  id: number;
-  bank_date: string;
-  raw_description: string;
-  merchant_name?: string;
-  amount: number;
-  status: string;
-  predicted_account_id?: number;
-  predicted_account_name?: string;
-  reconciled_account_name?: string;
-  statement_import_id: number;
-}
+import { StagedTransactionView } from '../types/transactions';
 
 interface TransactionListTableProps {
   productId: number;
   institutionId: number;
   title: string;
   description: string;
-  fetchFn: () => Promise<StagedTransaction[]>;
+  fetchFn: () => Promise<StagedTransactionView[]>;
   onDataChange?: () => void;
   refreshTrigger?: number;
 }
@@ -40,7 +34,7 @@ export const TransactionListTable: React.FC<TransactionListTableProps> = ({
   onDataChange,
   refreshTrigger = 0,
 }) => {
-  const [transactions, setTransactions] = useState<StagedTransaction[]>([]);
+  const [transactions, setTransactions] = useState<StagedTransactionView[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [approving, setApproving] = useState<Record<number, boolean>>({});
@@ -62,7 +56,7 @@ export const TransactionListTable: React.FC<TransactionListTableProps> = ({
       const data = await fetchFn();
       setTransactions(data);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch transactions';
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch routed transactions';
       setError(errorMessage);
     } finally {
       setLoading(false);
@@ -73,12 +67,12 @@ export const TransactionListTable: React.FC<TransactionListTableProps> = ({
     loadTransactions();
   }, [loadTransactions, refreshTrigger]);
 
-  const handleApprove = async (transactionId: number, targetAccountId?: number) => {
+  const handleRoute = async (transactionId: number, targetAccountId?: number) => {
     if (!targetAccountId) {
       toast({
         variant: "destructive",
-        title: "Approval Failed",
-        description: "No target account selected to approve this transaction.",
+        title: "Route Failed",
+        description: "No target account selected to route this transaction.",
       });
       return;
     }
@@ -87,15 +81,15 @@ export const TransactionListTable: React.FC<TransactionListTableProps> = ({
       await approveTransaction(productId, transactionId, targetAccountId);
       toast({
         title: "Success",
-        description: "Transaction approved and reconciled.",
+        description: "Transaction routed and reconciled.",
       });
       if (onDataChange) onDataChange();
       loadTransactions(); // Refresh the list
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Approval failed';
+      const errorMessage = err instanceof Error ? err.message : 'Route failed';
       toast({
         variant: "destructive",
-        title: "Approval Failed",
+        title: "Route Failed",
         description: errorMessage,
       });
     } finally {
@@ -110,8 +104,8 @@ export const TransactionListTable: React.FC<TransactionListTableProps> = ({
 
   const handleRuleCreated = (updatedCount: number) => {
     toast({
-      title: "Rule Created & Applied",
-      description: `New rule created and ${updatedCount} transaction(s) auto-approved.`,
+      title: 'Routing rule created',
+      description: formatRoutingRuleSuccess(updatedCount),
     });
     if (onDataChange) onDataChange();
     loadTransactions(); // Refresh the list
@@ -122,9 +116,9 @@ export const TransactionListTable: React.FC<TransactionListTableProps> = ({
     setIsAccountModalOpen(true);
   };
 
-  const handleAccountSelect = async (account: any) => {
+  const handleAccountSelect = async (account: { id: number }) => {
     if (categorizingTxId) {
-      await handleApprove(categorizingTxId, account.id);
+      await handleRoute(categorizingTxId, account.id);
       setIsAccountModalOpen(false);
       setCategorizingTxId(null);
     }
@@ -161,7 +155,7 @@ export const TransactionListTable: React.FC<TransactionListTableProps> = ({
                 <tr>
                   <th className="px-4 py-3 text-left font-medium text-slate-700">Date</th>
                   <th className="px-4 py-3 text-left font-medium text-slate-700">Description</th>
-                  <th className="px-4 py-3 text-left font-medium text-slate-700">Account / Category</th>
+                  <th className="px-4 py-3 text-left font-medium text-slate-700">Routing / Account</th>
                   <th className="px-4 py-3 text-right font-medium text-slate-700">Amount</th>
                   <th className="px-4 py-3 text-right font-medium text-slate-700">Actions</th>
                 </tr>
@@ -179,11 +173,11 @@ export const TransactionListTable: React.FC<TransactionListTableProps> = ({
                     <td className="px-4 py-3">
                       {tx.status === 'RECONCILED' ? (
                         <Badge className="bg-blue-600 text-white border-none font-normal">
-                          {tx.reconciled_account_name || 'Reconciled'}
+                           {tx.reconciled_account_name || TRANSACTION_ROUTED_LABEL}
                         </Badge>
                       ) : tx.predicted_account_name ? (
                         <Badge variant="secondary" className="bg-green-100 text-green-800">
-                          Predicted: {tx.predicted_account_name}
+                           {TRANSACTION_ROUTED_TO_LABEL}: {tx.predicted_account_name}
                         </Badge>
                       ) : (
                         <Button 
@@ -193,7 +187,7 @@ export const TransactionListTable: React.FC<TransactionListTableProps> = ({
                           onClick={() => handleAssignCategoryClick(tx.id)}
                         >
                           <Tag className="h-3 w-3" />
-                          Assign Category
+                           {TRANSACTION_ROUTE_LABEL}
                         </Button>
                       )}
                     </td>
@@ -205,18 +199,18 @@ export const TransactionListTable: React.FC<TransactionListTableProps> = ({
                         variant="outline" 
                         size="sm"
                         onClick={() => handleCreateRuleClick(tx.raw_description)}
-                        title="Create automation rule for this description"
+                        title="Create routing rule for this description"
                         disabled={tx.status === 'RECONCILED'}
                       >
                         <PlusCircle className="h-4 w-4 mr-1" />
-                        Rule
+                        Create routing rule
                       </Button>
                       <Button 
                         size="sm"
-                        onClick={() => handleApprove(tx.id, tx.predicted_account_id)}
+                        onClick={() => handleRoute(tx.id, tx.predicted_account_id)}
                         disabled={approving[tx.id] || !tx.predicted_account_id || tx.status === 'RECONCILED'}
                       >
-                        {tx.status === 'RECONCILED' ? 'Approved' : (approving[tx.id] ? 'Approve' : 'Approve')}
+                        {tx.status === 'RECONCILED' ? TRANSACTION_ROUTED_LABEL : TRANSACTION_ROUTE_LABEL}
                       </Button>
                     </td>
                   </tr>
@@ -235,14 +229,14 @@ export const TransactionListTable: React.FC<TransactionListTableProps> = ({
         institutionId={institutionId}
       />
 
-      {/* Manual Categorization Modal */}
+      {/* Manual Routing Modal */}
       {isAccountModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
           <Card className="w-full max-w-2xl mx-auto shadow-2xl max-h-[90vh] flex flex-col">
             <CardHeader className="border-b">
-              <CardTitle>Assign Accounting Category</CardTitle>
+              <CardTitle>Route Transaction</CardTitle>
               <CardDescription>
-                Select the destination account for this transaction.
+                Select the destination account route for this transaction.
               </CardDescription>
             </CardHeader>
             <CardContent className="overflow-y-auto p-6">

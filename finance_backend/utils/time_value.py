@@ -46,20 +46,53 @@ def compute_n_periods(target_date: date, frequency: PaymentFrequency, start_date
     return 0
 
 
-def _period_rate(annual_rate: Decimal, frequency: PaymentFrequency) -> Decimal:
-    """Convert annual percentage rate to per-period rate."""
+def _get_frequency_value(frequency: PaymentFrequency) -> int:
+    """Returns number of periods per year for a given frequency."""
+    mapping = {
+        PaymentFrequency.DAILY: 365,
+        PaymentFrequency.WEEKLY: 52,
+        PaymentFrequency.BIWEEKLY: 26,
+        PaymentFrequency.MONTHLY: 12,
+        PaymentFrequency.ANNUALLY: 1,
+    }
+    return mapping.get(frequency, 12)
+
+
+def _period_rate(
+    annual_rate: Decimal, 
+    payment_frequency: PaymentFrequency, 
+    compounding_frequency: PaymentFrequency = None
+) -> Decimal:
+    """
+    Convert annual percentage rate to per-period rate using General Annuity logic.
+    
+    If compounding_frequency is different from payment_frequency, we use the formula:
+    p = (1 + i)^c - 1
+    where:
+      i = annual_rate / compounding_periods_per_year
+      c = compounding_periods_per_year / payment_periods_per_year
+    """
+    if compounding_frequency is None:
+        compounding_frequency = payment_frequency
+
     rate = annual_rate / Decimal('100')
-    if frequency == PaymentFrequency.MONTHLY:
-        return rate / Decimal('12')
-    elif frequency == PaymentFrequency.BIWEEKLY:
-        return rate / Decimal('26')
-    elif frequency == PaymentFrequency.WEEKLY:
-        return rate / Decimal('52')
-    elif frequency == PaymentFrequency.ANNUALLY:
-        return rate
-    elif frequency == PaymentFrequency.DAILY:
-        return rate / Decimal('365')
-    return rate / Decimal('12')
+    m = Decimal(str(_get_frequency_value(compounding_frequency)))
+    nppy = Decimal(str(_get_frequency_value(payment_frequency)))
+    
+    # i = rate per compounding period
+    i = rate / m
+    
+    # c = ratio of compounding periods to payment periods
+    c = m / nppy
+    
+    if c == 1:
+        return i
+        
+    # p = effective rate per payment period
+    # Formula: (1 + i)^c - 1
+    # Note: We use float for the power operation as Decimal power is restricted to integers in some versions
+    effective_p = (1 + float(i)) ** float(c) - 1
+    return Decimal(str(effective_p))
 
 
 def compute_pmt_loan(
@@ -67,6 +100,7 @@ def compute_pmt_loan(
     annual_rate: Decimal,
     n_periods: int,
     frequency: PaymentFrequency = PaymentFrequency.MONTHLY,
+    compounding_frequency: PaymentFrequency = None,
 ) -> Decimal:
     """
     Payment required to fully amortize a loan (present value annuity).
@@ -74,7 +108,7 @@ def compute_pmt_loan(
     """
     if n_periods <= 0:
         return Decimal('0')
-    r = _period_rate(annual_rate, frequency)
+    r = _period_rate(annual_rate, frequency, compounding_frequency)
     if r == 0:
         return (pv / n_periods).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
     pmt = pv * r / (1 - (1 + r) ** -n_periods)
@@ -86,6 +120,7 @@ def compute_pmt_sinking_fund(
     annual_rate: Decimal,
     n_periods: int,
     frequency: PaymentFrequency = PaymentFrequency.MONTHLY,
+    compounding_frequency: PaymentFrequency = None,
 ) -> Decimal:
     """
     Periodic contribution required to accumulate a future value (future value annuity).
@@ -93,7 +128,7 @@ def compute_pmt_sinking_fund(
     """
     if n_periods <= 0:
         return Decimal('0')
-    r = _period_rate(annual_rate, frequency)
+    r = _period_rate(annual_rate, frequency, compounding_frequency)
     if r == 0:
         return (fv / n_periods).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
     pmt = fv * r / ((1 + r) ** n_periods - 1)
@@ -120,14 +155,15 @@ def generate_amortization_schedule(
     n_periods: int,
     start_date: date,
     frequency: PaymentFrequency = PaymentFrequency.MONTHLY,
+    compounding_frequency: PaymentFrequency = None,
 ) -> List[Dict[str, Any]]:
     """
     Full amortization schedule for a loan.
     Each row: period_number, payment_date, payment_amount,
               interest_portion, principal_portion, balance_after.
     """
-    pmt = compute_pmt_loan(principal, annual_rate, n_periods, frequency)
-    r = _period_rate(annual_rate, frequency)
+    pmt = compute_pmt_loan(principal, annual_rate, n_periods, frequency, compounding_frequency)
+    r = _period_rate(annual_rate, frequency, compounding_frequency)
     balance = principal
     schedule = []
     payment_date = _advance_date(start_date, frequency)
@@ -164,6 +200,7 @@ def generate_sinking_fund_schedule(
     start_date: date,
     current_balance: Decimal = Decimal('0'),
     frequency: PaymentFrequency = PaymentFrequency.MONTHLY,
+    compounding_frequency: PaymentFrequency = None,
 ) -> List[Dict[str, Any]]:
     """
     Sinking fund accumulation schedule.
@@ -174,8 +211,8 @@ def generate_sinking_fund_schedule(
     if remaining <= 0:
         return []
 
-    pmt = compute_pmt_sinking_fund(remaining, annual_rate, n_periods, frequency)
-    r = _period_rate(annual_rate, frequency)
+    pmt = compute_pmt_sinking_fund(remaining, annual_rate, n_periods, frequency, compounding_frequency)
+    r = _period_rate(annual_rate, frequency, compounding_frequency)
     balance = current_balance
     schedule = []
     payment_date = _advance_date(start_date, frequency)
