@@ -44,14 +44,17 @@ def classify_growth(
         >>> classify_growth(0.009, 0.03, 0.02)  # 0.9% vs 3% CPI
         'EFFICIENCY_GAIN'
     """
-    # Calculate deviation from benchmark
-    deviation = category_slope - benchmark_slope
+    # Use Decimal arithmetic to avoid float boundary artifacts at tolerance edges.
+    category = Decimal(str(category_slope))
+    benchmark = Decimal(str(benchmark_slope))
+    tol = Decimal(str(tolerance))
+    deviation = category - benchmark
 
     # Check thresholds with tolerance
-    if abs(deviation) <= tolerance:
+    if abs(deviation) <= tol:
         # Within tolerance band → tracking inflation
         return "INFLATION_TRACKED"
-    elif deviation > tolerance:
+    elif deviation > tol:
         # Above benchmark + tolerance → real growth
         return "REAL_GROWTH"
     else:

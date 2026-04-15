@@ -168,4 +168,6 @@ class InsightFactOut(Schema):
     projected_value: float | None = None
     projected_lower_bound: Decimal | None = None
     projected_upper_bound: Decimal | None = None
+    benchmark_slope: Decimal | None = None
+    benchmark_classification: Optional[str] = None
 
