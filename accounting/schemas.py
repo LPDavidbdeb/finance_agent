@@ -1,6 +1,7 @@
 from ninja import Schema
 from typing import List, Optional
 from datetime import date
+from decimal import Decimal
 
 class AccountChildOut(Schema):
     id: int
@@ -155,3 +156,16 @@ class AnnualYearDataOut(Schema):
 
 class AnnualHistoryOut(Schema):
     years: List[AnnualYearDataOut]
+
+
+class InsightFactOut(Schema):
+    id: int
+    category_id: int
+    insight_score: float
+    materiality_pct: float
+    process_type: str
+    expert_summary: str
+    projected_value: float | None = None
+    projected_lower_bound: Decimal | None = None
+    projected_upper_bound: Decimal | None = None
+

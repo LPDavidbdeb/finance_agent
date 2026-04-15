@@ -187,10 +187,44 @@ class InsightFact(models.Model):
         blank=True,
         help_text="12-month projected spend (EPIC 4.1)"
     )
+    projected_lower_bound = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Lower bound of the 95% prediction interval (Confidence Corridor)"
+    )
+    projected_upper_bound = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Upper bound of the 95% prediction interval (Confidence Corridor)"
+    )
 
     # Natural Language Summary
     expert_summary = models.TextField(
         help_text="Expert-grade natural language summary of the insight (EPIC 4.2)"
+    )
+
+    # External Normalization (EPIC 3.2)
+    benchmark_slope = models.DecimalField(
+        max_digits=7,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        help_text="The external baseline slope (e.g., CPI) used for comparison"
+    )
+    benchmark_classification = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        choices=[
+            ('REAL_GROWTH', 'Real Growth'),
+            ('INFLATION_TRACKED', 'Inflation Tracked'),
+            ('EFFICIENCY_GAIN', 'Efficiency Gain'),
+        ],
+        help_text="Classification: REAL_GROWTH, INFLATION_TRACKED, or EFFICIENCY_GAIN"
     )
 
     class Meta:

@@ -24,6 +24,18 @@ class ProjectionResult:
     lower_bound: pd.Series
     selected_model: str
 
+    def to_payload(self) -> dict:
+        """Return a first-period snapshot payload with explicit interval keys."""
+        projected_value = float(self.projected_series.iloc[0]) if len(self.projected_series) > 0 else None
+        upper_bound = float(self.upper_bound.iloc[0]) if len(self.upper_bound) > 0 else None
+        lower_bound = float(self.lower_bound.iloc[0]) if len(self.lower_bound) > 0 else None
+        return {
+            'projected_value': projected_value,
+            'upper_bound': upper_bound,
+            'lower_bound': lower_bound,
+            'selected_model': self.selected_model,
+        }
+
 
 class ProjectionEngine:
     """
