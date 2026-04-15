@@ -396,17 +396,11 @@ class RunCoherenceTestCase(TestCase):
 
         # Create a family
         self.family = Family.objects.create(
-            name="Test Family",
-            country="CA",
-            currency="CAD"
+            name="Test Family"
         )
 
         # Create a user associated with the family
-        self.user = User.objects.create_user(
-            username="testuser",
-            email="test@example.com",
-            password="testpass123"
-        )
+        self.user = User.objects.create_user("test@example.com", "testpass123")
         self.user.family = self.family
         self.user.save()
 
@@ -499,9 +493,7 @@ class RunCoherenceTestCase(TestCase):
 
         # Create a family with no completed runs
         new_family = Family.objects.create(
-            name="No Runs Family",
-            country="CA",
-            currency="CAD"
+            name="No Runs Family"
         )
 
         latest_run = (
@@ -520,9 +512,7 @@ class RunCoherenceTestCase(TestCase):
 
         # Create a separate family
         other_family = Family.objects.create(
-            name="Other Family",
-            country="CA",
-            currency="CAD"
+            name="Other Family"
         )
 
         # Create a category and run for the other family
