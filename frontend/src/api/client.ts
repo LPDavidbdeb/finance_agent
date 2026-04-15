@@ -937,7 +937,7 @@ export async function changePassword(
 // --- Analysis API ---
 
 export async function fetchTopInsights() {
-  const res = await fetch(`${API_URL}/analysis/insights/top`, {
+  const res = await fetch(`${API_URL}/analysis/insights/top/`, {
     headers: getAuthHeader(),
   });
   if (!res.ok) {
@@ -948,7 +948,7 @@ export async function fetchTopInsights() {
 }
 
 export async function triggerAnalyticsEngine() {
-  const res = await fetch(`${API_URL}/analysis/engine/trigger`, {
+  const res = await fetch(`${API_URL}/analysis/engine/trigger/`, {
     method: "POST",
     headers: getAuthHeader(),
   });
@@ -985,7 +985,7 @@ export interface LatestInsightsSnapshot {
 }
 
 export async function getEngineStatus(): Promise<EngineStatus> {
-  const res = await fetch(`${API_URL}/analysis/engine/status`, {
+  const res = await fetch(`${API_URL}/analysis/engine/status/`, {
     headers: getAuthHeader(),
   });
   if (!res.ok) {
