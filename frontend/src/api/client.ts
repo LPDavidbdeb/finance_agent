@@ -933,3 +933,76 @@ export async function changePassword(
     throw new Error(data.detail || 'Failed to change password');
   }
 }
+
+// --- Analysis API ---
+
+export async function fetchTopInsights() {
+  const res = await fetch(`${API_URL}/analysis/insights/top/`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to fetch top financial insights");
+  }
+  return res.json();
+}
+
+export async function triggerAnalyticsEngine() {
+  const res = await fetch(`${API_URL}/analysis/engine/trigger/`, {
+    method: "POST",
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to trigger analytics engine");
+  }
+  return res.json();
+}
+
+export interface AnalysisInsightRow {
+  id: string;
+  categoryName: string;
+  insight_score: number;
+  materiality_pct: number;
+  processType: 'DETERMINISTIC' | 'STOCHASTIC' | 'EPISODIC';
+  expertSummary: string;
+  causal_volume_pct: number | null;
+  causal_price_pct: number | null;
+}
+
+export interface EngineStatus {
+  status: "idle" | "syncing";
+  last_computed_at: string | null;
+  total_facts: number;
+}
+
+export interface LatestInsightsSnapshot {
+  run_id: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  total_insights: number;
+  insights: AnalysisInsightRow[];
+}
+
+export async function getEngineStatus(): Promise<EngineStatus> {
+  const res = await fetch(`${API_URL}/analysis/engine/status/`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to fetch analytics engine status");
+  }
+  return res.json();
+}
+
+export async function fetchLatestInsightsSnapshot(): Promise<LatestInsightsSnapshot> {
+  const res = await fetch(`${API_URL}/analysis/insights/latest/`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error("Unauthorized");
+    throw new Error("Failed to fetch latest insights snapshot");
+  }
+  return res.json();
+}
+

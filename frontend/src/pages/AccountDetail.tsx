@@ -504,7 +504,6 @@ export const AccountDetail: React.FC = () => {
           {account.historical_trends.length > 1 && (() => {
             const sortedTrends = account.historical_trends.slice().sort((a, b) => a.year - b.year);
             const isPct = historyMode === '%';
-            const dataKey = isPct ? 'pct_of_income' : 'total';
             const avgValue = isPct
               ? sortedTrends.filter(t => t.pct_of_income > 0).reduce((s, t) => s + t.pct_of_income, 0) /
                 (sortedTrends.filter(t => t.pct_of_income > 0).length || 1)
@@ -582,7 +581,7 @@ export const AccountDetail: React.FC = () => {
                           strokeDasharray="4 4"
                           label={{ position: 'right', value: 'Avg', fill: '#94a3b8', fontSize: 9, fontWeight: 'bold' }}
                         />
-                        <Bar dataKey="realized_total" stackId="a" radius={ (entry: any) => entry.estimated_total <= 0 ? [4, 4, 0, 0] : [0, 0, 0, 0] } maxBarSize={60}>
+                        <Bar dataKey="realized_total" stackId="a" radius={[0, 0, 0, 0]} maxBarSize={60}>
                           {sortedTrends.map((entry) => (
                             <Cell
                               key={entry.year}
