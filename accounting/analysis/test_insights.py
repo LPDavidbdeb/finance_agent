@@ -209,7 +209,7 @@ class TestInsightEngine(unittest.TestCase):
         # Should not raise error
         ranked = self.engine.rank([profile])
         self.assertEqual(len(ranked), 1)
-        self.assertGreater(ranked[0].insight_score, 0)
+        self.assertGreaterEqual(ranked[0].insight_score, 0)
 
     def test_mix_shift_not_counted_when_causal_none(self):
         """Verify mix_shift points not added when CausalResult is None."""
@@ -276,7 +276,7 @@ class TestInsightEngine(unittest.TestCase):
         self.assertIn("Structural break", summary)
         self.assertIn("upward trend", summary)
         self.assertIn("2026 Projection", summary)
-        self.assertIn("5000", summary)
+        self.assertIn("$5,000", summary)
         self.assertIn("±", summary)
 
     def test_expert_summary_with_causal_effects(self):

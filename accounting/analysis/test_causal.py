@@ -156,42 +156,42 @@ class TestCausalAnalyzer(unittest.TestCase):
         L12M (2024-12-31 to 2025-12-31): 10% of spend at MerchantA, 90% at MerchantB
         Expected: mix_shift_detected = True (change of 80 percentage points > threshold)
         """
-        # Create P12M (2024): 90% at MerchantA, 10% at MerchantB (9:1 ratio)
+        # Create P12M (2024): MerchantA dominates with smaller tickets, MerchantB has larger tickets.
         p12m_txns = []
         day_counter = 0
         for month in range(12):
-            # 9 purchases at MerchantA (90%)
+            # 9 purchases at MerchantA
             for i in range(9):
                 p12m_txns.append({
                     'date': pd.Timestamp('2024-01-01') + timedelta(days=day_counter),
-                    'amount': 50.0,
+                    'amount': 10.0,
                     'merchant_name': 'MerchantA'
                 })
                 day_counter += 1
-            # 1 purchase at MerchantB (10%)
+            # 1 purchase at MerchantB, but with a much larger ticket to skew spend share
             p12m_txns.append({
                 'date': pd.Timestamp('2024-01-01') + timedelta(days=day_counter),
-                'amount': 50.0,
+                'amount': 100.0,
                 'merchant_name': 'MerchantB'
             })
             day_counter += 1
 
-        # Create L12M (2025): 10% at MerchantA, 90% at MerchantB (flipped)
+        # Create L12M (2025): flip the ticket sizes so MerchantB now dominates spend.
         l12m_txns = []
         day_counter = 0
         for month in range(12):
-            # 1 purchase at MerchantA (10%)
+            # 1 purchase at MerchantA, now with the larger ticket
             l12m_txns.append({
                 'date': pd.Timestamp('2025-01-01') + timedelta(days=day_counter),
-                'amount': 50.0,
+                'amount': 100.0,
                 'merchant_name': 'MerchantA'
             })
             day_counter += 1
-            # 9 purchases at MerchantB (90%)
+            # 9 purchases at MerchantB with smaller tickets
             for i in range(9):
                 l12m_txns.append({
                     'date': pd.Timestamp('2025-01-01') + timedelta(days=day_counter),
-                    'amount': 50.0,
+                    'amount': 10.0,
                     'merchant_name': 'MerchantB'
                 })
                 day_counter += 1

@@ -5,13 +5,12 @@ from unittest.mock import patch
 from django.core.management import call_command
 from django.contrib.auth import get_user_model
 from django.test import TestCase
-from ninja.testing import TestClient
 from ninja_jwt.tokens import AccessToken
 
 from accounting.models import Account, JournalEntry, TransactionLine
 from banking.consistency import TransactionConsistencyReport
 from banking.models import BankStatementImport, FinancialInstitution, FinancialProduct, StagedTransaction
-from quality.api import router as quality_router
+from finance_backend.test_client import api_test_client
 from quality.models import ConsistencyReportFinding, ConsistencyReportRun
 from quality.services import create_consistency_report_run
 from users.models import Family
@@ -79,7 +78,7 @@ class ConsistencyReportPersistenceTest(TestCase):
 class ReprocessCommandReportPersistenceTest(TestCase):
     def setUp(self):
         self.family = Family.objects.create(name='Reprocess Family')
-        self.user = User.objects.create_user(email='reprocess@example.com', password='x', family=self.family)
+        self.user = User.objects.create_user('reprocess@example.com', 'x', family=self.family)
         self.institution = FinancialInstitution.objects.create(name='Test Bank')
         self.account = Account.objects.create(
             name='Reprocess Checking',
@@ -173,12 +172,12 @@ class LedgerResetCommandReportPersistenceTest(TestCase):
 
 class QualityApiTest(TestCase):
     def setUp(self):
-        self.client = TestClient(quality_router)
+        self.client = api_test_client
         self.family_a = Family.objects.create(name='Quality A')
         self.family_b = Family.objects.create(name='Quality B')
 
-        self.user_a = User.objects.create_user(email='qa@example.com', password='x', family=self.family_a)
-        self.user_b = User.objects.create_user(email='qb@example.com', password='x', family=self.family_b)
+        self.user_a = User.objects.create_user('qa@example.com', 'x', family=self.family_a)
+        self.user_b = User.objects.create_user('qb@example.com', 'x', family=self.family_b)
         self.headers_a = {'Authorization': f"Bearer {str(AccessToken.for_user(self.user_a))}"}
         self.headers_b = {'Authorization': f"Bearer {str(AccessToken.for_user(self.user_b))}"}
 
@@ -234,26 +233,26 @@ class QualityApiTest(TestCase):
         )
 
     def test_list_runs_is_family_scoped(self):
-        response_a = self.client.get('/consistency-runs', headers=self.headers_a)
+        response_a = self.client.get('/quality/consistency-runs', headers=self.headers_a)
         self.assertEqual(response_a.status_code, 200)
         self.assertEqual(len(response_a.json()), 1)
         self.assertEqual(response_a.json()[0]['id'], self.run_a.id)
 
-        response_b = self.client.get('/consistency-runs', headers=self.headers_b)
+        response_b = self.client.get('/quality/consistency-runs', headers=self.headers_b)
         self.assertEqual(response_b.status_code, 200)
         self.assertEqual(response_b.json(), [])
 
     def test_get_findings_is_family_scoped(self):
-        response_a = self.client.get(f'/consistency-runs/{self.run_a.id}/findings', headers=self.headers_a)
+        response_a = self.client.get(f'/quality/consistency-runs/{self.run_a.id}/findings', headers=self.headers_a)
         self.assertEqual(response_a.status_code, 200)
         self.assertEqual(len(response_a.json()), 1)
         self.assertEqual(response_a.json()[0]['category'], 'ZERO_AMOUNT_UNPROCESSED')
 
-        response_b = self.client.get(f'/consistency-runs/{self.run_a.id}/findings', headers=self.headers_b)
+        response_b = self.client.get(f'/quality/consistency-runs/{self.run_a.id}/findings', headers=self.headers_b)
         self.assertEqual(response_b.status_code, 404)
 
     def test_get_unresolved_transactions_returns_old_nonzero_rows(self):
-        response = self.client.get(f'/consistency-runs/{self.run_a.id}/unresolved-transactions', headers=self.headers_a)
+        response = self.client.get(f'/quality/consistency-runs/{self.run_a.id}/unresolved-transactions', headers=self.headers_a)
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(len(payload), 1)
@@ -262,12 +261,12 @@ class QualityApiTest(TestCase):
         self.assertEqual(payload[0]['raw_description'], 'Old unresolved row')
         self.assertEqual(payload[0]['amount'], '45.67')
 
-        response_b = self.client.get(f'/consistency-runs/{self.run_a.id}/unresolved-transactions', headers=self.headers_b)
+        response_b = self.client.get(f'/quality/consistency-runs/{self.run_a.id}/unresolved-transactions', headers=self.headers_b)
         self.assertEqual(response_b.status_code, 404)
 
     def test_trigger_manual_run_respects_statement_scope(self):
         response = self.client.post(
-            '/consistency-runs',
+            '/quality/consistency-runs',
             json={'statement_ids': [self.statement_a.id]},
             headers=self.headers_a,
         )
@@ -287,7 +286,7 @@ class QualityApiTest(TestCase):
         statement_b = BankStatementImport.objects.create(financial_product=product_b, institution=self.institution)
 
         response = self.client.post(
-            '/consistency-runs',
+            '/quality/consistency-runs',
             json={'statement_ids': [statement_b.id]},
             headers=self.headers_a,
         )

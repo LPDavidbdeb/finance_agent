@@ -1,5 +1,4 @@
-from ninja import NinjaAPI, Router, errors
-from ninja_jwt.controller import NinjaJWTDefaultController
+from ninja import NinjaAPI, errors
 from ninja_jwt.routers.obtain import obtain_pair_router
 from ninja_jwt.authentication import JWTAuth
 from django.conf import settings
@@ -17,6 +16,7 @@ api = NinjaAPI(
     title="Finance Headless API",
     auth=JWTAuth(),
     docs_url="/docs" if settings.DEBUG else None,
+    urls_namespace="finance_api",
 )
 
 api.add_router("/auth/", obtain_pair_router, auth=None)

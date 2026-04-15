@@ -21,8 +21,7 @@ class ETLPipelineTestCase(TestCase):
     def setUp(self):
         """Create test family and expense categories."""
         self.family = Family.objects.create(
-            name="ETL Test Family",
-            timezone="America/Toronto"
+            name="ETL Test Family"
         )
         
         # Create expense categories
@@ -68,8 +67,7 @@ class ETLPipelineTestCase(TestCase):
         
         # Create another family
         other_family = Family.objects.create(
-            name="Other Family",
-            timezone="America/Montreal"
+            name="Other Family"
         )
         
         # Process only the test family
@@ -151,8 +149,7 @@ class ETLPipelineTestCase(TestCase):
         
         # Create another family with separate data
         other_family = Family.objects.create(
-            name="Other Family",
-            timezone="America/Montreal"
+            name="Other Family"
         )
         
         other_category = Account.objects.create(
@@ -334,8 +331,7 @@ class ETLIntegrationTestCase(TestCase):
     def setUp(self):
         """Create test environment."""
         self.family = Family.objects.create(
-            name="Integration Test Family",
-            timezone="America/Toronto"
+            name="Integration Test Family"
         )
         
         self.category = Account.objects.create(

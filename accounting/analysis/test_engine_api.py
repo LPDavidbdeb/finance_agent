@@ -19,11 +19,7 @@ class EngineOrchestrationApiTests(TestCase):
     def setUp(self):
         cache.delete(INSIGHTS_SYNC_CACHE_KEY)
         self.family = Family.objects.create(name="Engine API Family")
-        self.user = User.objects.create_user(
-            email="engine-status@example.com",
-            password="secret123",
-            family=self.family,
-        )
+        self.user = User.objects.create_user("engine-status@example.com", "secret123", family=self.family)
         self.request = SimpleNamespace(auth=self.user)
 
         self.category = Account.objects.create(
@@ -111,9 +107,15 @@ class TopInsightsApiTests(TestCase):
         self.family = Family.objects.create(name="Primary Family")
         self.other_family = Family.objects.create(name="Other Family")
 
+        self.latest_run = AnalysisRun.objects.create(
+            family=self.family,
+            status=AnalysisRun.Status.SUCCEEDED,
+            completed_at=timezone.now(),
+        )
+
         self.user = User.objects.create_user(
-            email="analysis@example.com",
-            password="secret123",
+            "analysis@example.com",
+            "secret123",
             family=self.family,
         )
         self.request = SimpleNamespace(auth=self.user)
@@ -139,6 +141,7 @@ class TopInsightsApiTests(TestCase):
 
         old = InsightFact.objects.create(
             category=self.cat_food,
+            analysis_run=self.latest_run,
             insight_score=100.0,
             materiality_pct=5.0,
             process_type="STOCHASTIC",
@@ -150,6 +153,7 @@ class TopInsightsApiTests(TestCase):
 
         InsightFact.objects.create(
             category=self.cat_food,
+            analysis_run=self.latest_run,
             insight_score=250.0,
             materiality_pct=6.0,
             process_type="STOCHASTIC",
@@ -159,6 +163,7 @@ class TopInsightsApiTests(TestCase):
         )
         InsightFact.objects.create(
             category=self.cat_rent,
+            analysis_run=self.latest_run,
             insight_score=150.0,
             materiality_pct=20.0,
             process_type="DETERMINISTIC",
@@ -174,7 +179,8 @@ class TopInsightsApiTests(TestCase):
 
         response = get_top_insights(self.request, top_n=10)
 
-        self.assertEqual(len(response), 2)
+        # Snapshot-consistent /top/ now returns all facts from the single successful AnalysisRun.
+        self.assertEqual(len(response), 3)
         self.assertEqual(response[0].categoryName, "Groceries")
         self.assertEqual(response[0].insight_score, 250.0)
         self.assertEqual(response[0].causal_volume_pct, 3.2)
@@ -185,6 +191,7 @@ class TopInsightsApiTests(TestCase):
 
         InsightFact.objects.create(
             category=self.cat_food,
+            analysis_run=self.latest_run,
             insight_score=200.0,
             materiality_pct=8.0,
             process_type="STOCHASTIC",
@@ -192,6 +199,7 @@ class TopInsightsApiTests(TestCase):
         )
         InsightFact.objects.create(
             category=self.cat_rent,
+            analysis_run=self.latest_run,
             insight_score=120.0,
             materiality_pct=18.0,
             process_type="DETERMINISTIC",
@@ -210,8 +218,8 @@ class LatestInsightsSnapshotApiTests(TestCase):
         self.other_family = Family.objects.create(name="Other Snapshot Family")
 
         self.user = User.objects.create_user(
-            email="snapshot@example.com",
-            password="secret123",
+            "snapshot@example.com",
+            "secret123",
             family=self.family,
         )
         self.request = SimpleNamespace(auth=self.user)

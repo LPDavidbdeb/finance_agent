@@ -6,23 +6,19 @@ This is a headless personal finance and wealth management application built for 
 finance_agent/
 ├── manage.py
 ├── requirements.txt
+├── docs/                     # General implementation, test results, and coherence docs
 ├── finance_backend/          # Django project config
 │   ├── api.py                # Root API router
 │   ├── urls.py
 │   ├── celery.py
-│   ├── settings/
-│   │   ├── base.py
-│   │   ├── local.py
-│   │   └── remote.py
-│   └── utils/
-│       └── time_value.py
+│   └── settings/
 ├── users/                    # Auth, Family, FamilyMember models
-├── accounting/               # Chart of Accounts, JournalEntry, TransactionLine (django-mptt)
+├── accounting/               # Chart of Accounts, JournalEntry, TransactionLine
+│   ├── docs/                 # Analysis Framework, EPIC 1-4, Normalization docs
+│   └── tasks.py              # Analytical ETL Pipeline
 ├── banking/                  # BankStatementImport, StagedTransaction, FinancialProduct
-│   ├── extraction.py         # PDF parsing logic (tabula-py, pandas)
-│   ├── services.py           # Ingestion pipeline orchestration
-│   ├── mappers.py
-│   └── tasks.py              # Celery async tasks
+│   ├── docs/                 # Extraction fixes and workflow docs
+│   └── extraction.py         # PDF parsing logic
 ├── categorization/           # Merchant, TransactionMappingRule, auto-categorization
 │   └── services.py
 ├── planning/                 # Stateless simulation engine (no models yet)
@@ -31,14 +27,11 @@ finance_agent/
 ├── quality/                  # Consistency report runs, findings, and investigation hooks
 │   ├── api.py                # Persisted report run + findings endpoints (Django Ninja)
 │   ├── models.py             # ConsistencyReportRun, ConsistencyReportFinding
-│   ├── schemas.py            # API schemas for report runs/findings
-│   ├── services.py           # Persist/report rendering helpers
-│   └── tests.py              # Report persistence regression tests
+│   └── docs/                 # Quality reports documentation (if any)
+├── assets/                   # Asset tracking and lifecycle management
+│   ├── docs/                 # Asset architecture and lifecycle docs
+│   └── models.py
 ├── ai_core/                  # AI extraction strategies
-│   └── extractors/
-│       ├── factory.py
-│       ├── strategies.py
-│       └── base.py
 └── frontend/                 # React 18 + TypeScript + Vite
     └── src/
         ├── pages/            # Dashboard, FamilyManager, MerchantManager, QualityReportsPage, AccountDetail, etc.

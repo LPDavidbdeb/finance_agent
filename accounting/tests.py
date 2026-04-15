@@ -1,7 +1,6 @@
 from django.test import TestCase
 from django.contrib.auth import get_user_model
-from ninja.testing import TestClient
-from finance_backend.api import api
+from finance_backend.test_client import api_test_client
 from users.models import Family
 from accounting.models import Account, JournalEntry, TransactionLine
 from decimal import Decimal
@@ -11,16 +10,16 @@ User = get_user_model()
 
 class AccountingApiTest(TestCase):
     def setUp(self):
-        self.client = TestClient(api)
-        
+        self.client = api_test_client
+
         # Create Families
         self.family_a = Family.objects.create(name="Family A")
         self.family_b = Family.objects.create(name="Family B")
         
         # Create Users
-        self.user_a = User.objects.create_user(email="user_a@example.com", password="password", family=self.family_a)
-        self.user_b = User.objects.create_user(email="user_b@example.com", password="password", family=self.family_b)
-        
+        self.user_a = User.objects.create_user("user_a@example.com", "password", family=self.family_a)
+        self.user_b = User.objects.create_user("user_b@example.com", "password", family=self.family_b)
+
         # Create Tokens
         self.token_a = str(AccessToken.for_user(self.user_a))
         self.headers_a = {"Authorization": f"Bearer {self.token_a}"}
@@ -163,13 +162,13 @@ class AccountingApiTest(TestCase):
 
 class AccountManagementTest(TestCase):
     def setUp(self):
-        self.client = TestClient(api)
+        self.client = api_test_client
         self.family1 = Family.objects.create(name="Family 1")
         self.family2 = Family.objects.create(name="Family 2")
         
-        self.user1 = User.objects.create_user(email="u1@test.com", password="password", family=self.family1)
-        self.user2 = User.objects.create_user(email="u2@test.com", password="password", family=self.family2)
-        
+        self.user1 = User.objects.create_user("u1@test.com", "password", family=self.family1)
+        self.user2 = User.objects.create_user("u2@test.com", "password", family=self.family2)
+
         self.token1 = str(AccessToken.for_user(self.user1))
         self.headers1 = {"Authorization": f"Bearer {self.token1}"}
         

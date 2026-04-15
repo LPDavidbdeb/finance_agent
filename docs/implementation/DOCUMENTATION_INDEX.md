@@ -311,17 +311,16 @@ InsightFact(..., projected_lower_bound=..., projected_upper_bound=...)
 
 ## 📍 Location
 
-All files are in the project root:
+All implementation documentation files are in:
 ```
-/Users/Louis-Philippe/Documents/finance_agent/
+/Users/Louis-Philippe/Documents/finance_agent/docs/implementation/
 ├── NEXT_STEPS.md
 ├── FINAL_SUMMARY.md
 ├── IMPLEMENTATION_DETAILS.md
 ├── CHANGES_MADE.md
 ├── QUICK_REFERENCE.md
 ├── IMPLEMENTATION_SUMMARY.md
-├── DOCUMENTATION_INDEX.md (← you are here)
-└── [source code files with changes]
+└── DOCUMENTATION_INDEX.md (← you are here)
 ```
 
 ---

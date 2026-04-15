@@ -13,8 +13,7 @@ class InsightFactModelTestCase(TestCase):
     def setUp(self):
         """Create test data."""
         self.family = Family.objects.create(
-            name="Test Family",
-            timezone="America/Toronto"
+            name="Test Family"
         )
         self.category = Account.objects.create(
             name="Groceries",
@@ -277,8 +276,7 @@ class HybridLayerIntegrationTestCase(TestCase):
     def setUp(self):
         """Create test family and categories."""
         self.family = Family.objects.create(
-            name="Integration Test Family",
-            timezone="America/Toronto"
+            name="Integration Test Family"
         )
 
         # Create expense categories

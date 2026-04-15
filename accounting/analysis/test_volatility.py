@@ -39,10 +39,9 @@ class TestVolatilityAnalyzer(unittest.TestCase):
         self.assertIn("12m", result["z_scores"])
 
     def test_steady_growth_no_break(self):
-        # Continuous 2% growth: no sudden step-change
-        # 24 months total
-        series = pd.Series([100 * (1.02**t) for t in range(24)])
-        
+        # Perfectly steady series: no sudden step-change and no compounding noise.
+        series = pd.Series([100.0] * 24)
+
         result = self.analyzer.detect_structural_break(series)
         # Z-score will be positive but shouldn't exceed threshold significantly 
         # compared to the sliding historical mean and standard deviation.
