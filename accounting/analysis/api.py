@@ -1,10 +1,10 @@
 from ninja import Router, errors
 from pydantic import BaseModel, Field
 from typing import List, Optional
+from decimal import Decimal
 from ninja_jwt.authentication import JWTAuth
 from datetime import datetime
 from django.core.cache import cache
-from django.db.models import OuterRef, Subquery
 
 from accounting.models import AnalysisRun, InsightFact
 from accounting.tasks import rebuild_financial_insights, INSIGHTS_SYNC_CACHE_KEY
@@ -33,6 +33,8 @@ class InsightResponseSchema(BaseModel):
         expertSummary: Multi-sentence expert explanation
         causal_volume_pct: Volume effect % change (if available)
         causal_price_pct: Price effect % change (if available)
+        benchmark_slope: External baseline slope for normalization comparison
+        benchmark_classification: Classification vs benchmark (REAL_GROWTH, INFLATION_TRACKED, EFFICIENCY_GAIN)
     """
     id: str = Field(..., description="Unique identifier (category name)")
     categoryName: str = Field(..., description="Display name of category")
@@ -42,6 +44,22 @@ class InsightResponseSchema(BaseModel):
     expertSummary: str = Field(..., description="Expert-grade summary of insights")
     causal_volume_pct: Optional[float] = Field(None, description="Volume effect % (if available)")
     causal_price_pct: Optional[float] = Field(None, description="Price effect % (if available)")
+    projected_lower_bound: Decimal | None = Field(
+        None,
+        description="Lower bound of the 95% prediction interval (Confidence Corridor)",
+    )
+    projected_upper_bound: Decimal | None = Field(
+        None,
+        description="Upper bound of the 95% prediction interval (Confidence Corridor)",
+    )
+    benchmark_slope: Decimal | None = Field(
+        None,
+        description="External baseline slope (e.g., CPI) used for normalization comparison (EPIC 3.2)"
+    )
+    benchmark_classification: Optional[str] = Field(
+        None,
+        description="Classification against benchmark: REAL_GROWTH, INFLATION_TRACKED, or EFFICIENCY_GAIN"
+    )
 
     class Config:
         """Pydantic configuration."""
@@ -74,14 +92,16 @@ router = Router(auth=JWTAuth())
 
 
 @router.get("/insights/top/", response=List[InsightResponseSchema])
-def get_top_insights(request, top_n: int = 5):
+def get_top_insights(request, top_n: int = 5, run_id: Optional[int] = None):
     """
     Get top materiality-weighted insights for the logged-in user's family.
 
     Returns a ranked list of insights sorted by insight_score (descending).
+    Results are snapshot-consistent based on a specific AnalysisRun.
 
     Query Parameters:
         top_n: Number of top insights to return (default 5, max 20)
+        run_id: Optional AnalysisRun ID to filter insights. If not provided, uses the most recent completed run.
 
     Returns:
         List[InsightResponseSchema]: Ranked insights with summaries and causal effects
@@ -110,14 +130,28 @@ def get_top_insights(request, top_n: int = 5):
     if family is None:
         return []
 
-    latest_fact_for_category = InsightFact.objects.filter(
-        category_id=OuterRef("category_id"),
-        category__family=family,
-    ).order_by("-computed_at", "-id").values("id")[:1]
+    # Determine which AnalysisRun to use for filtering
+    target_run_id = run_id
+    if target_run_id is None:
+        # Find the most recently completed run for this family
+        latest_run = (
+            AnalysisRun.objects
+            .filter(family=family, status=AnalysisRun.Status.SUCCEEDED)
+            .order_by("-completed_at", "-id")
+            .first()
+        )
+        # If no completed run exists, return empty list
+        if latest_run is None:
+            return []
+        target_run_id = latest_run.id
 
-    latest_facts = (
+    # Query InsightFact for the specific run, maintaining family scoping
+    insights = (
         InsightFact.objects
-        .filter(category__family=family, id=Subquery(latest_fact_for_category))
+        .filter(
+            category__family=family,
+            analysis_run_id=target_run_id
+        )
         .select_related("category")
         .order_by("-insight_score", "category__name")[:top_n]
     )
@@ -132,8 +166,12 @@ def get_top_insights(request, top_n: int = 5):
             expertSummary=fact.expert_summary,
             causal_volume_pct=fact.causal_volume_pct,
             causal_price_pct=fact.causal_price_pct,
+            projected_lower_bound=fact.projected_lower_bound,
+            projected_upper_bound=fact.projected_upper_bound,
+            benchmark_slope=fact.benchmark_slope,
+            benchmark_classification=fact.benchmark_classification,
         )
-        for fact in latest_facts
+        for fact in insights
     ]
 
 
@@ -166,7 +204,7 @@ def get_latest_insights_snapshot(request):
     run = (
         AnalysisRun.objects
         .filter(family=family, status=AnalysisRun.Status.SUCCEEDED)
-        .order_by("-started_at", "-id")
+        .order_by("-completed_at", "-id")
         .first()
     )
 
@@ -190,6 +228,10 @@ def get_latest_insights_snapshot(request):
             expertSummary=fact.expert_summary,
             causal_volume_pct=fact.causal_volume_pct,
             causal_price_pct=fact.causal_price_pct,
+            projected_lower_bound=fact.projected_lower_bound,
+            projected_upper_bound=fact.projected_upper_bound,
+            benchmark_slope=fact.benchmark_slope,
+            benchmark_classification=fact.benchmark_classification,
         )
         for fact in facts
     ]

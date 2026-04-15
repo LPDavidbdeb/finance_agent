@@ -8,10 +8,15 @@ from django.core.cache import cache
 from celery import shared_task
 
 from accounting.models import Account, AnalysisRun, CategoryMonthlyStat, InsightFact
-from accounting.analysis.classification import ProcessClassifier
+from accounting.analysis.classification import ProcessClassifier, ProcessType
 from accounting.analysis.trend import TrendAnalyzer
 from accounting.analysis.volatility import VolatilityAnalyzer, VolatilityResult
 from accounting.analysis.insights import InsightEngine, CategoryProfile
+from accounting.analysis.filters import SignalFilter
+from accounting.analysis.sanity import SanityLayer
+from accounting.analysis.causal import CausalAnalyzer
+
+from banking.models import StagedTransaction
 
 logger = logging.getLogger(__name__)
 INSIGHTS_SYNC_CACHE_KEY = "insights_is_syncing"
@@ -209,6 +214,32 @@ def _extract_category_data(family):
     return pandas_dataframes
 
 
+def _extract_transaction_data(category_id):
+    """
+    Fetch transaction-level data for a specific category to support Causal Decomposition.
+    
+    Returns:
+        pd.DataFrame: Columns [date, amount, merchant_name]
+    """
+    txns = StagedTransaction.objects.filter(
+        predicted_account_id=category_id
+    ).select_related('merchant').values('bank_date', 'amount', 'merchant__name')
+
+    if not txns:
+        return pd.DataFrame(columns=['date', 'amount', 'merchant_name'])
+
+    df = pd.DataFrame(txns)
+    df.rename(columns={
+        'bank_date': 'date',
+        'merchant__name': 'merchant_name'
+    }, inplace=True)
+    
+    # Fill missing merchant names
+    df['merchant_name'] = df['merchant_name'].fillna('Unknown Merchant')
+    
+    return df
+
+
 def _transform_through_pipeline(family, category_dataframes):
     """
     Step 3: Transform data through the EPIC 1-4 mathematical pipeline.
@@ -235,11 +266,15 @@ def _transform_through_pipeline(family, category_dataframes):
     trend_analyzer = TrendAnalyzer()
     volatility_analyzer = VolatilityAnalyzer()
     projection_engine = ProjectionEngine()
+    signal_filter = SignalFilter()
+    sanity_layer = SanityLayer()
+    causal_analyzer = CausalAnalyzer()
 
     # Get materiality (total spend by category)
     total_family_spend = CategoryMonthlyStat.objects.filter(
         category_id__in=Account.objects.filter(family=family).values_list('id', flat=True)
     ).aggregate(Sum('total_amount'))['total_amount__sum'] or Decimal('1')
+    total_family_spend_float = float(total_family_spend)
 
     # Process each category
     for category_id, series in category_dataframes.items():
@@ -252,40 +287,61 @@ def _transform_through_pipeline(family, category_dataframes):
                 logger.debug(f"Skipping {account.name}: insufficient data ({len(series)} points)")
                 continue
 
+            # STEP 0: Data Filtering & Sanity
+            # 0.1 Materiality & Sparsity Classification
+            category_spend = float(CategoryMonthlyStat.objects.filter(
+                category_id=category_id
+            ).aggregate(Sum('total_amount'))['total_amount__sum'] or 0)
+            
+            materiality_status = signal_filter.classify_materiality(category_spend, total_family_spend_float)
+            sparsity_status = signal_filter.classify_sparsity(series)
+
+            # 0.2 Sanity & Imputation Layer (Intercept & Clean)
+            cleaned_series = sanity_layer.process(series)
+
             # EPIC 1: Classify process type
-            process_type = classifier.classify(series)
+            if sparsity_status == "Sparse":
+                # Circuit breaker: bypass Log-Linear regression and default to Episodic
+                process_type = ProcessType.EPISODIC
+            else:
+                process_type = classifier.classify(cleaned_series, sparsity_status=sparsity_status)
 
             # EPIC 2: Analyze trend
-            trend_result = trend_analyzer.analyze(series)
+            trend_result = trend_analyzer.analyze(cleaned_series)
             
             # EPIC 2: Analyze volatility
-            volatility_result = volatility_analyzer.detect_structural_break(series)
+            volatility_result = volatility_analyzer.detect_structural_break(cleaned_series)
             volatility_result_obj = VolatilityResult(
                 ser=volatility_result.get('ser', 0.0),
                 has_structural_break=volatility_result.get('has_structural_break', False),
                 z_scores=volatility_result.get('z_scores', {})
             )
 
-            # EPIC 3: Causal analysis (if sufficient data)
+            # EPIC 3: Causal analysis (Price, Volume, Mix Decomposition)
             causal_result = None
-            if len(series) >= 12:
-                # Would need raw transaction data for CausalAnalyzer
-                # For now, skip causal analysis in ETL
+            try:
+                # Fetch raw transaction data for causal decomposition
+                transactions_df = _extract_transaction_data(category_id)
+                
+                if len(transactions_df) >= 2:
+                    causal_result = causal_analyzer.analyze(transactions_df)
+                    logger.debug(f"Causal decomposition complete for {account.name}")
+            except Exception as causal_exc:
+                logger.warning(f"Causal analysis failed for {account.name}: {str(causal_exc)}")
+                # Continue without causal result if decomposition fails
                 pass
 
             # EPIC 4.1: Project future values
             projection_result = projection_engine.project(
-                historical_series=series,
+                historical_series=cleaned_series,
                 process_type=process_type,
                 trend_result=trend_result,
                 volatility_result=volatility_result_obj,
                 reference_date=pd.Timestamp.now()
             )
+            projection_payload = projection_result.to_payload()
 
             # Calculate materiality percentage
-            category_spend = float(CategoryMonthlyStat.objects.filter(
-                category_id=category_id
-            ).aggregate(Sum('total_amount'))['total_amount__sum'] or 0)
             materiality_pct = (category_spend / float(total_family_spend) * 100) if total_family_spend > 0 else 0
 
             # EPIC 4.2: Create CategoryProfile for ranking
@@ -296,9 +352,11 @@ def _transform_through_pipeline(family, category_dataframes):
                 trend_result=trend_result,
                 volatility_result=volatility_result_obj,
                 causal_result=causal_result,
-                projected_value=float(projection_result.projected_series.iloc[0]) if len(projection_result.projected_series) > 0 else None,
-                projected_upper=float(projection_result.upper_bound.iloc[0]) if len(projection_result.upper_bound) > 0 else None,
-                projected_lower=float(projection_result.lower_bound.iloc[0]) if len(projection_result.lower_bound) > 0 else None,
+                projected_value=projection_payload.get('projected_value'),
+                projected_upper=projection_payload.get('upper_bound'),
+                projected_lower=projection_payload.get('lower_bound'),
+                materiality_status=materiality_status,
+                sparsity_status=sparsity_status
             )
 
             # Generate expert summary
@@ -308,6 +366,7 @@ def _transform_through_pipeline(family, category_dataframes):
             # Store with summary for loading
             profile._expert_summary = expert_summary
             profile._account_id = category_id
+            profile._projection_result = projection_payload
 
             category_profiles.append(profile)
             logger.debug(f"Analyzed {account.name}: {process_type.value}, score={profile.insight_score:.0f}")
@@ -319,7 +378,11 @@ def _transform_through_pipeline(family, category_dataframes):
             logger.error(f"Error analyzing category {category_id}: {str(e)}", exc_info=True)
             continue
 
-    return category_profiles
+    # EPIC 4.2: Rank profiles and calculate materiality-weighted insight scores
+    insight_engine = InsightEngine()
+    ranked_profiles = insight_engine.rank(category_profiles)
+
+    return ranked_profiles
 
 
 def _load_insights(category_profiles, analysis_run=None):
@@ -338,6 +401,10 @@ def _load_insights(category_profiles, analysis_run=None):
     insight_facts = []
 
     for profile in category_profiles:
+        persistence_kwargs = InsightEngine.build_persistence_kwargs(
+            profile,
+            getattr(profile, '_projection_result', None),
+        )
         insight_fact = InsightFact(
             category_id=profile._account_id,
             analysis_run=analysis_run,
@@ -348,7 +415,9 @@ def _load_insights(category_profiles, analysis_run=None):
             has_structural_break=profile.volatility_result.has_structural_break if profile.volatility_result else False,
             causal_volume_pct=profile.causal_result.volume_effect_pct if profile.causal_result else None,
             causal_price_pct=profile.causal_result.price_effect_pct if profile.causal_result else None,
-            projected_value=profile.projected_value,
+            projected_value=persistence_kwargs.get('projected_value'),
+            projected_lower_bound=persistence_kwargs.get('projected_lower_bound'),
+            projected_upper_bound=persistence_kwargs.get('projected_upper_bound'),
             expert_summary=profile._expert_summary if hasattr(profile, '_expert_summary') else ""
         )
         insight_facts.append(insight_fact)

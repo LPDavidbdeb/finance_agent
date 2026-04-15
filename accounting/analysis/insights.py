@@ -32,6 +32,8 @@ class CategoryProfile:
     projected_value: Optional[float] = None
     projected_upper: Optional[float] = None
     projected_lower: Optional[float] = None
+    materiality_status: str = "Active"
+    sparsity_status: str = "Dense"
     insight_score: float = field(default=0.0, init=False)
 
     def __post_init__(self):
@@ -256,4 +258,35 @@ class InsightEngine:
             })
 
         return insights
+
+    @staticmethod
+    def build_persistence_kwargs(profile: CategoryProfile, projection_result: Optional[dict] = None, normalization_result: Optional[dict] = None) -> dict:
+        """
+        Build InsightFact-compatible kwargs with confidence corridor mapping.
+
+        Args:
+            profile: CategoryProfile object with metrics
+            projection_result: Dict with 'lower_bound' and 'upper_bound' for confidence corridor
+            normalization_result: Dict with 'benchmark_slope' and 'benchmark_classification' from External Normalization Engine
+
+        Returns:
+            dict: Kwargs ready to pass to InsightFact.objects.create()
+        """
+        projection_result = projection_result or {}
+        normalization_result = normalization_result or {}
+
+        persistence_kwargs = {
+            'projected_value': profile.projected_value,
+            'projected_lower_bound': projection_result.get('lower_bound'),
+            'projected_upper_bound': projection_result.get('upper_bound'),
+        }
+
+        # Add external normalization fields if provided (EPIC 3.2)
+        if 'benchmark_slope' in normalization_result:
+            persistence_kwargs['benchmark_slope'] = normalization_result.get('benchmark_slope')
+
+        if 'benchmark_classification' in normalization_result:
+            persistence_kwargs['benchmark_classification'] = normalization_result.get('benchmark_classification')
+
+        return persistence_kwargs
 

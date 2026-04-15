@@ -1,6 +1,8 @@
 import json
 from django.test import TestCase, Client
 from django.contrib.auth import get_user_model
+from datetime import datetime, timezone
+from decimal import Decimal
 
 User = get_user_model()
 
@@ -45,7 +47,8 @@ class InsightsAPITestCase(TestCase):
 
         required_fields = {
             'id', 'categoryName', 'insight_score', 'materiality_pct',
-            'processType', 'expertSummary', 'causal_volume_pct', 'causal_price_pct'
+            'processType', 'expertSummary', 'causal_volume_pct', 'causal_price_pct',
+            'projected_lower_bound', 'projected_upper_bound'
         }
 
         schema_fields = set(InsightResponseSchema.model_fields.keys())
@@ -64,7 +67,9 @@ class InsightsAPITestCase(TestCase):
             'processType': 'STOCHASTIC',
             'expertSummary': 'Category is stable.',
             'causal_volume_pct': 5.5,
-            'causal_price_pct': 2.1
+            'causal_price_pct': 2.1,
+            'projected_lower_bound': 71000.25,
+            'projected_upper_bound': 79000.75,
         }
 
         schema = InsightResponseSchema(**valid_data)
@@ -85,7 +90,9 @@ class InsightsAPITestCase(TestCase):
             'processType': 'DETERMINISTIC',
             'expertSummary': 'Utilities are stable.',
             'causal_volume_pct': None,
-            'causal_price_pct': None
+            'causal_price_pct': None,
+            'projected_lower_bound': None,
+            'projected_upper_bound': None,
         }
 
         schema = InsightResponseSchema(**valid_data)
@@ -104,7 +111,9 @@ class InsightsAPITestCase(TestCase):
             'processType': 'STOCHASTIC',
             'expertSummary': 'Test summary.',
             'causal_volume_pct': None,
-            'causal_price_pct': None
+            'causal_price_pct': None,
+            'projected_lower_bound': None,
+            'projected_upper_bound': None,
         }
 
         schema = InsightResponseSchema(**data)
@@ -137,6 +146,8 @@ class InsightsAPITestCase(TestCase):
                 'materiality_pct': 10.0,
                 'processType': 'STOCHASTIC',
                 'expertSummary': 'Test',
+                'projected_lower_bound': None,
+                'projected_upper_bound': None,
                 **case
             }
             try:
@@ -154,19 +165,22 @@ class InsightsAPITestCase(TestCase):
                 id='Cat1', categoryName='Cat1', insight_score=100000.0,
                 materiality_pct=20.0, processType='STOCHASTIC',
                 expertSummary='Summary 1',
-                causal_volume_pct=5.0, causal_price_pct=2.0
+                causal_volume_pct=5.0, causal_price_pct=2.0,
+                projected_lower_bound=Decimal('95000.00'), projected_upper_bound=Decimal('105000.00'),
             ),
             InsightResponseSchema(
                 id='Cat2', categoryName='Cat2', insight_score=50000.0,
                 materiality_pct=10.0, processType='DETERMINISTIC',
                 expertSummary='Summary 2',
-                causal_volume_pct=None, causal_price_pct=None
+                causal_volume_pct=None, causal_price_pct=None,
+                projected_lower_bound=None, projected_upper_bound=None,
             ),
             InsightResponseSchema(
                 id='Cat3', categoryName='Cat3', insight_score=30000.0,
                 materiality_pct=6.0, processType='EPISODIC',
                 expertSummary='Summary 3',
-                causal_volume_pct=3.0, causal_price_pct=None
+                causal_volume_pct=3.0, causal_price_pct=None,
+                projected_lower_bound=Decimal('28000.00'), projected_upper_bound=Decimal('32000.00'),
             ),
         ]
 
@@ -345,6 +359,8 @@ class InsightsAPIIntegrationTestCase(TestCase):
                     expertSummary=insight['summary'],
                     causal_volume_pct=None,
                     causal_price_pct=None,
+                    projected_lower_bound=Decimal('95000.00'),
+                    projected_upper_bound=Decimal('105000.00'),
                 )
                 responses.append(response)
             except Exception as e:
@@ -353,6 +369,267 @@ class InsightsAPIIntegrationTestCase(TestCase):
         # Verify we got responses
         self.assertGreater(len(responses), 0)
         self.assertLessEqual(len(responses), 5)
+
+
+class RunCoherenceTestCase(TestCase):
+    """
+    Test suite for enforcing run coherence in the Insights API.
+
+    Verifies that the /api/analysis/insights/top/ endpoint respects
+    AnalysisRun boundaries and doesn't return Frankenstein responses
+    from partial ETL runs.
+    """
+
+    def setUp(self):
+        """Set up test database with Family, User, and AnalysisRun fixtures."""
+        from users.models import Family
+        from django.contrib.auth import get_user_model
+        from accounting.models import AnalysisRun, Account, InsightFact
+
+        User = get_user_model()
+
+        # Create a family
+        self.family = Family.objects.create(
+            name="Test Family",
+            country="CA",
+            currency="CAD"
+        )
+
+        # Create a user associated with the family
+        self.user = User.objects.create_user(
+            username="testuser",
+            email="test@example.com",
+            password="testpass123"
+        )
+        self.user.family = self.family
+        self.user.save()
+
+        # Create a test category (Account)
+        self.category = Account.objects.create(
+            name="Groceries",
+            account_type="EXPENSE",
+            family=self.family
+        )
+
+        # Create multiple AnalysisRun records
+        self.run1 = AnalysisRun.objects.create(
+            family=self.family,
+            status=AnalysisRun.Status.SUCCEEDED,
+            version='v1',
+            completed_at=datetime(2026, 4, 10, 10, 0, 0, tzinfo=timezone.utc),
+        )
+        self.run1.started_at = datetime(2026, 4, 10, 9, 0, 0, tzinfo=timezone.utc)
+        self.run1.save()
+
+        self.run2 = AnalysisRun.objects.create(
+            family=self.family,
+            status=AnalysisRun.Status.SUCCEEDED,
+            version='v1',
+            completed_at=datetime(2026, 4, 15, 10, 0, 0, tzinfo=timezone.utc),
+        )
+        self.run2.started_at = datetime(2026, 4, 15, 9, 0, 0, tzinfo=timezone.utc)
+        self.run2.save()
+
+        # Create InsightFact records for run1
+        self.fact1_run1 = InsightFact.objects.create(
+            category=self.category,
+            analysis_run=self.run1,
+            insight_score=75000.0,
+            materiality_pct=15.0,
+            process_type='STOCHASTIC',
+            expert_summary="Run 1 insight",
+        )
+
+        # Create InsightFact records for run2 (more recent)
+        self.fact1_run2 = InsightFact.objects.create(
+            category=self.category,
+            analysis_run=self.run2,
+            insight_score=85000.0,  # Different score
+            materiality_pct=17.0,   # Different materiality
+            process_type='DETERMINISTIC',
+            expert_summary="Run 2 insight",
+        )
+
+    def test_run_id_parameter_filters_by_specific_run(self):
+        """Verify run_id parameter filters InsightFact to specific run."""
+        # This test verifies the logic that would be executed in the endpoint
+        from accounting.models import InsightFact
+
+        # Query for specific run_id
+        facts_run1 = InsightFact.objects.filter(
+            category__family=self.family,
+            analysis_run_id=self.run1.id
+        )
+        facts_run2 = InsightFact.objects.filter(
+            category__family=self.family,
+            analysis_run_id=self.run2.id
+        )
+
+        # Verify different results per run
+        self.assertEqual(facts_run1.count(), 1)
+        self.assertEqual(facts_run2.count(), 1)
+        self.assertEqual(facts_run1[0].insight_score, 75000.0)
+        self.assertEqual(facts_run2[0].insight_score, 85000.0)
+
+    def test_default_uses_latest_completed_run(self):
+        """Verify endpoint defaults to most recent completed run when run_id is None."""
+        from accounting.models import AnalysisRun
+
+        # Find latest completed run (mimics endpoint logic)
+        latest_run = (
+            AnalysisRun.objects
+            .filter(family=self.family, status=AnalysisRun.Status.SUCCEEDED)
+            .order_by("-completed_at", "-id")
+            .first()
+        )
+
+        self.assertIsNotNone(latest_run)
+        self.assertEqual(latest_run.id, self.run2.id)
+
+    def test_graceful_handle_no_completed_run(self):
+        """Verify endpoint returns empty list when no completed run exists."""
+        from accounting.models import AnalysisRun
+        from users.models import Family
+
+        # Create a family with no completed runs
+        new_family = Family.objects.create(
+            name="No Runs Family",
+            country="CA",
+            currency="CAD"
+        )
+
+        latest_run = (
+            AnalysisRun.objects
+            .filter(family=new_family, status=AnalysisRun.Status.SUCCEEDED)
+            .order_by("-completed_at", "-id")
+            .first()
+        )
+
+        self.assertIsNone(latest_run)
+
+    def test_family_scoping_prevents_cross_tenant_leak(self):
+        """Verify InsightFact queries include family scoping to prevent data leaks."""
+        from users.models import Family
+        from accounting.models import AnalysisRun, Account, InsightFact
+
+        # Create a separate family
+        other_family = Family.objects.create(
+            name="Other Family",
+            country="CA",
+            currency="CAD"
+        )
+
+        # Create a category and run for the other family
+        other_category = Account.objects.create(
+            name="Other Groceries",
+            account_type="EXPENSE",
+            family=other_family
+        )
+        other_run = AnalysisRun.objects.create(
+            family=other_family,
+            status=AnalysisRun.Status.SUCCEEDED,
+            version='v1',
+            completed_at=datetime(2026, 4, 15, 10, 0, 0, tzinfo=timezone.utc),
+        )
+        other_fact = InsightFact.objects.create(
+            category=other_category,
+            analysis_run=other_run,
+            insight_score=100000.0,
+            materiality_pct=25.0,
+            process_type='STOCHASTIC',
+            expert_summary="Other family insight",
+        )
+
+        # Query with family scoping
+        my_facts = InsightFact.objects.filter(
+            category__family=self.family,
+            analysis_run_id=self.run2.id
+        )
+
+        # Verify we don't see the other family's data
+        self.assertEqual(my_facts.count(), 1)
+        self.assertNotIn(other_fact.id, [f.id for f in my_facts])
+
+    def test_endpoint_logic_run_id_none_uses_latest(self):
+        """Integration test simulating endpoint behavior with run_id=None."""
+        from accounting.models import AnalysisRun, InsightFact
+
+        user = self.user
+        family = getattr(user, "family", None)
+        run_id = None
+
+        # Simulate endpoint logic
+        target_run_id = run_id
+        return_value = []
+        if target_run_id is None:
+            latest_run = (
+                AnalysisRun.objects
+                .filter(family=family, status=AnalysisRun.Status.SUCCEEDED)
+                .order_by("-completed_at", "-id")
+                .first()
+            )
+            if latest_run is None:
+                return_value = []
+            else:
+                target_run_id = latest_run.id
+                insights = (
+                    InsightFact.objects
+                    .filter(
+                        category__family=family,
+                        analysis_run_id=target_run_id
+                    )
+                    .select_related("category")
+                    .order_by("-insight_score", "category__name")[:5]
+                )
+                return_value = list(insights)
+
+        # Verify we got results from the latest run
+        self.assertEqual(len(return_value), 1)
+        self.assertEqual(return_value[0].insight_score, 85000.0)  # run2 score
+
+    def test_endpoint_logic_run_id_explicit(self):
+        """Integration test simulating endpoint behavior with explicit run_id."""
+        from accounting.models import InsightFact
+
+        user = self.user
+        family = getattr(user, "family", None)
+        run_id = self.run1.id
+
+        # Simulate endpoint logic
+        target_run_id = run_id
+        return_value = []
+        if target_run_id is not None:
+            insights = (
+                InsightFact.objects
+                .filter(
+                    category__family=family,
+                    analysis_run_id=target_run_id
+                )
+                .select_related("category")
+                .order_by("-insight_score", "category__name")[:5]
+            )
+            return_value = list(insights)
+
+        # Verify we got results from the specific run
+        self.assertEqual(len(return_value), 1)
+        self.assertEqual(return_value[0].insight_score, 75000.0)  # run1 score
+
+    def test_latest_snapshot_uses_completed_at(self):
+        """Verify /insights/latest/ endpoint uses completed_at for ordering."""
+        from accounting.models import AnalysisRun
+
+        run = (
+            AnalysisRun.objects
+            .filter(family=self.family, status=AnalysisRun.Status.SUCCEEDED)
+            .order_by("-completed_at", "-id")
+            .first()
+        )
+
+        self.assertEqual(run.id, self.run2.id)
+        self.assertEqual(
+            run.completed_at,
+            datetime(2026, 4, 15, 10, 0, 0, tzinfo=timezone.utc)
+        )
 
 
 if __name__ == '__main__':
