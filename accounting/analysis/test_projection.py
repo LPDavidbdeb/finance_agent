@@ -190,8 +190,8 @@ class TestProjectionEngine(unittest.TestCase):
         Verify STOCHASTIC model with significant trend and low MAPE uses REGRESSION_TREND.
         Example: Consistent upward trend, MAPE < 20% over recent 6 months
         """
-        # Create a perfect, undeniable linear trend so the regression model is selected cleanly.
-        data = [100 * (i + 1) for i in range(24)]
+        # Create a perfect, undeniable log-linear trend so the regression model is selected cleanly.
+        data = [100.0 * (1.08 ** i) for i in range(24)]
         series = pd.Series(data, index=pd.date_range('2023-01-01', periods=len(data), freq='MS'))
 
         # Simulate significant trend with low MAPE (will be calculated by engine)
@@ -223,8 +223,8 @@ class TestProjectionEngine(unittest.TestCase):
 
     def test_stochastic_trend_continuing_slope(self):
         """Verify REGRESSION_TREND projection continues the historical slope correctly."""
-        # Perfect linear trend keeps the backtest and confidence interval calculations stable.
-        data = [100 * (i + 1) for i in range(24)]
+        # Perfect log-linear trend keeps the backtest and confidence interval calculations stable.
+        data = [100.0 * (1.08 ** i) for i in range(24)]
         series = pd.Series(data, index=pd.date_range('2023-01-01', periods=len(data), freq='MS'))
 
         trend_result = TrendResult(

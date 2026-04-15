@@ -13,6 +13,10 @@ export interface InsightData {
   expertSummary: string;
   causal_volume_pct: number | null;
   causal_price_pct: number | null;
+  projected_lower_bound?: number | null;
+  projected_upper_bound?: number | null;
+  benchmark_slope?: number | null;
+  benchmark_classification?: 'REAL_GROWTH' | 'INFLATION_TRACKED' | 'EFFICIENCY_GAIN' | null;
 }
 
 interface InsightsDashboardProps {
