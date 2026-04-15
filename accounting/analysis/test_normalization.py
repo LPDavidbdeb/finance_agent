@@ -5,6 +5,7 @@ Tests the classification logic, benchmark presets, and persistence mechanism.
 """
 
 from decimal import Decimal
+from types import SimpleNamespace
 from django.test import TestCase
 
 from accounting.analysis.normalization import (
@@ -14,6 +15,7 @@ from accounting.analysis.normalization import (
     get_benchmark_slope,
     BENCHMARK_PRESETS,
 )
+from accounting.analysis.insights import InsightEngine
 
 
 class NormalizationClassificationTestCase(TestCase):
@@ -273,4 +275,22 @@ class NormalizationIntegrationTestCase(TestCase):
         classification = classify_growth(0.032, back_to_float, tolerance=0.02)
 
         self.assertEqual(classification, "INFLATION_TRACKED")
+
+    def test_persistence_handoff_maps_normalization_fields(self):
+        """Verify build_persistence_kwargs maps benchmark fields into persistence payload."""
+        profile = SimpleNamespace(projected_value=4200.0)
+        kwargs = InsightEngine.build_persistence_kwargs(
+            profile=profile,
+            projection_result={"lower_bound": Decimal("4000.00"), "upper_bound": Decimal("4400.00")},
+            normalization_result={
+                "benchmark_slope": Decimal("0.0250"),
+                "benchmark_classification": "INFLATION_TRACKED",
+            },
+        )
+
+        self.assertEqual(kwargs["projected_value"], 4200.0)
+        self.assertEqual(kwargs["projected_lower_bound"], Decimal("4000.00"))
+        self.assertEqual(kwargs["projected_upper_bound"], Decimal("4400.00"))
+        self.assertEqual(kwargs["benchmark_slope"], Decimal("0.0250"))
+        self.assertEqual(kwargs["benchmark_classification"], "INFLATION_TRACKED")
 

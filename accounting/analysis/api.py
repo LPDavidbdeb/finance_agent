@@ -9,7 +9,7 @@ from django.core.cache import cache
 from accounting.models import AnalysisRun, InsightFact
 from accounting.tasks import rebuild_financial_insights, INSIGHTS_SYNC_CACHE_KEY
 
-from accounting.analysis.insights import InsightEngine, CategoryProfile
+from accounting.analysis.insights import CategoryProfile
 from accounting.analysis.trend import TrendResult
 from accounting.analysis.volatility import VolatilityResult
 from accounting.analysis.causal import CausalAnalysisResult
