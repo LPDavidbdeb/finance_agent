@@ -10,12 +10,13 @@ from ninja_jwt.tokens import AccessToken
 from accounting.models import Account, JournalEntry, TransactionLine
 from banking.consistency import TransactionConsistencyReport
 from banking.models import BankStatementImport, FinancialInstitution, FinancialProduct, StagedTransaction
-from finance_backend.test_client import api_test_client
 from quality.models import ConsistencyReportFinding, ConsistencyReportRun
 from quality.services import create_consistency_report_run
 from users.models import Family
+from test_client_factory import get_test_client
 
 User = get_user_model()
+
 
 
 class ConsistencyReportPersistenceTest(TestCase):
@@ -172,7 +173,7 @@ class LedgerResetCommandReportPersistenceTest(TestCase):
 
 class QualityApiTest(TestCase):
     def setUp(self):
-        self.client = api_test_client
+        self.client = get_test_client()
         self.family_a = Family.objects.create(name='Quality A')
         self.family_b = Family.objects.create(name='Quality B')
 

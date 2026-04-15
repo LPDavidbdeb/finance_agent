@@ -242,50 +242,70 @@ class ETLPipelineTestCase(TestCase):
     # Helper Methods
     # =========================================================================
     def _create_test_transactions(self):
-        """Create test journal entries with realistic transaction history."""
+        """
+        Create enriched test journal entries with realistic transaction history.
+
+        Ensures data passes Step-0 filters:
+        - Materiality: Groceries ~65% of total, Utilities ~35% (both well above 1%)
+        - Sparsity: Dense (multiple transactions per month, 0% sparse)
+        - Minimum data points: 12 months of complete data
+        """
         # Create 12 months of historical data
         for month_offset in range(12):
-            date = datetime.now().date() - timedelta(days=30 * month_offset)
-            
-            # Groceries transaction
-            je = JournalEntry.objects.create(
-                family=self.family,
-                date=date,
-                description="Grocery shopping",
-                is_reconciled=True
-            )
-            
-            TransactionLine.objects.create(
-                journal_entry=je,
-                account=self.groceries,
-                amount=Decimal('150.00')
-            )
-            
-            TransactionLine.objects.create(
-                journal_entry=je,
-                account=self.bank,
-                amount=Decimal('-150.00')
-            )
-            
-            # Utilities transaction
-            je2 = JournalEntry.objects.create(
-                family=self.family,
-                date=date,
-                description="Utility payment",
-                is_reconciled=True
-            )
-            
-            TransactionLine.objects.create(
-                journal_entry=je2,
-                account=self.utilities,
-                amount=Decimal('80.00')
-            )
-            
-            TransactionLine.objects.create(
-                journal_entry=je2,
-                account=self.bank,
-                amount=Decimal('-80.00')
-            )
+            # Calculate the date for this month (normalized to 1st of month for proper bucketing)
+            base_date = (datetime.now().date() - timedelta(days=30 * month_offset)).replace(day=1)
+
+            # Create MULTIPLE transactions per month for each category to ensure density
+            # This ensures sparsity check passes (100% of months have transactions)
+
+            # Groceries: 3-4 transactions per month, avg $500 each = $1500-2000/month
+            for week in range(0, 4):
+                transaction_date = base_date + timedelta(days=7 * week)
+
+                je = JournalEntry.objects.create(
+                    family=self.family,
+                    date=transaction_date,
+                    description=f"Grocery shopping week {week + 1}",
+                    is_reconciled=True
+                )
+
+                TransactionLine.objects.create(
+                    journal_entry=je,
+                    account=self.groceries,
+                    amount=Decimal('550.00')  # ~$2200/month total
+                )
+
+                TransactionLine.objects.create(
+                    journal_entry=je,
+                    account=self.bank,
+                    amount=Decimal('-550.00')
+                )
+
+            # Utilities: 2 transactions per month (hydro + phone), avg $600 each = $1200/month
+            for utility_idx in range(2):
+                transaction_date = base_date + timedelta(days=15 * (utility_idx + 1))
+
+                je2 = JournalEntry.objects.create(
+                    family=self.family,
+                    date=transaction_date,
+                    description=f"Utility payment {utility_idx + 1}",
+                    is_reconciled=True
+                )
+
+                TransactionLine.objects.create(
+                    journal_entry=je2,
+                    account=self.utilities,
+                    amount=Decimal('600.00')  # ~$1200/month total
+                )
+
+                TransactionLine.objects.create(
+                    journal_entry=je2,
+                    account=self.bank,
+                    amount=Decimal('-600.00')
+                )
+
+        # _extract_category_data reads from the materialized view, not directly from ledger tables.
+        _refresh_materialized_view()
 
     def _create_mock_profiles(self):
         """Create mock CategoryProfile objects for testing load_insights."""
@@ -348,28 +368,37 @@ class ETLIntegrationTestCase(TestCase):
 
     def test_full_etl_pipeline_flow(self):
         """Test complete ETL flow from transactions to insights."""
-        # Create test data
-        for i in range(12):
-            date = datetime.now().date() - timedelta(days=30 * i)
-            je = JournalEntry.objects.create(
-                family=self.family,
-                date=date,
-                description="Test transaction",
-                is_reconciled=True
-            )
-            
-            TransactionLine.objects.create(
-                journal_entry=je,
-                account=self.category,
-                amount=Decimal('100.00')
-            )
-            
-            TransactionLine.objects.create(
-                journal_entry=je,
-                account=self.bank,
-                amount=Decimal('-100.00')
-            )
-        
+        # Create test data spanning 12 months with dense transaction patterns
+        for month_offset in range(12):
+            # Create date spread across different months (1st of each month going back)
+            base_date = (datetime.now().date() - timedelta(days=30 * month_offset)).replace(day=1)
+
+            # Create multiple transactions per month to ensure density (100% non-sparse)
+            for week in range(0, 4):
+                transaction_date = base_date + timedelta(days=7 * week)
+
+                je = JournalEntry.objects.create(
+                    family=self.family,
+                    date=transaction_date,
+                    description="Test transaction",
+                    is_reconciled=True
+                )
+
+                TransactionLine.objects.create(
+                    journal_entry=je,
+                    account=self.category,
+                    amount=Decimal('500.00')
+                )
+
+                TransactionLine.objects.create(
+                    journal_entry=je,
+                    account=self.bank,
+                    amount=Decimal('-500.00')
+                )
+
+        # Ensure materialized view is in sync before extraction assertions.
+        _refresh_materialized_view()
+
         # Get families to process
         families = _get_families_to_process(self.family.id)
         self.assertEqual(families.count(), 1)

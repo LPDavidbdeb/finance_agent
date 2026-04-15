@@ -178,9 +178,14 @@ def _extract_category_data(family):
     Returns:
         dict: {category_id: pd.Series} where Series is monthly spend values
     """
-    # Query the materialized view
+    # Query the materialized view - only EXPENSE accounts
+    expense_accounts = Account.objects.filter(
+        family=family,
+        account_type=Account.AccountType.EXPENSE
+    ).values_list('id', flat=True)
+
     stats = CategoryMonthlyStat.objects.filter(
-        category_id__in=Account.objects.filter(family=family).values_list('id', flat=True)
+        category_id__in=expense_accounts
     ).order_by('category_id', 'month')
 
     # Group by category
@@ -271,8 +276,14 @@ def _transform_through_pipeline(family, category_dataframes):
     causal_analyzer = CausalAnalyzer()
 
     # Get materiality (total spend by category)
+    # Note: Sum only EXPENSE accounts to avoid negatives from ASSET accounts
+    expense_accounts = Account.objects.filter(
+        family=family,
+        account_type=Account.AccountType.EXPENSE
+    ).values_list('id', flat=True)
+
     total_family_spend = CategoryMonthlyStat.objects.filter(
-        category_id__in=Account.objects.filter(family=family).values_list('id', flat=True)
+        category_id__in=expense_accounts
     ).aggregate(Sum('total_amount'))['total_amount__sum'] or Decimal('1')
     total_family_spend_float = float(total_family_spend)
 

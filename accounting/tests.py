@@ -1,16 +1,17 @@
 from django.test import TestCase
 from django.contrib.auth import get_user_model
-from finance_backend.test_client import api_test_client
 from users.models import Family
 from accounting.models import Account, JournalEntry, TransactionLine
 from decimal import Decimal
 from ninja_jwt.tokens import AccessToken
+from test_client_factory import get_test_client
 
 User = get_user_model()
 
+
 class AccountingApiTest(TestCase):
     def setUp(self):
-        self.client = api_test_client
+        self.client = get_test_client()
 
         # Create Families
         self.family_a = Family.objects.create(name="Family A")
@@ -162,7 +163,7 @@ class AccountingApiTest(TestCase):
 
 class AccountManagementTest(TestCase):
     def setUp(self):
-        self.client = api_test_client
+        self.client = get_test_client()
         self.family1 = Family.objects.create(name="Family 1")
         self.family2 = Family.objects.create(name="Family 2")
         

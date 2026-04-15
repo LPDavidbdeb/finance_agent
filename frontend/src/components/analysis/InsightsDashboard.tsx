@@ -83,6 +83,9 @@ const InsightsDashboard: React.FC<InsightsDashboardProps> = ({ data }) => {
                 expertSummary={insight.expertSummary}
                 volume_pct={insight.causal_volume_pct ?? 0}
                 price_pct={insight.causal_price_pct ?? 0}
+                projected_lower_bound={insight.projected_lower_bound}
+                projected_upper_bound={insight.projected_upper_bound}
+                benchmark_classification={insight.benchmark_classification}
               />
             </div>
           ))}
