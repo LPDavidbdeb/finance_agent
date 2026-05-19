@@ -161,6 +161,56 @@ class AccountingApiTest(TestCase):
         self.assertEqual(data['income_statement']['net_income'], 3800.00)
         self.assertEqual(data['balance_sheet']['assets'], 3800.00) # 5000 - 1200
 
+    def test_get_monthly_expense_overview(self):
+        """Test the monthly expense overview report including revenue and savings."""
+        # Setup tree
+        root_rev = Account.objects.create(name="Revenue", account_type=Account.AccountType.REVENUE, family=self.family_a)
+        root_exp = Account.objects.create(name="Expenses", account_type=Account.AccountType.EXPENSE, family=self.family_a)
+        cat_food = Account.objects.create(name="Food", account_type=Account.AccountType.EXPENSE, family=self.family_a, parent=root_exp)
+        
+        # Add transactions for Jan 2023
+        je1 = JournalEntry.objects.create(family=self.family_a, date="2023-01-15", description="Salary")
+        TransactionLine.objects.create(journal_entry=je1, account=root_rev, amount=Decimal("-5000.00"))
+        TransactionLine.objects.create(journal_entry=je1, account=self.cash_a, amount=Decimal("5000.00"))
+        
+        je2 = JournalEntry.objects.create(family=self.family_a, date="2023-01-20", description="Groceries")
+        TransactionLine.objects.create(journal_entry=je2, account=cat_food, amount=Decimal("200.00"))
+        TransactionLine.objects.create(journal_entry=je2, account=self.cash_a, amount=Decimal("-200.00"))
+        
+        response = self.client.get("/accounting/reports/expenses/monthly-overview", headers=self.headers_a)
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        
+        self.assertEqual(data['latest_revenue'], 5000.0)
+        self.assertEqual(data['latest_expenses'], 200.0)
+        self.assertEqual(data['latest_savings'], 4800.0)
+        
+        # Check summary series
+        self.assertEqual(len(data['summary_series']), 1)
+        self.assertEqual(data['summary_series'][0]['month'], "2023-01")
+        self.assertEqual(data['summary_series'][0]['revenue'], 5000.0)
+        self.assertEqual(data['summary_series'][0]['expenses'], 200.0)
+        self.assertEqual(data['summary_series'][0]['savings'], 4800.0)
+
+    def test_get_monthly_expense_overview_pdf(self):
+        """Test that the monthly expense report PDF endpoint returns a PDF document."""
+        root_rev = Account.objects.create(name="Revenue", account_type=Account.AccountType.REVENUE, family=self.family_a)
+        root_exp = Account.objects.create(name="Expenses", account_type=Account.AccountType.EXPENSE, family=self.family_a)
+        cat_food = Account.objects.create(name="Food", account_type=Account.AccountType.EXPENSE, family=self.family_a, parent=root_exp)
+
+        je1 = JournalEntry.objects.create(family=self.family_a, date="2023-01-15", description="Salary")
+        TransactionLine.objects.create(journal_entry=je1, account=root_rev, amount=Decimal("-5000.00"))
+        TransactionLine.objects.create(journal_entry=je1, account=self.cash_a, amount=Decimal("5000.00"))
+
+        je2 = JournalEntry.objects.create(family=self.family_a, date="2023-01-20", description="Groceries")
+        TransactionLine.objects.create(journal_entry=je2, account=cat_food, amount=Decimal("200.00"))
+        TransactionLine.objects.create(journal_entry=je2, account=self.cash_a, amount=Decimal("-200.00"))
+
+        response = self.client.get("/accounting/reports/expenses/monthly-overview/pdf", headers=self.headers_a)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Content-Type"], "application/pdf")
+        self.assertTrue(response.content.startswith(b"%PDF"))
+
 class AccountManagementTest(TestCase):
     def setUp(self):
         self.client = get_test_client()

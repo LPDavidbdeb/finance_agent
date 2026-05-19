@@ -158,6 +158,62 @@ class AnnualHistoryOut(Schema):
     years: List[AnnualYearDataOut]
 
 
+class MonthlyExpensePointOut(Schema):
+    month: str
+    amount: float
+
+
+class MonthlyExpenseCategoryOut(Schema):
+    category_id: int
+    category_name: str
+    all_time_average: float
+    current_month_amount: float
+    delta_vs_average: float
+    delta_vs_average_pct: Optional[float] = None
+    series: List[MonthlyExpensePointOut]
+
+
+class MerchantSeriesOut(Schema):
+    id: int
+    name: str
+    series: List[MonthlyExpensePointOut]
+
+
+class MonthlyExpenseTransactionOut(Schema):
+    journal_entry_id: int
+    date: date
+    description: str
+    amount: float
+    category_id: int
+    category_name: str
+    merchant_name: Optional[str] = None
+    statement_id: Optional[int] = None
+    staged_transaction_id: Optional[int] = None
+
+
+class MonthlySummaryPointOut(Schema):
+    month: str
+    revenue: float
+    expenses: float
+    savings: float
+
+
+class MonthlyExpenseReportOut(Schema):
+    latest_month: Optional[str] = None
+    latest_revenue: float = 0.0
+    latest_expenses: float = 0.0
+    latest_savings: float = 0.0
+    avg_revenue: float = 0.0
+    avg_expenses: float = 0.0
+    avg_savings: float = 0.0
+    totals_series: List[MonthlyExpensePointOut]
+    summary_series: List[MonthlySummaryPointOut] = []
+    categories: List[MonthlyExpenseCategoryOut]
+    revenue_categories: List[MonthlyExpenseCategoryOut] = []
+    merchants: List["MerchantSeriesOut"] = []
+    top_transactions: List[MonthlyExpenseTransactionOut] = []
+
+
 class InsightFactOut(Schema):
     id: int
     category_id: int

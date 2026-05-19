@@ -15,7 +15,7 @@ const MemberProfile = lazy(() => import('./pages/MemberProfile').then(module => 
 const ProductDetail = lazy(() => import('./pages/ProductDetail').then(module => ({ default: module.ProductDetail })));
 const MerchantManager = lazy(() => import('./pages/MerchantManager').then(module => ({ default: module.MerchantManager })));
 const MerchantDetail = lazy(() => import('./pages/MerchantDetail').then(module => ({ default: module.MerchantDetail })));
-const AccountDetail = lazy(() => import('./pages/AccountDetail').then(module => ({ default: module.AccountDetail })));
+const AccountDetail = lazy(() => import('./pages/AccountDetailPage').then(module => ({ default: module.AccountDetailPage })));
 const DimensionDetail = lazy(() => import('./pages/DimensionDetail').then(module => ({ default: module.DimensionDetail })));
 const StatementDetail = lazy(() => import('./pages/StatementDetail').then(module => ({ default: module.StatementDetail })));
 const MaintenancePage = lazy(() => import('./pages/MaintenancePage').then(module => ({ default: module.MaintenancePage })));
@@ -23,6 +23,9 @@ const SimulationPage = lazy(() => import('./pages/SimulationPage').then(module =
 const StatementCoverage = lazy(() => import('./pages/StatementCoverage').then(module => ({ default: module.StatementCoverage })));
 const QualityReportsPage = lazy(() => import('./pages/QualityReportsPage').then(module => ({ default: module.QualityReportsPage })));
 const AnalysisPage = lazy(() => import('./pages/AnalysisPage'));
+const MonthlyExpenseReportPage = lazy(() => import('./pages/MonthlyExpenseReportPage'));
+const CreateAssetPage = lazy(() => import('./pages/CreateAssetPage'))
+const HouseEditorPage = lazy(() => import('./pages/HouseEditorPage'))
 
 // Lazy-load complex shared components
 const InstitutionManager = lazy(() => import('./components/InstitutionManager').then(module => ({ default: module.InstitutionManager })));
@@ -59,10 +62,13 @@ function App() {
                 <Route path="/dashboard/simulate" element={<SimulationPage />} />
                 <Route path="/dashboard/statement-coverage" element={<StatementCoverage />} />
                 <Route path="/dashboard/quality" element={<QualityReportsPage />} />
+                <Route path="/dashboard/monthly-expenses" element={<MonthlyExpenseReportPage />} />
                 <Route path="/analysis" element={<AnalysisPage />} />
                 <Route path="/maintenance" element={<MaintenancePage />} />
                 <Route path="/settings/banks" element={<InstitutionManager />} />
                 <Route path="/ledger" element={<AccountTree />} />
+                <Route path="/assets/create" element={<CreateAssetPage />} />
+                <Route path="/house/editor" element={<HouseEditorPage />} />
               </Routes>
             </Suspense>
           </main>

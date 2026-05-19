@@ -26,6 +26,9 @@ export const Navbar: React.FC = () => {
               <Link to="/dashboard/simulate" className="hover:text-slate-300 transition-colors">Simulate</Link>
               <Link to="/dashboard/statement-coverage" className="hover:text-slate-300 transition-colors">Coverage</Link>
               <Link to="/dashboard/quality" className="hover:text-slate-300 transition-colors">Quality</Link>
+              <Link to="/dashboard/monthly-expenses" className="hover:text-slate-300 transition-colors">Monthly Report</Link>
+              <Link to="/assets/create" className="hover:text-slate-300 transition-colors">Assets</Link>
+              <Link to="/house/editor" className="hover:text-slate-300 transition-colors">House Editor</Link>
               <Link to="/analysis" className="hover:text-slate-300 transition-colors">Analysis</Link>
               <Link to="/maintenance" className="hover:text-slate-300 transition-colors">System</Link>
               <Link to="/ledger" className="hover:text-slate-300 transition-colors">Ledger</Link>

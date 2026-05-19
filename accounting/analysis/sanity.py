@@ -108,12 +108,16 @@ class SanityLayer:
     def process(self, series: Union[list, pd.Series, np.ndarray]) -> pd.Series:
         """
         Applies full sanity layer: Imputation first, then Winsorization.
+        Clips negative values to 0 to ensure compatibility with log-linear models.
         """
         if not isinstance(series, pd.Series):
             series = pd.Series(series)
             
+        # 0. Clip negative values to 0 (refunds > spend in a month)
+        clean_series = series.clip(lower=0)
+            
         # 1. Fill isolated missing data
-        clean_series = self.impute_missing_periods(series)
+        clean_series = self.impute_missing_periods(clean_series)
         
         # 2. Cap non-persistent outliers
         clean_series = self.apply_conditional_winsorization(clean_series)

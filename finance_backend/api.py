@@ -19,15 +19,28 @@ api = NinjaAPI(
     urls_namespace="finance_api",
 )
 
-api.add_router("/auth/", obtain_pair_router, auth=None)
-api.add_router("/users/", "users.api.router")
-api.add_router("/banking/", "banking.api.router")
-api.add_router("/categorization/", "categorization.api.router")
-api.add_router("/accounting/", "accounting.api.router")
-api.add_router("/analysis/", "accounting.analysis.api.router")
-api.add_router("/maintenance/", "finance_backend.maintenance_api.router")
-api.add_router("/planning/", "planning.api.router")
-api.add_router("/quality/", "quality.api.router")
+try:
+    api.add_router("/auth/", obtain_pair_router, auth=None)
+except Exception:
+    # Router may already be attached during autoreload or repeated imports.
+    pass
+
+for path, router in [
+    ("/users/", "users.api.router"),
+    ("/banking/", "banking.api.router"),
+    ("/categorization/", "categorization.api.router"),
+    ("/accounting/", "accounting.api.router"),
+    ("/analysis/", "accounting.analysis.api.router"),
+    ("/maintenance/", "finance_backend.maintenance_api.router"),
+    ("/planning/", "planning.api.router"),
+    ("/quality/", "quality.api.router"),
+    ("/assets/", "assets.api.router"),
+]:
+    try:
+        api.add_router(path, router)
+    except Exception:
+        # Ignore duplicate router registration (common during dev autoreload)
+        pass
 
 @api.get("/accounts/tree", response=List[AccountSchema])
 def get_account_tree(request):

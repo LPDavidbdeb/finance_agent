@@ -24,6 +24,21 @@ ALLOWED_COMMANDS = [
     'fix_inverted_transactions'
 ]
 
+@router.get("/celery-status")
+def get_celery_status(request):
+    """
+    Checks if the Celery worker is running by inspecting active workers.
+    """
+    from finance_backend.celery import app
+    try:
+        # We use a timeout to avoid hanging if the broker is unreachable
+        inspect = app.control.inspect(timeout=1.0)
+        active_workers = inspect.active()
+        is_running = active_workers is not None and len(active_workers) > 0
+        return {"is_running": is_running, "worker_count": len(active_workers) if active_workers else 0}
+    except Exception as e:
+        return {"is_running": False, "error": str(e)}
+
 @router.post("/run-command", response=CommandResponseOut)
 def run_management_command(request, payload: CommandRequestIn):
     """

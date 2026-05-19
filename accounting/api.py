@@ -1,6 +1,9 @@
+from collections import defaultdict
+
 from ninja import Router, errors
 from django.db.models import Sum, Q
 from django.db.models.functions import TruncMonth, TruncYear, TruncWeek
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from ninja_jwt.authentication import JWTAuth
 from datetime import date
@@ -10,11 +13,13 @@ from dateutil.relativedelta import relativedelta
 import numpy as np
 
 from .models import Account, TransactionLine, JournalEntry
+from .pdf_reports import build_monthly_expense_report_pdf
 from .schemas import (
     AccountDetailOut, DimensionBreakdownOut, AccountCreateIn, AccountOut,
     DrillDownOut, DrillDownBannerOut, BannerTransactionOut, RerouteIn, FlatAccountOut,
     AnnualHistoryOut,
-    AccountTransactionOut
+    AccountTransactionOut,
+    MonthlyExpenseReportOut,
 )
 from categorization.models import Merchant
 
@@ -665,6 +670,231 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
     # 1. Branch Data Context
     descendants = account.get_descendants(include_self=True)
     direct_children = account.get_children()
+
+    if not is_cumulative:
+        today = date.today()
+        today_year = today.year
+
+        descendant_ids = list(descendants.values_list('id', flat=True))
+        direct_child_ids = {
+            child.id: tuple(child.get_descendants(include_self=True).values_list('id', flat=True))
+            for child in direct_children
+        }
+        account_to_child_id = {
+            descendant_id: child_id
+            for child_id, child_descendant_ids in direct_child_ids.items()
+            for descendant_id in child_descendant_ids
+        }
+
+        history_start = min(year - 1, today_year - 5)
+        history_end = max(year, today_year)
+
+        descendant_rows = TransactionLine.objects.filter(
+            journal_entry__family=family,
+            account_id__in=descendant_ids,
+            journal_entry__date__year__gte=history_start,
+            journal_entry__date__year__lte=history_end,
+        ).values('account_id', 'journal_entry__date__year', 'journal_entry__date__month').annotate(total=Sum('amount'))
+
+        overall_year_totals = defaultdict(Decimal)
+        overall_month_totals = defaultdict(Decimal)
+        child_year_totals = {child.id: defaultdict(Decimal) for child in direct_children}
+        child_month_totals = {child.id: defaultdict(Decimal) for child in direct_children}
+
+        for row in descendant_rows:
+            total = row['total'] or Decimal('0.00')
+            row_year = row['journal_entry__date__year']
+            row_month = row['journal_entry__date__month']
+            account_id = row['account_id']
+
+            overall_year_totals[row_year] += total
+            overall_month_totals[(row_year, row_month)] += total
+
+            child_id = account_to_child_id.get(account_id)
+            if child_id is not None:
+                child_year_totals[child_id][row_year] += total
+                child_month_totals[child_id][(row_year, row_month)] += total
+
+        def yearly_totals_for_ids(account_ids, target_years):
+            if not account_ids:
+                return {}
+
+            rows = TransactionLine.objects.filter(
+                journal_entry__family=family,
+                account_id__in=account_ids,
+                journal_entry__date__year__in=target_years,
+            ).values('journal_entry__date__year').annotate(total=Sum('amount'))
+
+            return {
+                row['journal_entry__date__year']: abs(float(row['total'] or Decimal('0.00')))
+                for row in rows
+            }
+
+        def cumulative_total_for_ids(account_ids, cutoff_year):
+            if not account_ids:
+                return 0.0
+
+            total = TransactionLine.objects.filter(
+                journal_entry__family=family,
+                account_id__in=account_ids,
+                journal_entry__date__lte=date(cutoff_year, 12, 31),
+            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+            return abs(float(total))
+
+        root_revenue = Account.objects.filter(name='Revenue', parent=None, family=family).first()
+        revenue_descendant_ids = list(root_revenue.get_descendants(include_self=True).values_list('id', flat=True)) if root_revenue else []
+        revenue_year_totals = yearly_totals_for_ids(revenue_descendant_ids, {year, year - 1})
+
+        parent_account_ids = list(account.parent.get_descendants(include_self=True).values_list('id', flat=True)) if account.parent else descendant_ids
+        parent_year_totals = yearly_totals_for_ids(parent_account_ids, {year})
+
+        total_assets_root = Account.objects.filter(name='Assets', parent=None, family=family).first()
+        total_assets = cumulative_total_for_ids(
+            list(total_assets_root.get_descendants(include_self=True).values_list('id', flat=True)) if total_assets_root else [],
+            year,
+        )
+
+        amt_current = abs(float(overall_year_totals.get(year, Decimal('0.00'))))
+        amt_previous = abs(float(overall_year_totals.get(year - 1, Decimal('0.00'))))
+        parent_amt = parent_year_totals.get(year, amt_current)
+
+        children_list = []
+        for child in direct_children:
+            children_list.append({
+                "id": child.id,
+                "name": child.name,
+                "account_type": child.account_type,
+                "balance": abs(float(child_year_totals[child.id].get(year, Decimal('0.00')))),
+            })
+        children_list.sort(key=lambda x: x['balance'], reverse=True)
+
+        direct_merchants_sums = TransactionLine.objects.filter(
+            journal_entry__family=family,
+            account=account,
+            journal_entry__date__year=year
+        ).values('journal_entry__description').annotate(total=Sum('amount'))
+
+        direct_merchants = [
+            {"id": 0, "name": item['journal_entry__description'], "balance": abs(float(item['total']))}
+            for item in direct_merchants_sums if item['total']
+        ]
+        direct_merchants.sort(key=lambda x: x['balance'], reverse=True)
+
+        monthly_breakdown = []
+        for month_idx in range(1, 13):
+            by_child = []
+            month_total = 0.0
+
+            for child in direct_children:
+                child_amt = abs(float(child_month_totals[child.id].get((year, month_idx), Decimal('0.00'))))
+                by_child.append({
+                    "child_id": child.id,
+                    "child_name": child.name,
+                    "amount": child_amt
+                })
+                month_total += child_amt
+
+            if not direct_children:
+                month_total = abs(float(overall_month_totals.get((year, month_idx), Decimal('0.00'))))
+
+            monthly_breakdown.append({
+                "month": f"{year}-{month_idx:02d}",
+                "total": month_total,
+                "by_child": by_child
+            })
+
+        jan_1_today = date(today_year, 1, 1)
+        days_elapsed = max((today - jan_1_today).days + 1, 1)
+        annual_multiplier = 365.25 / days_elapsed
+
+        logic_amt_current = amt_current * annual_multiplier if year == today_year else amt_current
+        logic_amt_previous = amt_previous
+
+        yoy_growth = (logic_amt_current - logic_amt_previous) / logic_amt_previous if logic_amt_previous > 0 else None
+        revenue_growth = (revenue_year_totals.get(year, 0.0) - revenue_year_totals.get(year - 1, 0.0)) / revenue_year_totals.get(year - 1, 0.0) if revenue_year_totals.get(year - 1, 0.0) > 0 else 0
+        drift = (yoy_growth - revenue_growth) if yoy_growth is not None else 0
+
+        monthly_totals = [m['total'] for m in monthly_breakdown]
+        volatility = float(np.std(monthly_totals)) if monthly_totals else 0.0
+
+        top_driver_bal = children_list[0]['balance'] if children_list else amt_current
+        concentration = (top_driver_bal / amt_current) if amt_current > 0 else 0.0
+
+        health_tag = "stable"
+        red_flag = None
+        green_flag = None
+
+        if account.account_type == 'EXPENSE' and drift > 0.05:
+            health_tag = "drifting"
+            red_flag = {"title": "Operational Drift", "detail": f"Category growing {drift*100:.1f}% faster than income."}
+        elif concentration > 0.5:
+            health_tag = "concentrated"
+            red_flag = {"title": "Concentration Risk", "detail": f"Top driver accounts for {concentration*100:.0f}% of volume."}
+
+        if yoy_growth is not None and yoy_growth < -0.1 and account.account_type == 'EXPENSE':
+            green_flag = {"title": "Efficiency Gain", "detail": "Category spend reduced by >10% YoY."}
+
+        historical_trends = []
+        for y in range(today_year - 5, today_year + 1):
+            y_total = abs(float(overall_year_totals.get(y, Decimal('0.00'))))
+            y_income = revenue_year_totals.get(y, 0.0)
+
+            realized = y_total
+            estimated = 0.0
+
+            if y == today_year and y_total > 0:
+                projected_full = y_total * annual_multiplier
+                estimated = projected_full - y_total
+                display_total = projected_full
+                monthly_avg = realized / (days_elapsed / (365.25 / 12))
+            else:
+                display_total = y_total
+                monthly_avg = display_total / 12
+
+            historical_trends.append({
+                "year": y,
+                "total": display_total,
+                "realized_total": realized,
+                "estimated_total": estimated,
+                "monthly_avg": monthly_avg,
+                "pct_of_income": round((display_total / y_income) * 100, 2) if y_income > 0 else 0.0,
+            })
+
+        total_valid = [t['total'] for t in historical_trends if t['total'] > 0]
+        avg_yearly = sum(total_valid) / len(total_valid) if total_valid else 0.0
+
+        return {
+            "id": account.id,
+            "name": account.name,
+            "account_type": account.account_type,
+            "parent_id": account.parent_id,
+            "children": children_list,
+            "direct_merchants": direct_merchants,
+            "monthly_breakdown": monthly_breakdown,
+            "insights": {
+                "amount_current": amt_current,
+                "amount_previous": amt_previous,
+                "yoy_growth": yoy_growth,
+                "share_of_parent": (amt_current / parent_amt) if parent_amt > 0 else 1.0,
+                "share_of_total_inflow": (amt_current / revenue_year_totals.get(year, 0.0)) if revenue_year_totals.get(year, 0.0) > 0 else 0.0,
+                "volatility_score": volatility,
+                "concentration_top_1": concentration,
+                "drift_spread": drift if account.account_type == 'EXPENSE' else None,
+                "optimization_headroom": (top_driver_bal * 0.05),
+                "burn_coverage_days": (total_assets / (amt_current / 365)) if amt_current > 0 else None,
+                "health_tag": health_tag,
+                "red_flag": red_flag,
+                "green_flag": green_flag,
+                "strategic_action": {
+                    "action": f"Review {children_list[0]['name'] if children_list else 'drivers'} for 5% optimization." if health_tag == 'concentrated' else "Monitor for structural drift.",
+                    "owner": "household",
+                    "time_horizon": "30d"
+                }
+            },
+            "historical_trends": historical_trends,
+            "avg_yearly_total": avg_yearly,
+            "avg_monthly_avg": avg_yearly / 12
+        }
     
     # 2. Universal Sum Helper
     def get_sum(branch_qs, target_year, month=None, is_cumulative=False):
@@ -1109,6 +1339,336 @@ def get_spending_by_category(request, start_date: date, end_date: date):
     # Sort by highest spend
     results.sort(key=lambda x: x['amount'], reverse=True)
     return results
+
+
+@router.get("/reports/expenses/monthly-overview", response=MonthlyExpenseReportOut)
+def get_monthly_expense_overview(request, selected_month: Optional[str] = None):
+    """
+    Returns a full monthly expense series for each top-level expense category,
+    plus the latest month comparison against all-time monthly average.
+    """
+    family = request.auth.family
+
+    root_expenses = Account.objects.filter(
+        family=family,
+        name='Expenses',
+        parent=None,
+        account_type=Account.AccountType.EXPENSE,
+    ).first()
+
+    if not root_expenses:
+        return {
+            "latest_month": None,
+            "totals_series": [],
+            "categories": [],
+            "top_transactions": [],
+        }
+
+    top_categories = list(root_expenses.get_children().order_by('name'))
+    if not top_categories:
+        return {
+            "latest_month": None,
+            "totals_series": [],
+            "categories": [],
+            "top_transactions": [],
+        }
+
+    category_to_descendants = {
+        cat.id: list(cat.get_descendants(include_self=True).values_list('id', flat=True))
+        for cat in top_categories
+    }
+    account_to_category = {
+        account_id: cat_id
+        for cat_id, descendant_ids in category_to_descendants.items()
+        for account_id in descendant_ids
+    }
+
+    all_expense_ids = list(account_to_category.keys())
+    if not all_expense_ids:
+        return {
+            "latest_month": None,
+            "totals_series": [],
+            "categories": [],
+            "top_transactions": [],
+        }
+
+    raw_rows = list(
+        TransactionLine.objects.filter(
+            journal_entry__family=family,
+            account_id__in=all_expense_ids,
+        )
+        .annotate(month=TruncMonth('journal_entry__date'))
+        .values('month', 'account_id')
+        .annotate(total=Sum('amount'))
+        .order_by('month')
+    )
+
+    if not raw_rows:
+        return {
+            "latest_month": None,
+            "totals_series": [],
+            "categories": [
+                {
+                    "category_id": cat.id,
+                    "category_name": cat.name,
+                    "all_time_average": 0.0,
+                    "current_month_amount": 0.0,
+                    "delta_vs_average": 0.0,
+                    "delta_vs_average_pct": None,
+                    "series": [],
+                }
+                for cat in top_categories
+            ],
+            "top_transactions": [],
+        }
+
+    min_month = raw_rows[0]['month']
+    max_month = raw_rows[-1]['month']
+
+    all_months = []
+    current_month = min_month
+    while current_month <= max_month:
+        all_months.append(current_month)
+        current_month += relativedelta(months=1)
+
+    # Fetch Revenue data and categories
+    root_revenue = Account.objects.filter(
+        family=family,
+        name='Revenue',
+        parent=None,
+        account_type=Account.AccountType.REVENUE,
+    ).first()
+    top_revenue_categories = list(root_revenue.get_children().order_by('name')) if root_revenue else []
+    
+    rev_cat_to_descendants = {
+        cat.id: list(cat.get_descendants(include_self=True).values_list('id', flat=True))
+        for cat in top_revenue_categories
+    }
+    rev_account_to_cat = {
+        acc_id: cat_id
+        for cat_id, acc_ids in rev_cat_to_descendants.items()
+        for acc_id in acc_ids
+    }
+
+    all_revenue_ids = list(root_revenue.get_descendants(include_self=True).values_list('id', flat=True)) if root_revenue else []
+    revenue_rows = TransactionLine.objects.filter(
+        journal_entry__family=family,
+        account_id__in=all_revenue_ids,
+    ).annotate(month=TruncMonth('journal_entry__date')).values('month', 'account_id').annotate(total=Sum('amount'))
+
+    revenue_month_values = {month: Decimal('0.00') for month in all_months}
+    rev_cat_month_values = {
+        cat.id: {month: Decimal('0.00') for month in all_months}
+        for cat in top_revenue_categories
+    }
+
+    for row in revenue_rows:
+        if row['month'] in revenue_month_values:
+            val = -(row['total'] or Decimal('0.00'))
+            revenue_month_values[row['month']] += val
+            cat_id = rev_account_to_cat.get(row['account_id'])
+            if cat_id:
+                rev_cat_month_values[cat_id][row['month']] += val
+
+    category_month_values = {
+        cat.id: {month: Decimal('0.00') for month in all_months}
+        for cat in top_categories
+    }
+
+    for row in raw_rows:
+        mapped_category_id = account_to_category.get(row['account_id'])
+        if not mapped_category_id:
+            continue
+        category_month_values[mapped_category_id][row['month']] += row['total'] or Decimal('0.00')
+
+    latest_month = all_months[-1]
+    selected_month_key = selected_month or latest_month.strftime("%Y-%m")
+    selected_month_start = next((month for month in all_months if month.strftime("%Y-%m") == selected_month_key), latest_month)
+    categories_payload = []
+    revenue_categories_payload = []
+    totals_series = []
+    summary_series = []
+
+    for month in all_months:
+        month_expenses = Decimal('0.00')
+        for cat in top_categories:
+            month_expenses += category_month_values[cat.id][month]
+        
+        month_revenue = revenue_month_values[month]
+        month_savings = month_revenue - month_expenses
+
+        totals_series.append({
+            "month": month.strftime("%Y-%m"),
+            "amount": float(month_expenses),
+        })
+        summary_series.append({
+            "month": month.strftime("%Y-%m"),
+            "revenue": float(month_revenue),
+            "expenses": float(month_expenses),
+            "savings": float(month_savings),
+        })
+
+    def build_cat_payload(cats, month_values_map):
+        payload = []
+        for cat in cats:
+            month_map = month_values_map[cat.id]
+            ordered_values = [month_map[month] for month in all_months]
+            total_amount = sum(ordered_values, Decimal('0.00'))
+            month_count = Decimal(len(all_months))
+            all_time_avg = total_amount / month_count if month_count else Decimal('0.00')
+            latest_amount = month_map[latest_month]
+            delta = latest_amount - all_time_avg
+            delta_pct = None
+            if all_time_avg != Decimal('0.00'):
+                delta_pct = float((delta / all_time_avg) * Decimal('100.00'))
+
+            payload.append({
+                "category_id": cat.id,
+                "category_name": cat.name,
+                "all_time_average": float(all_time_avg),
+                "current_month_amount": float(latest_amount),
+                "delta_vs_average": float(delta),
+                "delta_vs_average_pct": delta_pct,
+                "series": [
+                    {
+                        "month": month.strftime("%Y-%m"),
+                        "amount": float(month_map[month]),
+                    }
+                    for month in all_months
+                ],
+            })
+        payload.sort(key=lambda item: item['current_month_amount'], reverse=True)
+        return payload
+
+    categories_payload = build_cat_payload(top_categories, category_month_values)
+    revenue_categories_payload = build_cat_payload(top_revenue_categories, rev_cat_month_values)
+
+    avg_revenue = sum(revenue_month_values.values()) / len(all_months) if all_months else Decimal('0.00')
+    avg_expenses = sum(s['expenses'] for s in summary_series) / len(all_months) if all_months else 0.0
+    avg_savings = sum(s['savings'] for s in summary_series) / len(all_months) if all_months else 0.0
+
+    # Build merchant stacked series: select top N merchants by total across the period,
+    # then order them alphabetically and produce a per-month series for each.
+    TOP_N_MERCHANTS = 10
+
+    # Total per merchant (by description) across the whole period
+    merchant_totals_qs = TransactionLine.objects.filter(
+        journal_entry__family=family,
+        account_id__in=all_expense_ids,
+    ).values('journal_entry__description').annotate(total=Sum('amount'))
+    merchant_totals = []
+    for m in merchant_totals_qs:
+        merchant_totals.append((m['journal_entry__description'], m['total'] or Decimal('0.00')))
+
+    # Pick top N by absolute total
+    merchant_totals_sorted = sorted(merchant_totals, key=lambda t: abs(t[1]), reverse=True)[:TOP_N_MERCHANTS]
+    merchant_names = [t[0] for t in merchant_totals_sorted]
+
+    # Order alphabetically as requested
+    merchant_names_sorted = sorted(merchant_names, key=lambda n: n.lower())
+
+    # Initialize merchant -> month map
+    merchant_month_values = {name: {month: Decimal('0.00') for month in all_months} for name in merchant_names_sorted}
+
+    merchant_month_rows = TransactionLine.objects.filter(
+        journal_entry__family=family,
+        account_id__in=all_expense_ids,
+    ).annotate(month=TruncMonth('journal_entry__date')).values('month', 'journal_entry__description').annotate(total=Sum('amount')).order_by('month')
+
+    for row in merchant_month_rows:
+        desc = row['journal_entry__description']
+        if desc in merchant_month_values:
+            merchant_month_values[desc][row['month']] += row['total'] or Decimal('0.00')
+
+    merchants_payload = []
+    for name in merchant_names_sorted:
+        m_obj = Merchant.objects.filter(family=family, name=name).first()
+        merchants_payload.append({
+            "id": m_obj.id if m_obj else 0,
+            "name": name,
+            "series": [
+                {"month": month.strftime("%Y-%m"), "amount": float(merchant_month_values[name][month])}
+                for month in all_months
+            ],
+        })
+
+    latest_month_start = selected_month_start
+    latest_month_end = latest_month_start + relativedelta(months=1) - relativedelta(days=1)
+    latest_month_rows = list(
+        TransactionLine.objects.filter(
+            journal_entry__family=family,
+            account_id__in=all_expense_ids,
+            journal_entry__date__range=[latest_month_start, latest_month_end],
+        )
+        .values('journal_entry_id', 'journal_entry__description', 'journal_entry__date')
+        .annotate(total=Sum('amount'))
+        .order_by('-total')[:5]
+    )
+
+    latest_entry_ids = [row['journal_entry_id'] for row in latest_month_rows]
+    latest_entries = JournalEntry.objects.filter(
+        family=family,
+        id__in=latest_entry_ids,
+    ).prefetch_related('lines__account', 'staged_transactions__merchant')
+    latest_entry_map = {entry.id: entry for entry in latest_entries}
+
+    top_transactions_payload = []
+    for row in latest_month_rows:
+        entry = latest_entry_map.get(row['journal_entry_id'])
+        if not entry:
+            continue
+
+        expense_lines = [line for line in entry.lines.all() if line.account_id in all_expense_ids]
+        primary_line = max(expense_lines, key=lambda line: abs(line.amount)) if expense_lines else None
+        category_name = 'Uncategorized'
+        category_id = 0
+        if primary_line and primary_line.account_id in account_to_category:
+            category_id = account_to_category[primary_line.account_id]
+            category_name = next((cat.name for cat in top_categories if cat.id == category_id), category_name)
+
+        staged_transactions = list(entry.staged_transactions.all())
+        staged_tx = staged_transactions[0] if staged_transactions else None
+        merchant_name = staged_tx.merchant.name if staged_tx and staged_tx.merchant else None
+
+        top_transactions_payload.append({
+            "journal_entry_id": entry.id,
+            "date": entry.date,
+            "description": staged_tx.raw_description if staged_tx and staged_tx.raw_description else entry.description,
+            "amount": float(row['total'] or Decimal('0.00')),
+            "category_id": category_id,
+            "category_name": category_name,
+            "merchant_name": merchant_name,
+            "statement_id": staged_tx.statement_import_id if staged_tx else None,
+            "staged_transaction_id": staged_tx.id if staged_tx else None,
+        })
+
+    return {
+        "latest_month": latest_month.strftime("%Y-%m"),
+        "latest_revenue": float(revenue_month_values[latest_month]),
+        "latest_expenses": float(sum(category_month_values[cat.id][latest_month] for cat in top_categories)),
+        "latest_savings": float(revenue_month_values[latest_month] - sum(category_month_values[cat.id][latest_month] for cat in top_categories)),
+        "avg_revenue": float(avg_revenue),
+        "avg_expenses": float(avg_expenses),
+        "avg_savings": float(avg_savings),
+        "totals_series": totals_series,
+        "summary_series": summary_series,
+        "categories": categories_payload,
+        "revenue_categories": revenue_categories_payload,
+        "merchants": merchants_payload,
+        "top_transactions": top_transactions_payload,
+    }
+
+
+@router.get("/reports/expenses/monthly-overview/pdf")
+def get_monthly_expense_overview_pdf(request, selected_month: Optional[str] = None):
+    """Return the monthly expense report as a polished PDF document."""
+    report_data = get_monthly_expense_overview(request, selected_month=selected_month)
+    pdf_bytes = build_monthly_expense_report_pdf(report_data, selected_month=selected_month)
+
+    month_label = selected_month or report_data.get("latest_month") or "latest"
+    response = HttpResponse(pdf_bytes, content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="monthly-expense-report-{month_label}.pdf"'
+    return response
 
 @router.get("/annual-statements/history", response=AnnualHistoryOut)
 def get_annual_statements_history(request):

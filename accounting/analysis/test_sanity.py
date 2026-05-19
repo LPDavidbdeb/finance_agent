@@ -46,6 +46,17 @@ class TestSanityLayer(unittest.TestCase):
         self.assertEqual(cleaned.iloc[2], 0)
         self.assertEqual(cleaned.iloc[3], 0)
 
+    def test_negative_clipping(self):
+        # Series with negative values (refunds)
+        # Use first element as negative to avoid isolated-zero interpolation
+        series = pd.Series([-50, 100, 200])
+        cleaned = self.sl.process(series)
+        
+        # Index 0 should be clipped to 0
+        self.assertEqual(cleaned.iloc[0], 0)
+        self.assertEqual(cleaned.iloc[1], 100)
+        self.assertEqual(cleaned.iloc[2], 200)
+
     def test_full_process_integration(self):
         # Mix of isolated zero and a spike
         series = pd.Series([100, 110, 0, 110, 1000, 100])

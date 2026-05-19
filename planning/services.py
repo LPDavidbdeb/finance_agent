@@ -5,6 +5,7 @@ from django.db import transaction, models
 from .models import AnnuitySchedule, AnnuityRateHistory, AnnuityPeriod
 from .schemas import ScenarioSpec, ScenarioType, PaymentFrequencyIn
 from accounting.models import Account, JournalEntry, TransactionLine
+import logging
 from finance_backend.utils.time_value import (
     PaymentFrequency,
     compute_pmt_loan,
@@ -12,6 +13,11 @@ from finance_backend.utils.time_value import (
     generate_amortization_schedule,
     generate_sinking_fund_schedule,
 )
+
+
+class ReconciliationError(Exception):
+    """Domain error for amortization reconciliation failures."""
+    pass
 
 _FREQ_MAP = {
     PaymentFrequencyIn.MONTHLY: PaymentFrequency.MONTHLY,
@@ -213,13 +219,18 @@ class AmortizationReconciliationService:
                 output_field=models.IntegerField(),
             )
         ).order_by('-is_family_specific', 'id').first()
-
         if not interest_account:
-            # Create a generic one if missing? Or just fail?
-            # Let's try to find "Mortgage interest cost" as seen in shell
-            interest_account = Account.objects.filter(name__icontains='Mortgage interest cost').first()
-            if not interest_account:
-                raise ValueError("No 'Interest' expense account found for this family.")
+            # Try a common name fallback
+            interest_account = Account.objects.filter(name__icontains='Mortgage interest cost', family=family).first()
+        if not interest_account:
+            # As a safe fallback, auto-create a family-scoped interest expense account.
+            logger = logging.getLogger(__name__)
+            interest_account = Account.objects.create(
+                name='Interest expense',
+                account_type=Account.AccountType.EXPENSE,
+                family=family
+            )
+            logger.info("Auto-created interest expense account %s for family %s", interest_account.id, family.id)
 
         # 3. Construct the 3-line compound JournalEntry
         journal_entry = JournalEntry.objects.create(

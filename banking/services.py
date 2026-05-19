@@ -161,9 +161,14 @@ def approve_staged_transaction(transaction_id: int, target_account_id: int, user
     )
     
     if rule and rule.linked_schedule:
-        je = AmortizationReconciliationService.reconcile_amortization_payment(staged_tx, rule, user)
-        if je:
-            return je
+        try:
+            je = AmortizationReconciliationService.reconcile_amortization_payment(staged_tx, rule, user)
+            if je:
+                return je
+        except Exception as e:
+            logger.exception("Amortization reconciliation failed")
+            # Map service errors into a user-friendly ValueError for higher layers
+            raise ValueError(f"Amortization reconciliation failed: {e}")
 
     source_account = resolved_product.account
     try:

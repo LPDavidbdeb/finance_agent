@@ -11,6 +11,7 @@ import {
   fetchStatementMonths,
   fetchStatementTransactions,
   fetchStagedTransactions,
+  fetchCeleryStatus,
 } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { TransactionListTable } from '../components/TransactionListTable';
@@ -147,6 +148,24 @@ export const ProductDetail: React.FC = () => {
   const handleFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file || !id) return;
+
+    // Check Celery worker status before upload
+    try {
+      const status = await fetchCeleryStatus();
+      if (!status.is_running) {
+        const proceed = window.confirm(
+          "Warning: The background worker (Celery) is currently offline. " +
+          "If you upload now, the transaction extraction will not start until the worker is manually restarted. " +
+          "\n\nDo you want to proceed anyway?"
+        );
+        if (!proceed) {
+          event.target.value = '';
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Could not verify Celery status", err);
+    }
 
     setUploading(true);
     try {

@@ -134,3 +134,43 @@ class AmortizationReconciliationTest(TestCase):
         self.assertEqual(staged_tx.status, StagedTransaction.Status.RECONCILED)
         self.assertEqual(staged_tx.journal_entry, je)
         self.assertEqual(staged_tx.merchant, self.rule.merchant)
+
+    def test_auto_create_interest_account_when_missing(self):
+        """
+        If the family lacks an interest expense account, the reconciliation should
+        create one automatically and use it in the compound journal entry.
+        """
+        # Remove the explicit interest account
+        self.interest_acc.delete()
+
+        period1 = self.schedule.periods.get(period_number=1)
+        expected_amount = period1.payment_amount
+
+        stmt = BankStatementImport.objects.create(
+            institution=self.institution,
+            financial_product=self.bank_product,
+            document_date=date(2026, 2, 1)
+        )
+
+        staged_tx = StagedTransaction.objects.create(
+            statement_import=stmt,
+            bank_date=period1.payment_date,
+            raw_description="Mazda CX-5",
+            amount=-expected_amount,
+            status=StagedTransaction.Status.UNPROCESSED
+        )
+
+        je = approve_staged_transaction(
+            transaction_id=staged_tx.id,
+            target_account_id=self.bank_acc.id,
+            user=self.user
+        )
+
+        # Verify an interest account was created for the family
+        # Accept either a family-scoped or global interest expense account
+        interest_account = Account.objects.filter(account_type=Account.AccountType.EXPENSE, name__icontains='interest').first()
+        self.assertIsNotNone(interest_account)
+
+        # Verify JE used that interest account
+        interest_line = je.lines.get(account=interest_account)
+        self.assertEqual(interest_line.amount, period1.interest_portion)

@@ -38,6 +38,85 @@ export async function fetchSpendingByCategory(startDate: string, endDate: string
   return res.json();
 }
 
+export interface MonthlyExpensePoint {
+  month: string;
+  amount: number;
+}
+
+export interface MerchantSeriesPoint {
+  month: string;
+  amount: number;
+}
+
+export interface MerchantSeries {
+  id: number;
+  name: string;
+  series: MerchantSeriesPoint[];
+}
+
+export interface MonthlyExpenseTransaction {
+  journal_entry_id: number;
+  date: string;
+  description: string;
+  amount: number;
+  category_id: number;
+  category_name: string;
+  merchant_name?: string | null;
+  statement_id?: number | null;
+  staged_transaction_id?: number | null;
+}
+
+export interface MonthlyExpenseCategory {
+  category_id: number;
+  category_name: string;
+  all_time_average: number;
+  current_month_amount: number;
+  delta_vs_average: number;
+  delta_vs_average_pct: number | null;
+  series: MonthlyExpensePoint[];
+}
+
+export interface MonthlySummaryPoint {
+  month: string;
+  revenue: number;
+  expenses: number;
+  savings: number;
+}
+
+export interface MonthlyExpenseReport {
+  latest_month: string | null;
+  latest_revenue: number;
+  latest_expenses: number;
+  latest_savings: number;
+  avg_revenue: number;
+  avg_expenses: number;
+  avg_savings: number;
+  totals_series: MonthlyExpensePoint[];
+  summary_series: MonthlySummaryPoint[];
+  categories: MonthlyExpenseCategory[];
+  revenue_categories: MonthlyExpenseCategory[];
+  merchants?: MerchantSeries[];
+  top_transactions?: MonthlyExpenseTransaction[];
+}
+
+export async function fetchMonthlyExpenseOverview(selectedMonth?: string | null): Promise<MonthlyExpenseReport> {
+  const query = selectedMonth ? `?selected_month=${encodeURIComponent(selectedMonth)}` : '';
+  const res = await fetch(`${API_URL}/accounting/reports/expenses/monthly-overview${query}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch monthly expense overview");
+  return res.json();
+}
+
+export async function fetchMonthlyExpenseOverviewPdf(selectedMonth?: string | null): Promise<Blob> {
+  const query = selectedMonth ? `?selected_month=${encodeURIComponent(selectedMonth)}` : '';
+  const res = await fetch(`${API_URL}/accounting/reports/expenses/monthly-overview/pdf${query}`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch monthly expense report PDF");
+  return res.blob();
+}
+
 export async function fetchAvailableYears() {
   const res = await fetch(`${API_URL}/accounting/available-years`, {
     headers: getAuthHeader(),
@@ -470,6 +549,14 @@ export async function deleteStatementImport(importId: number) {
     throw new Error(errorData?.detail || "Failed to delete statement import");
   }
 
+  return res.json();
+}
+
+export async function fetchCeleryStatus() {
+  const res = await fetch(`${API_URL}/maintenance/celery-status`, {
+    headers: getAuthHeader(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch celery status");
   return res.json();
 }
 

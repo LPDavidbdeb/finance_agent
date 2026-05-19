@@ -11,7 +11,8 @@ import {
   ArrowLeft, Store, Layers, Loader2,
   TrendingUp, TrendingDown, Zap,
   Activity, BarChart3, Calendar, ChevronRight,
-  ArrowRightLeft, PlusCircle, X, FileText
+  ArrowRightLeft, PlusCircle, X, FileText,
+  ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { InlineReroutePanel, RerouteMerchant } from '../components/InlineReroutePanel';
 import { CreateRuleModal } from '../components/CreateRuleModal';
@@ -28,6 +29,8 @@ interface Merchant {
   name: string;
   balance: number;
 }
+
+type BannerSortKey = 'name' | 'count' | 'total';
 
 interface MonthlyCategory {
   child_id: number;
@@ -112,6 +115,8 @@ const BannerTable: React.FC<BannerTableProps> = ({ transactions, flatAccounts, m
   const [expandedBanner, setExpandedBanner] = useState<string | null>(null);
   const [reroutingEntry, setReroutingEntry] = useState<number | null>(null);
   const [ruleModalTx, setRuleModalTx] = useState<any | null>(null);
+  const [sortKey, setSortKey] = useState<BannerSortKey>('count');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   const bannerMap = new Map<string, { txs: any[]; total: number }>();
   transactions.forEach(tx => {
@@ -122,10 +127,35 @@ const BannerTable: React.FC<BannerTableProps> = ({ transactions, flatAccounts, m
   });
   const banners = Array.from(bannerMap.entries())
     .map(([name, { txs, total }]) => ({ name, txs, total, count: txs.length }))
-    .sort((a, b) => b.count - a.count);
+    .sort((a, b) => {
+      const direction = sortDirection === 'asc' ? 1 : -1;
+      if (sortKey === 'name') {
+        return a.name.localeCompare(b.name) * direction;
+      }
+      if (sortKey === 'count') {
+        return (a.count - b.count) * direction;
+      }
+      return (a.total - b.total) * direction;
+    });
   const filtered = txSearch
     ? banners.filter(b => b.name.toLowerCase().includes(txSearch.toLowerCase()))
     : banners;
+
+  const toggleSort = (key: BannerSortKey) => {
+    if (sortKey === key) {
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    setSortKey(key);
+    setSortDirection(key === 'name' ? 'asc' : 'desc');
+  };
+
+  const SortIndicator = ({ column }: { column: BannerSortKey }) => {
+    if (sortKey !== column) return <ArrowUpDown className="h-3 w-3 text-slate-300" />;
+    return sortDirection === 'asc'
+      ? <ArrowUp className="h-3 w-3 text-blue-600" />
+      : <ArrowDown className="h-3 w-3 text-blue-600" />;
+  };
 
   return (
     <>
@@ -145,9 +175,21 @@ const BannerTable: React.FC<BannerTableProps> = ({ transactions, flatAccounts, m
           <thead className="bg-slate-50/50 border-b text-slate-500 text-xs uppercase font-bold tracking-wider">
             <tr>
               <th className="px-4 py-3 w-6"></th>
-              <th className="px-4 py-3 text-left">Banner</th>
-              <th className="px-4 py-3 text-center">Hits</th>
-              <th className="px-4 py-3 text-right">Total</th>
+              <th className="px-4 py-3 text-left">
+                <button type="button" onClick={() => toggleSort('name')} className="inline-flex items-center gap-1 hover:text-blue-600">
+                  Banner <SortIndicator column="name" />
+                </button>
+              </th>
+              <th className="px-4 py-3 text-center">
+                <button type="button" onClick={() => toggleSort('count')} className="inline-flex items-center gap-1 hover:text-blue-600 mx-auto">
+                  Hits <SortIndicator column="count" />
+                </button>
+              </th>
+              <th className="px-4 py-3 text-right">
+                <button type="button" onClick={() => toggleSort('total')} className="inline-flex items-center gap-1 hover:text-blue-600 ml-auto">
+                  Total <SortIndicator column="total" />
+                </button>
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y bg-white">

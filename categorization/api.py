@@ -431,7 +431,8 @@ def get_merchant_stats(request, merchant_id: int):
     current_year = date.today().year
     current_month_num = date.today().month
     current_year_total = qs.filter(bank_date__year=current_year).aggregate(total=Sum(Abs('amount')))['total'] or 0.0
-    current_year_monthly_avg = float(current_year_total) / current_month_num
+    months_completed = current_month_num - 1 if current_month_num > 1 else 12
+    current_year_monthly_avg = float(current_year_total) / months_completed if months_completed > 0 else 0.0
     
     # 4. Daily Activity
     # Group by bank_date and sum absolute amounts

@@ -186,10 +186,13 @@ class MasterCardWealthSimpleExtractor(BasePDFExtractor):
     def sort_debit_credit(self, df):
         credit_list, debit_list = [], []
         for amount in df["AMOUNT"]:
-            if str(amount)[0] != "$":
+            amount_str = str(amount).strip()
+            # If it starts with a dash (standard or special), it's a debit (outflow)
+            if amount_str.startswith('–') or amount_str.startswith('-'):
                 credit_list.append(None)
                 debit_list.append(amount)
             else:
+                # Otherwise it's a credit (inflow)
                 credit_list.append(amount)
                 debit_list.append(None)
         df["CREDIT"], df["DEBIT"] = credit_list, debit_list
@@ -202,7 +205,11 @@ class MasterCardWealthSimpleExtractor(BasePDFExtractor):
             for amount in df[col_name]:
                 if pd.notna(amount) and amount != "":
                     amount = str(amount).strip()
-                    # Handle "1 661,24 $" or "-1 661,24 $" or "1,661.24 $" (standard)
+                    # Handle "1 661,24 $" or "–1 661,24 $" or "1,661.24 $" (standard)
+                    # For Wealthsimple, we want the positive magnitude in the DEBIT/CREDIT column
+                    # because the final amount is calculated as CREDIT - DEBIT.
+                    amount = amount.replace('–', '').replace('-', '')
+                    
                     # 1. Remove currency and spaces
                     for caracter in caracter_list:
                         amount = amount.replace(caracter, "")

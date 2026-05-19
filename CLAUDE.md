@@ -15,6 +15,7 @@ finance_agent/
 ├── users/                    # Auth, Family, FamilyMember models
 ├── accounting/               # Chart of Accounts, JournalEntry, TransactionLine
 │   ├── docs/                 # Analysis Framework, EPIC 1-4, Normalization docs
+│   ├── pdf_reports.py        # Server-side PDF builders for report exports
 │   └── tasks.py              # Analytical ETL Pipeline
 ├── banking/                  # BankStatementImport, StagedTransaction, FinancialProduct
 │   ├── docs/                 # Extraction fixes and workflow docs
@@ -34,7 +35,7 @@ finance_agent/
 ├── ai_core/                  # AI extraction strategies
 └── frontend/                 # React 18 + TypeScript + Vite
     └── src/
-        ├── pages/            # Dashboard, FamilyManager, MerchantManager, QualityReportsPage, AccountDetail, etc.
+        ├── pages/            # Dashboard, MonthlyExpenseReportPage, FamilyManager, MerchantManager, QualityReportsPage, AccountDetail, etc.
         ├── components/       # Reusable UI components (Shadcn UI patterns)
         ├── context/          # AuthContext
         └── api/              # client.ts — API calls to backend
