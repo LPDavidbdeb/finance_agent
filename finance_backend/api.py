@@ -35,6 +35,7 @@ for path, router in [
     ("/planning/", "planning.api.router"),
     ("/quality/", "quality.api.router"),
     ("/assets/", "assets.api.router"),
+    ("/projects/", "projects.api.router"),
 ]:
     try:
         api.add_router(path, router)

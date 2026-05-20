@@ -59,7 +59,7 @@ def find_matching_rule(
                 default=Value(0),
                 output_field=IntegerField(),
             ),
-        ).order_by('-search_len', '-has_amount_bounds', '-search_text')
+        ).order_by('-has_amount_bounds', '-search_len', '-search_text')
 
         for rule in rules:
             if not rule.search_text:

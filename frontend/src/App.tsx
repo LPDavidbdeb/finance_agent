@@ -26,6 +26,10 @@ const AnalysisPage = lazy(() => import('./pages/AnalysisPage'));
 const MonthlyExpenseReportPage = lazy(() => import('./pages/MonthlyExpenseReportPage'));
 const CreateAssetPage = lazy(() => import('./pages/CreateAssetPage'))
 const HouseEditorPage = lazy(() => import('./pages/HouseEditorPage'))
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage').then(m => ({ default: m.ProjectsPage })))
+const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage').then(m => ({ default: m.ProjectDetailPage })))
+const LoanSetupPage = lazy(() => import('./pages/LoanSetupPage').then(m => ({ default: m.LoanSetupPage })))
+const LoanDetailPage = lazy(() => import('./pages/LoanDetailPage').then(m => ({ default: m.LoanDetailPage })))
 
 // Lazy-load complex shared components
 const InstitutionManager = lazy(() => import('./components/InstitutionManager').then(module => ({ default: module.InstitutionManager })));
@@ -69,6 +73,10 @@ function App() {
                 <Route path="/ledger" element={<AccountTree />} />
                 <Route path="/assets/create" element={<CreateAssetPage />} />
                 <Route path="/house/editor" element={<HouseEditorPage />} />
+                <Route path="/projects" element={<ProjectsPage />} />
+                <Route path="/projects/:id" element={<ProjectDetailPage />} />
+                <Route path="/dashboard/loan-setup" element={<LoanSetupPage />} />
+                <Route path="/dashboard/loans/:id" element={<LoanDetailPage />} />
               </Routes>
             </Suspense>
           </main>

@@ -17,6 +17,14 @@ class Merchant(models.Model):
     name = models.CharField(max_length=255)
     default_account = models.ForeignKey('accounting.Account', on_delete=models.SET_NULL, null=True, related_name='merchants')
     is_unique_provider = models.BooleanField(default=True)
+    linked_schedule = models.ForeignKey(
+        'planning.AnnuitySchedule',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='linked_merchants',
+        help_text="When set, approved payments for this merchant are split into principal + interest instead of a single expense line.",
+    )
 
     class Meta:
         unique_together = ('family', 'name')

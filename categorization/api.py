@@ -392,11 +392,22 @@ def update_merchant(request, merchant_id: int, payload: MerchantUpdateIn):
     if payload.default_account_id is not None:
         # Use service for complex account update + historical retrofitting
         update_merchant_category(
-            merchant_id=merchant.id, 
-            new_account_id=payload.default_account_id, 
+            merchant_id=merchant.id,
+            new_account_id=payload.default_account_id,
             update_history=payload.update_history
         )
-        
+
+    if payload.clear_linked_schedule:
+        merchant.linked_schedule = None
+        merchant.save(update_fields=['linked_schedule'])
+    elif payload.linked_schedule_id is not None:
+        from planning.models import AnnuitySchedule
+        schedule = get_object_or_404(
+            AnnuitySchedule, id=payload.linked_schedule_id, family=user.family
+        )
+        merchant.linked_schedule = schedule
+        merchant.save(update_fields=['linked_schedule'])
+
     return {"success": True}
 
 @router.get("/merchants/{merchant_id}/stats", response=MerchantStatsOut)
@@ -456,8 +467,9 @@ def get_merchant_detail(request, merchant_id: int):
     """
     user = request.auth
     merchant = get_object_or_404(
-        Merchant.objects.select_related('default_account').prefetch_related('mapping_rules__institution'), 
-        id=merchant_id, 
+        Merchant.objects.select_related('default_account', 'linked_schedule')
+                        .prefetch_related('mapping_rules__institution'),
+        id=merchant_id,
         family=user.family
     )
     return merchant

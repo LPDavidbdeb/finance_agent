@@ -628,7 +628,7 @@ export async function fetchMerchantStats(id: number) {
   return res.json();
 }
 
-export async function updateMerchant(id: number, data: { name?: string; default_account_id?: number; is_unique_provider?: boolean; update_history?: boolean }) {
+export async function updateMerchant(id: number, data: { name?: string; default_account_id?: number; is_unique_provider?: boolean; update_history?: boolean; linked_schedule_id?: number | null; clear_linked_schedule?: boolean }) {
   const res = await fetch(`${API_URL}/categorization/merchants/${id}`, {
     method: "PATCH",
     headers: getAuthHeader(),
@@ -807,6 +807,7 @@ export interface AnnuityScheduleOut {
   start_date: string;
   computed_payment: number;
   linked_journal_entry_id: number | null;
+  linked_rule: LinkedRule | null;
   created_at: string;
   periods: AnnuityPeriodOut[];
 }
@@ -858,6 +859,91 @@ export async function deleteSchedule(scheduleId: number): Promise<void> {
     headers: getAuthHeader(),
   });
   if (!res.ok) throw new Error('Failed to delete schedule');
+}
+
+// --- Portfolio Scenarios ---
+
+export interface PortfolioStats {
+  mean: number;
+  median: number;
+  std: number;
+  min: number;
+  max: number;
+  skewness: number;
+  kurtosis: number;
+  percentile_5: number;
+  percentile_25: number;
+  percentile_50: number;
+  percentile_75: number;
+  percentile_95: number;
+}
+
+export interface DistributionData {
+  count: number;
+  stats: PortfolioStats;
+  histogram_edges: number[];
+  histogram_counts: number[];
+  kde_x: number[];
+  kde_y: number[];
+  returns?: number[];
+}
+
+export interface ScenarioMetrics {
+  horizon_years: number;
+  pattern: string;
+  lump_sum: DistributionData;
+  dca: DistributionData;
+}
+
+export interface AllocationWeight {
+  ticker: string;
+  weight: number;
+}
+
+export interface AllocationResult {
+  label: string;
+  weights: AllocationWeight[];
+  expected_return: number;
+  volatility: number;
+  sharpe_ratio: number;
+}
+
+export interface PortfolioOptimizationResult {
+  tickers: string[];
+  period_start: string;
+  period_end: string;
+  optimal: AllocationResult;
+  alternatives: AllocationResult[];
+}
+
+export interface PortfolioScenariosResponse {
+  optimization: PortfolioOptimizationResult;
+  scenarios: ScenarioMetrics[];
+  heatmap_data?: number[][];
+}
+
+export async function computePortfolioScenarios(
+  tickers: string[],
+  horizonsYears?: number[],
+  monthlyDcaAmount?: number,
+  rebalanceFreqMonths?: number,
+): Promise<PortfolioScenariosResponse> {
+  const res = await fetch(`${API_URL}/planning/portfolio-scenarios`, {
+    method: 'POST',
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tickers,
+      horizons_years: horizonsYears || [2, 5, 10, 15, 25],
+      monthly_dca_amount: monthlyDcaAmount || 1000,
+      rebalance_freq_months: rebalanceFreqMonths || 1,
+      optimize: true,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(err.detail || 'Portfolio scenarios computation failed');
+  }
+  return res.json();
 }
 
 // --- Statement Coverage ---
@@ -1095,5 +1181,282 @@ export async function fetchLatestInsightsSnapshot(): Promise<LatestInsightsSnaps
     throw new Error("Failed to fetch latest insights snapshot");
   }
   return res.json();
+}
+
+// --- Asset expense categories & CPI inflation ---
+
+export interface ExpenseCategory {
+  id: number
+  name: string
+  statcan_vector_id: number | null
+}
+
+export async function fetchExpenseCategories(): Promise<ExpenseCategory[]> {
+  const res = await fetch(`${API_URL}/assets/expense-categories`, {
+    headers: getAuthHeader(),
+  })
+  if (!res.ok) throw new Error('Failed to fetch expense categories')
+  return res.json()
+}
+
+export interface CpiRateResult {
+  vector_id: number
+  years: number
+  cagr: number | null
+  cagr_pct: number | null
+}
+
+export async function fetchCpiRate(vectorId: number, years = 10): Promise<CpiRateResult> {
+  const res = await fetch(`${API_URL}/planning/cpi-rate/${vectorId}?years=${years}`, {
+    headers: getAuthHeader(),
+  })
+  if (!res.ok) throw new Error('Failed to fetch CPI rate')
+  return res.json()
+}
+
+// --- Projects API ---
+
+export interface SinkingFundLineItem {
+  id: number
+  description: string
+  today_price: number
+  quantity: number
+  total_today_price: number
+  expense_category_id: number | null
+  expense_category_name: string | null
+  statcan_vector_id: number | null
+  inflation_rate_override: number | null
+  source_asset_id: number | null
+  source_asset_name: string | null
+}
+
+export interface SinkingFundProject {
+  id: number
+  name: string
+  target_date: string
+  savings_start_date: string | null
+  notes: string
+  line_items: SinkingFundLineItem[]
+  created_at: string
+}
+
+export interface SinkingFundProjectList {
+  id: number
+  name: string
+  target_date: string
+  savings_start_date: string | null
+  line_item_count: number
+  created_at: string
+}
+
+export interface ProjectIn {
+  name: string
+  target_date: string
+  savings_start_date?: string | null
+  notes?: string
+}
+
+export interface LineItemIn {
+  description: string
+  today_price: number
+  quantity: number
+  expense_category_id?: number | null
+  inflation_rate_override?: number | null
+  source_asset_id?: number | null
+}
+
+export async function fetchProjects(): Promise<SinkingFundProjectList[]> {
+  const res = await fetch(`${API_URL}/projects/`, { headers: getAuthHeader() })
+  if (!res.ok) throw new Error('Failed to fetch projects')
+  return res.json()
+}
+
+export async function fetchProject(id: number): Promise<SinkingFundProject> {
+  const res = await fetch(`${API_URL}/projects/${id}`, { headers: getAuthHeader() })
+  if (!res.ok) throw new Error('Failed to fetch project')
+  return res.json()
+}
+
+export async function createProject(data: ProjectIn): Promise<SinkingFundProject> {
+  const res = await fetch(`${API_URL}/projects/`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Failed to create project')
+  }
+  return res.json()
+}
+
+export async function updateProject(id: number, data: ProjectIn): Promise<SinkingFundProject> {
+  const res = await fetch(`${API_URL}/projects/${id}`, {
+    method: 'PATCH',
+    headers: getAuthHeader(),
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Failed to update project')
+  }
+  return res.json()
+}
+
+export async function deleteProject(id: number): Promise<void> {
+  const res = await fetch(`${API_URL}/projects/${id}`, {
+    method: 'DELETE',
+    headers: getAuthHeader(),
+  })
+  if (!res.ok) throw new Error('Failed to delete project')
+}
+
+export async function addLineItem(projectId: number, data: LineItemIn): Promise<SinkingFundProject> {
+  const res = await fetch(`${API_URL}/projects/${projectId}/line-items`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Failed to add line item')
+  }
+  return res.json()
+}
+
+export async function updateLineItem(projectId: number, itemId: number, data: LineItemIn): Promise<SinkingFundProject> {
+  const res = await fetch(`${API_URL}/projects/${projectId}/line-items/${itemId}`, {
+    method: 'PATCH',
+    headers: getAuthHeader(),
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Failed to update line item')
+  }
+  return res.json()
+}
+
+// --- Loan Lifecycle API ---
+
+export interface LoanSetupIn {
+  purchase_description: string
+  purchase_date: string
+  purchase_price: number
+  down_payment: number
+  loan_amount: number
+  asset_account_id: number
+  cash_account_id: number
+  loan_account_id: number
+  schedule_name: string
+  annual_rate: number
+  amortization_years: number
+  payment_frequency: 'MONTHLY' | 'BIWEEKLY' | 'WEEKLY' | 'ANNUALLY'
+  schedule_start_date: string
+}
+
+export interface PayPeriodIn {
+  cash_account_id: number
+  loan_account_id: number
+  interest_account_id: number
+  payment_date?: string | null
+}
+
+export interface BulkPayIn {
+  period_ids: number[]
+  cash_account_id: number
+  loan_account_id: number
+  interest_account_id: number
+}
+
+export async function loanSetup(data: LoanSetupIn): Promise<AnnuityScheduleOut> {
+  const res = await fetch(`${API_URL}/planning/loan-setup`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Loan setup failed')
+  }
+  return res.json()
+}
+
+export async function payPeriod(
+  scheduleId: number,
+  periodId: number,
+  data: PayPeriodIn,
+): Promise<AnnuityScheduleOut> {
+  const res = await fetch(`${API_URL}/planning/schedules/${scheduleId}/periods/${periodId}/pay`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Payment recording failed')
+  }
+  return res.json()
+}
+
+export interface LinkedRule {
+  id: number
+  search_text: string
+  min_amount: number | null
+  max_amount: number | null
+  merchant_name: string
+  institution_id: number | null
+}
+
+export async function updateScheduleRule(
+  scheduleId: number,
+  searchText: string,
+  institutionId?: number | null,
+): Promise<AnnuityScheduleOut> {
+  const res = await fetch(`${API_URL}/planning/schedules/${scheduleId}/rule`, {
+    method: 'PATCH',
+    headers: getAuthHeader(),
+    body: JSON.stringify({ search_text: searchText, institution_id: institutionId ?? null }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Failed to update rule')
+  }
+  return res.json()
+}
+
+export async function bulkPayPeriods(scheduleId: number, data: BulkPayIn): Promise<AnnuityScheduleOut> {
+  const res = await fetch(`${API_URL}/planning/schedules/${scheduleId}/bulk-pay`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.detail || 'Bulk payment failed')
+  }
+  return res.json()
+}
+
+export interface AccountFlat {
+  id: number
+  name: string
+  account_type: string
+  full_path?: string
+}
+
+export async function fetchAccountsWithType(): Promise<AccountFlat[]> {
+  const res = await fetch(`${API_URL}/accounting/accounts-flat`, { headers: getAuthHeader() })
+  if (!res.ok) throw new Error('Failed to fetch accounts')
+  return res.json()
+}
+
+export async function deleteLineItem(projectId: number, itemId: number): Promise<SinkingFundProject> {
+  const res = await fetch(`${API_URL}/projects/${projectId}/line-items/${itemId}`, {
+    method: 'DELETE',
+    headers: getAuthHeader(),
+  })
+  if (!res.ok) throw new Error('Failed to delete line item')
+  return res.json()
 }
 

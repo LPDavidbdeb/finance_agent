@@ -12,7 +12,7 @@ class AccountSchema(ModelSchema):
 
     class Meta:
         model = Account
-        fields = ['id', 'name', 'account_type', 'parent']
+        fields = ['id', 'name', 'account_type', 'parent', 'statcan_vector_id']
 
 AccountSchema.model_rebuild()
 

@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronUp, TrendingDown, TrendingUp, Calculator, CheckCircle2, BookMarked, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Plus, Trash2, ChevronDown, ChevronUp, TrendingDown, TrendingUp, Calculator, CheckCircle2, BookMarked, X, ExternalLink } from 'lucide-react';
 import {
   simulateScenarios, commitSchedule, fetchSchedules, fetchSchedule, deleteSchedule,
   ScenarioSpec, ScenarioResult, PeriodRow, AnnuityScheduleOut, AnnuityScheduleListOut,
@@ -421,6 +422,16 @@ const CommittedSchedules: React.FC<{ schedules: AnnuityScheduleListOut[]; onDele
                   <div className="font-semibold text-slate-800">{fmt(s.computed_payment)}<span className="text-xs text-slate-400 font-normal"> / period</span></div>
                   <div className="text-xs text-slate-400">{s.annual_rate}% annual · {s.payment_frequency.toLowerCase()}</div>
                 </div>
+                {s.schedule_type === 'LOAN_AMORTIZATION' && (
+                  <Link
+                    to={`/dashboard/loans/${s.id}`}
+                    onClick={e => e.stopPropagation()}
+                    className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 transition-colors"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    Payments
+                  </Link>
+                )}
                 <button
                   onClick={(e) => { e.stopPropagation(); if (window.confirm(`Delete "${s.name}"?`)) onDelete(s.id); }}
                   className="text-slate-300 hover:text-red-500 transition-colors"

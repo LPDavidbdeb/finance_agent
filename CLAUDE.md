@@ -32,6 +32,11 @@ finance_agent/
 ├── assets/                   # Asset tracking and lifecycle management
 │   ├── docs/                 # Asset architecture and lifecycle docs
 │   └── models.py
+├── projects/                 # Sinking fund projects and line items
+│   ├── models.py             # SinkingFundProject, SinkingFundLineItem
+│   └── api.py                # CRUD endpoints — GET/POST/PATCH/DELETE /projects/ + line items
+├── market_data/              # External market data clients (no Django models)
+│   └── statcan.py            # StatCan WDS DAO — factory pattern (get_dao("cpi"))
 ├── ai_core/                  # AI extraction strategies
 └── frontend/                 # React 18 + TypeScript + Vite
     └── src/
@@ -63,6 +68,7 @@ python manage.py runserver           # Start dev server
 python manage.py test                # Run tests
 python manage.py verify_ledger_integrity   # Validate accounting integrity
 python manage.py rebuild_accounting_master # Rebuild chart of accounts
+python manage.py populate_statcan_vectors  # Map expense accounts → StatCan CPI vector IDs
 ```
 
 ## Frontend

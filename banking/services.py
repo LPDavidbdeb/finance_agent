@@ -148,26 +148,32 @@ def approve_staged_transaction(transaction_id: int, target_account_id: int, user
         raise ValueError(f"Transaction is already processed (Status: {staged_tx.status}).")
 
     # --- Phase 4: Smart Categorization Interception ---
-    # If the transaction matches a rule with a linked schedule, we use the 
-    # compound entry logic (AmortizationReconciliationService).
+    # Merchant.linked_schedule (primary) or TransactionMappingRule.linked_schedule (legacy)
+    # triggers compound principal+interest entry instead of a single-line expense.
     from categorization.services import find_matching_rule
     from planning.services import AmortizationReconciliationService
-    
+
     rule = find_matching_rule(
         staged_tx.raw_description,
         resolved_product.institution_id,
         family.id,
         transaction_amount=staged_tx.amount
     )
-    
-    if rule and rule.linked_schedule:
+
+    effective_schedule = (
+        (rule.merchant.linked_schedule if rule and rule.merchant_id else None)
+        or (rule.linked_schedule if rule else None)
+    )
+
+    if rule and effective_schedule:
         try:
-            je = AmortizationReconciliationService.reconcile_amortization_payment(staged_tx, rule, user)
+            je = AmortizationReconciliationService.reconcile_amortization_payment(
+                staged_tx, rule, user, schedule_override=effective_schedule
+            )
             if je:
                 return je
         except Exception as e:
             logger.exception("Amortization reconciliation failed")
-            # Map service errors into a user-friendly ValueError for higher layers
             raise ValueError(f"Amortization reconciliation failed: {e}")
 
     source_account = resolved_product.account

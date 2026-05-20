@@ -33,12 +33,17 @@ class Account(MPTTModel):
         help_text="If null, this is a system-wide standard account."
     )
     global_reference = TreeForeignKey(
-        'self', 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        blank=True, 
-        related_name='cloned_accounts', 
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cloned_accounts',
         help_text="Link to the global StatCan master template"
+    )
+    statcan_vector_id = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="StatCan WDS vector ID for the CPI series that approximates inflation for this account category."
     )
 
     class MPTTMeta:

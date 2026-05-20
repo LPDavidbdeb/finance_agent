@@ -14,13 +14,15 @@ import {
   deleteRule,
   fetchRuleStats,
   fetchUnmappedStrings,
+  fetchSchedules,
+  type AnnuityScheduleListOut,
 } from '../api/client';
 import { AccountTree } from '../components/AccountTree';
 import { CreateRuleModal } from '../components/CreateRuleModal';
 import { useToast } from '../components/ui/use-toast';
 import {
   Loader2, Edit2, Check, X, ArrowLeft, Merge, Trash2, Tag,
-  History, DollarSign, TrendingUp, Calendar, ChevronRight, Search, Wand2
+  History, DollarSign, TrendingUp, Calendar, ChevronRight, Search, Wand2, Link2, Link2Off
 } from 'lucide-react';
 import { formatRoutingRuleSuccess } from '../utils/transactionVocabulary';
 
@@ -38,6 +40,8 @@ interface MerchantDetail {
   is_unique_provider: boolean;
   default_account_id?: number;
   default_account_name?: string;
+  linked_schedule_id?: number | null;
+  linked_schedule_name?: string | null;
   mapping_rules: MappingRule[];
 }
 
@@ -91,6 +95,11 @@ export const MerchantDetail: React.FC = () => {
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const [selectedOrphan, setSelectedOrphan] = useState<any>(null);
 
+  // Loan Schedule association state
+  const [loanSchedules, setLoanSchedules] = useState<AnnuityScheduleListOut[]>([]);
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string>('');
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+
   useEffect(() => {
     if (id) {
       loadData(Number(id));
@@ -100,15 +109,17 @@ export const MerchantDetail: React.FC = () => {
   const loadData = async (merchantId: number) => {
     try {
       setLoading(true);
-      const [detail, others, merchantStats] = await Promise.all([
+      const [detail, others, merchantStats, schedules] = await Promise.all([
         fetchMerchantDetail(merchantId),
         fetchMerchants(),
-        fetchMerchantStats(merchantId)
+        fetchMerchantStats(merchantId),
+        fetchSchedules(),
       ]);
       setMerchant(detail);
       setNewName(detail.name);
       setAllMerchants(others.filter((m: any) => m.id !== merchantId));
       setStats(merchantStats);
+      setLoanSchedules(schedules.filter(s => s.schedule_type === 'LOAN_AMORTIZATION'));
     } catch (err: any) {
       setError(err.message || "Failed to load merchant details.");
     } finally {
@@ -220,6 +231,35 @@ export const MerchantDetail: React.FC = () => {
     setSelectedSourceIds(prev => 
       prev.includes(sourceId) ? prev.filter(id => id !== sourceId) : [...prev, sourceId]
     );
+  };
+
+  const handleLinkSchedule = async () => {
+    if (!merchant || !selectedScheduleId) return;
+    setScheduleLoading(true);
+    try {
+      await updateMerchant(merchant.id, { linked_schedule_id: Number(selectedScheduleId) });
+      toast({ title: "Schedule linked", description: "Payments from this merchant will now be split into principal + interest." });
+      setSelectedScheduleId('');
+      loadData(merchant.id);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Link failed", description: err.message });
+    } finally {
+      setScheduleLoading(false);
+    }
+  };
+
+  const handleUnlinkSchedule = async () => {
+    if (!merchant) return;
+    setScheduleLoading(true);
+    try {
+      await updateMerchant(merchant.id, { clear_linked_schedule: true });
+      toast({ title: "Schedule unlinked", description: "Payments will no longer be split automatically." });
+      loadData(merchant.id);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Unlink failed", description: err.message });
+    } finally {
+      setScheduleLoading(false);
+    }
   };
 
   const handleOrphanedSearch = async () => {
@@ -404,6 +444,65 @@ export const MerchantDetail: React.FC = () => {
               <div className="w-2 h-2 bg-blue-600 rounded-sm" /> High
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Loan Schedule Association */}
+      <Card className="shadow-sm border-indigo-100 bg-indigo-50/10">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-indigo-900">
+            <Link2 className="h-5 w-5" />
+            Loan Schedule
+          </CardTitle>
+          <CardDescription>
+            Link an amortization schedule so payments are automatically split into principal + interest instead of a single expense.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {merchant.linked_schedule_id ? (
+            <div className="flex items-center justify-between bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold text-indigo-900">{merchant.linked_schedule_name}</p>
+                <p className="text-xs text-indigo-600 mt-0.5">Payments will be split into principal + interest on approval.</p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleUnlinkSchedule}
+                disabled={scheduleLoading}
+                className="border-indigo-200 text-indigo-700 hover:bg-indigo-100 gap-1.5 shrink-0"
+              >
+                {scheduleLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2Off className="h-3.5 w-3.5" />}
+                Unlink
+              </Button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <select
+                className="flex-1 border border-slate-200 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                value={selectedScheduleId}
+                onChange={(e) => setSelectedScheduleId(e.target.value)}
+              >
+                <option value="">Select a loan schedule…</option>
+                {loanSchedules.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} — ${s.computed_payment.toLocaleString(undefined, { minimumFractionDigits: 2 })}/{s.payment_frequency.toLowerCase()}
+                  </option>
+                ))}
+              </select>
+              <Button
+                onClick={handleLinkSchedule}
+                disabled={!selectedScheduleId || scheduleLoading}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 shrink-0"
+              >
+                {scheduleLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+                Link
+              </Button>
+            </div>
+          )}
+          {loanSchedules.length === 0 && !merchant.linked_schedule_id && (
+            <p className="mt-3 text-xs text-slate-400 italic">No committed loan schedules found. Create one via <strong>Simulate → Commit</strong>.</p>
+          )}
         </CardContent>
       </Card>
 

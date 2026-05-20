@@ -1,14 +1,47 @@
-from ninja import Router, Schema, fields
+from ninja import Router, Schema
 from ninja import errors
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, List
 
 from accounting.models import Account
 from .models import TangibleAsset
 
 router = Router()
+
+
+class ExpenseCategoryOut(Schema):
+    id: int
+    name: str
+    statcan_vector_id: Optional[int] = None
+
+
+@router.get("/expense-categories", response=List[ExpenseCategoryOut], auth=None)
+def list_expense_categories(request):
+    """
+    Return all distinct EXPENSE accounts that have a StatCan vector ID.
+    Used by the asset creation form to drive the inflation-assumption picker.
+    auth=None — read-only reference data shared across families.
+    """
+    # Deduplicate by name — same category name exists per-family; pick the lowest id.
+    seen: set[str] = set()
+    result = []
+    qs = (
+        Account.objects
+        .filter(account_type=Account.AccountType.EXPENSE)
+        .exclude(statcan_vector_id__isnull=True)
+        .order_by("name", "id")
+    )
+    for acct in qs:
+        if acct.name not in seen:
+            seen.add(acct.name)
+            result.append(ExpenseCategoryOut(
+                id=acct.id,
+                name=acct.name,
+                statcan_vector_id=acct.statcan_vector_id,
+            ))
+    return result
 
 
 class CreateAssetIn(Schema):

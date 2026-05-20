@@ -23,6 +23,8 @@ class MerchantUpdateIn(Schema):
     default_account_id: Optional[int] = None
     is_unique_provider: Optional[bool] = None
     update_history: bool = False
+    linked_schedule_id: Optional[int] = None   # set to link; omit to leave unchanged
+    clear_linked_schedule: bool = False         # set True to unlink
 
 class MappingRuleOut(Schema):
     id: int
@@ -41,6 +43,8 @@ class MerchantDetailOut(Schema):
     is_unique_provider: bool
     default_account_id: Optional[int] = None
     default_account_name: Optional[str] = None
+    linked_schedule_id: Optional[int] = None
+    linked_schedule_name: Optional[str] = None
     mapping_rules: List[MappingRuleOut]
 
     @staticmethod
@@ -50,6 +54,14 @@ class MerchantDetailOut(Schema):
     @staticmethod
     def resolve_default_account_id(obj):
         return obj.default_account_id
+
+    @staticmethod
+    def resolve_linked_schedule_id(obj):
+        return obj.linked_schedule_id
+
+    @staticmethod
+    def resolve_linked_schedule_name(obj):
+        return obj.linked_schedule.name if obj.linked_schedule else None
 
 class MerchantMergeIn(Schema):
     target_id: int

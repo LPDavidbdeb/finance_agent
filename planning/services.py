@@ -161,12 +161,13 @@ class AnnuityService:
 class AmortizationReconciliationService:
     @staticmethod
     @transaction.atomic
-    def reconcile_amortization_payment(staged_tx, rule, user) -> Optional[JournalEntry]:
+    def reconcile_amortization_payment(staged_tx, rule, user, schedule_override=None) -> Optional[JournalEntry]:
         """
         Phase 4: Payment Stripping.
         Matches a StagedTransaction to an AnnuityPeriod and creates a 3-line compound entry.
+        schedule_override: explicit schedule (used when the link is on Merchant rather than Rule).
         """
-        schedule = rule.linked_schedule
+        schedule = schedule_override or rule.linked_schedule
         if not schedule:
             return None
 

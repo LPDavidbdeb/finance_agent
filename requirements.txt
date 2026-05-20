@@ -14,3 +14,4 @@ scipy==1.17.1
 celery==5.4.0
 redis==5.0.7
 reportlab==4.2.5
+yfinance==0.2.42
