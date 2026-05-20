@@ -1,89 +1,25 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { simulateScenarios, ScenarioSpec, ScenarioResult, PeriodRow, fetchCpiRate } from '../api/client'
+import React, { useState, useEffect } from 'react'
+import { fetchCpiRate, createAsset } from '../api/client'
 import { ExpenseCategoryPanel } from './ExpenseCategoryPanel'
-
-const RATES = [3, 5, 7]  // percent — planning API divides by 100 internally
-const FREQS = ['MONTHLY', 'BIWEEKLY'] as const
+import { useSinkingFundSimulation, RATES } from '../hooks/useSinkingFundSimulation'
 
 const cad = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' })
 
-function buildSpecs(principal: number, years: number, startDate: string): ScenarioSpec[] {
-  const specs: ScenarioSpec[] = []
-  for (const rate of RATES) {
-    for (const freq of FREQS) {
-      specs.push({
-        name: `${rate}|${freq}`,
-        type: 'SINKING_FUND',
-        principal,
-        annual_rate: rate,
-        amortization_years: years,
-        payment_frequency: freq,
-        start_date: startDate,
-      })
-    }
-  }
-  return specs
-}
-
-// Walk the schedule and return the accumulated balance as of today
-function balanceAsOfToday(schedule: PeriodRow[]): number {
-  const today = new Date().toISOString().split('T')[0]
-  let balance = 0
-  for (const row of schedule) {
-    if (row.payment_date <= today) balance = row.balance_after
-    else break
-  }
-  return balance
-}
-
-interface RateRow {
-  rate: number
-  monthly: number
-  biweekly: number
-  totalContributed: number
-  investmentGain: number
-  catchUpMonthly: number   // lump sum needed today if no contributions were made since purchase
-  catchUpBiweekly: number
-}
-
-function parseResults(results: ScenarioResult[]): RateRow[] {
-  const map: Record<string, Partial<RateRow>> = {}
-  for (const r of results) {
-    const [rateStr, freq] = r.name.split('|')
-    if (!map[rateStr]) map[rateStr] = { rate: Number(rateStr) }
-    if (freq === 'MONTHLY') {
-      map[rateStr].monthly = r.payment_amount
-      map[rateStr].totalContributed = r.total_cost
-      map[rateStr].investmentGain = r.total_interest_paid
-      map[rateStr].catchUpMonthly = balanceAsOfToday(r.schedule)
-    }
-    if (freq === 'BIWEEKLY') {
-      map[rateStr].biweekly = r.payment_amount
-      map[rateStr].catchUpBiweekly = balanceAsOfToday(r.schedule)
-    }
-  }
-  return RATES.map(rate => ({
-    rate,
-    monthly:          map[String(rate)]?.monthly          ?? 0,
-    biweekly:         map[String(rate)]?.biweekly         ?? 0,
-    totalContributed: map[String(rate)]?.totalContributed ?? 0,
-    investmentGain:   map[String(rate)]?.investmentGain   ?? 0,
-    catchUpMonthly:   map[String(rate)]?.catchUpMonthly   ?? 0,
-    catchUpBiweekly:  map[String(rate)]?.catchUpBiweekly  ?? 0,
-  }))
-}
-
 function computeCurrentValue(purchaseValue: number, purchaseDate: string, lifeExpectancyYears: number): number {
   const purchased = new Date(purchaseDate)
-  if (isNaN(purchased.getTime())) return purchaseValue  // incomplete date string — return original value
+  if (isNaN(purchased.getTime())) return purchaseValue
   const elapsedDays = Math.max(0, (Date.now() - purchased.getTime()) / 86_400_000)
   const remaining = Math.max(0, 1 - elapsedDays / (lifeExpectancyYears * 365))
   return Math.round(purchaseValue * remaining * 100) / 100
 }
 
+// Day-based fractional months — avoids the calendar-boundary edge case where
+// Jan 31 → Feb 1 would register as a full month with naive year/month subtraction.
 function monthsBetween(from: string, to: Date = new Date()): number {
   const start = new Date(from)
-  return Math.max(0, (to.getFullYear() - start.getFullYear()) * 12 + to.getMonth() - start.getMonth())
+  if (isNaN(start.getTime())) return 0
+  const elapsedDays = Math.max(0, (to.getTime() - start.getTime()) / 86_400_000)
+  return elapsedDays * 12 / 365.25
 }
 
 export default function CreateAssetForm() {
@@ -98,10 +34,6 @@ export default function CreateAssetForm() {
 
   const [inflationRate, setInflationRate] = useState('0')
   const [inflationAutoSet, setInflationAutoSet] = useState(false)
-  const [rows, setRows] = useState<RateRow[] | null>(null)
-  const [computing, setComputing] = useState(false)
-  const [computeError, setComputeError] = useState<string | null>(null)
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Asset category panel
   const [showCategoryPanel, setShowCategoryPanel] = useState(false)
@@ -118,7 +50,7 @@ export default function CreateAssetForm() {
   // Inflation-adjusted replacement cost
   const adjustedTarget = valid ? Math.round(pv * Math.pow(1 + inflation / 100, years) * 100) / 100 : 0
 
-  // Months elapsed since purchase (0 when no purchase date or bought today)
+  // Fractional months elapsed since purchase (day-based, avoids calendar-boundary errors)
   const elapsedMonths = purchaseDate ? monthsBetween(purchaseDate) : 0
   const totalMonths   = valid ? years * 12 : 0
   const isLateStart   = !!purchaseDate && purchaseDate < today
@@ -126,7 +58,7 @@ export default function CreateAssetForm() {
   // Auto-compute current market value from straight-line depreciation
   useEffect(() => {
     if (!purchaseDate || !valid) return
-    if (isNaN(new Date(purchaseDate).getTime())) return  // partial date while typing
+    if (isNaN(new Date(purchaseDate).getTime())) return
     setCurrentValue(String(computeCurrentValue(pv, purchaseDate, years)))
     setCurrentValueAutoSet(true)
   }, [pv, purchaseDate, years, valid])
@@ -137,31 +69,17 @@ export default function CreateAssetForm() {
   const annualDepr  = valid ? pv / years          : null
 
   // 0% sinking fund on inflation-adjusted target
-  const zeroMonthly   = valid ? adjustedTarget / totalMonths    : null
-  const zeroBiweekly  = valid ? adjustedTarget / (years * 26)   : null
-  const zeroCatchUp   = isLateStart ? elapsedMonths * (adjustedTarget / totalMonths) : null
+  const zeroMonthly  = valid ? adjustedTarget / totalMonths  : null
+  const zeroBiweekly = valid ? adjustedTarget / (years * 26) : null
+  const zeroCatchUp  = isLateStart ? elapsedMonths * (adjustedTarget / totalMonths) : null
 
-  // Planning API — anchored to purchaseDate so the schedule maps to real calendar dates
-  useEffect(() => {
-    if (!valid) { setRows(null); setComputeError(null); return }
-    setRows(null)
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(async () => {
-      setComputing(true)
-      setComputeError(null)
-      try {
-        const startDate = purchaseDate || today
-        const results = await simulateScenarios(buildSpecs(adjustedTarget, years, startDate))
-        setRows(parseResults(results))
-      } catch (err: any) {
-        setComputeError(err.message || 'Simulation failed')
-        setRows(null)
-      } finally {
-        setComputing(false)
-      }
-    }, 600)
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [adjustedTarget, years, purchaseDate, valid])
+  // Compound-interest rows from the planning API — delegated to the hook
+  const { rows, computing, error: computeError } = useSinkingFundSimulation(
+    adjustedTarget,
+    years,
+    purchaseDate || today,
+    valid,
+  )
 
   const handleCategorySelect = async (account: { id: number; name: string; statcan_vector_id: number | null }) => {
     setSelectedCategory(account)
@@ -184,25 +102,18 @@ export default function CreateAssetForm() {
     e.preventDefault()
     setStatus('Saving...')
     try {
-      const res = await fetch('/api/assets/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          purchase_value: purchaseValue,
-          current_market_value: currentValue,
-          purchase_date: purchaseDate || null,
-          life_expectancy_years: lifeExpectancy ? parseInt(lifeExpectancy, 10) : null,
-          account_name: accountName,
-        }),
+      const data = await createAsset({
+        name,
+        purchase_value: pv,
+        current_market_value: parseFloat(currentValue),
+        purchase_date: purchaseDate || null,
+        account_name: accountName,
       })
-      if (!res.ok) throw new Error((await res.text()) || 'Failed')
-      const data = await res.json()
       setStatus(`Created asset ${data.name} (id=${data.id})`)
       setName(''); setPurchaseValue(''); setCurrentValue(''); setCurrentValueAutoSet(false)
       setAccountName(''); setPurchaseDate(''); setLifeExpectancy('')
       setInflationRate('0'); setInflationAutoSet(false)
-      setSelectedCategory(null); setShowCategoryPanel(false); setRows(null)
+      setSelectedCategory(null); setShowCategoryPanel(false)
     } catch (err: any) {
       setStatus(`Error: ${err.message}`)
     }

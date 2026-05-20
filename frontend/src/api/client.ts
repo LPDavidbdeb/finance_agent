@@ -1460,3 +1460,32 @@ export async function deleteLineItem(projectId: number, itemId: number): Promise
   return res.json()
 }
 
+// --- Assets ---
+
+export interface CreateAssetIn {
+  name: string
+  purchase_value: number
+  current_market_value: number
+  purchase_date?: string | null
+  account_id?: number | null
+  account_name?: string | null
+}
+
+export interface CreateAssetOut {
+  id: number
+  name: string
+}
+
+export async function createAsset(data: CreateAssetIn): Promise<CreateAssetOut> {
+  const res = await fetch(`${API_URL}/assets/`, {
+    method: 'POST',
+    headers: getAuthHeader(),
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Unknown error' }))
+    throw new Error(err.detail || 'Failed to create asset')
+  }
+  return res.json()
+}
+
