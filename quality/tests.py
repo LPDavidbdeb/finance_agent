@@ -13,7 +13,7 @@ from banking.models import BankStatementImport, FinancialInstitution, FinancialP
 from quality.models import ConsistencyReportFinding, ConsistencyReportRun
 from quality.services import create_consistency_report_run
 from users.models import Family
-from test_client_factory import get_test_client
+from finance_backend.test_client_factory import get_test_client
 
 User = get_user_model()
 

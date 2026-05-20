@@ -5,26 +5,36 @@ This is a headless personal finance and wealth management application built for 
 ```
 finance_agent/
 ├── manage.py
+├── gunicorn_config.py
 ├── requirements.txt
 ├── docs/                     # General implementation, test results, and coherence docs
+├── scripts/                  # One-off operational scripts (portfolio sim, ETL smoke tests)
+├── notebooks/                # Data inspection and exploration scripts
 ├── finance_backend/          # Django project config
 │   ├── api.py                # Root API router
 │   ├── urls.py
 │   ├── celery.py
+│   ├── test_client_factory.py  # Ninja TestClient singleton for test suites
 │   └── settings/
 ├── users/                    # Auth, Family, FamilyMember models
 ├── accounting/               # Chart of Accounts, JournalEntry, TransactionLine
 │   ├── docs/                 # Analysis Framework, EPIC 1-4, Normalization docs
+│   ├── chart_of_accounts_data.py  # CPI_categories + account hierarchy data
 │   ├── pdf_reports.py        # Server-side PDF builders for report exports
-│   └── tasks.py              # Analytical ETL Pipeline
+│   ├── tasks.py              # Analytical ETL Pipeline
+│   └── management/commands/
+│       ├── seed_chart_of_accounts.py   # Idempotent global CoA seed
+│       └── rebuild_accounting_master.py
 ├── banking/                  # BankStatementImport, StagedTransaction, FinancialProduct
 │   ├── docs/                 # Extraction fixes and workflow docs
 │   └── extraction.py         # PDF parsing logic
 ├── categorization/           # Merchant, TransactionMappingRule, auto-categorization
 │   └── services.py
-├── planning/                 # Stateless simulation engine (no models yet)
-│   ├── api.py                # POST /planning/simulate — N-scenario amortization/sinking fund
-│   └── schemas.py            # ScenarioSpec, ScenarioResult, PeriodRow
+├── planning/                 # AnnuitySchedule, AnnuityPeriod — TVM engine + simulation
+│   ├── api.py                # /planning/schedules + /planning/simulate endpoints
+│   ├── models.py             # AnnuitySchedule, AnnuityPeriod
+│   ├── schemas.py            # ScenarioSpec, ScenarioResult, PeriodRow
+│   └── tests.py              # API contract tests + TimeValueOfMoneyTest
 ├── quality/                  # Consistency report runs, findings, and investigation hooks
 │   ├── api.py                # Persisted report run + findings endpoints (Django Ninja)
 │   ├── models.py             # ConsistencyReportRun, ConsistencyReportFinding
@@ -42,8 +52,9 @@ finance_agent/
     └── src/
         ├── pages/            # Dashboard, MonthlyExpenseReportPage, FamilyManager, MerchantManager, QualityReportsPage, AccountDetail, etc.
         ├── components/       # Reusable UI components (Shadcn UI patterns)
+        ├── hooks/            # Custom React hooks (useSinkingFundSimulation, etc.)
         ├── context/          # AuthContext
-        └── api/              # client.ts — API calls to backend
+        └── api/              # client.ts — typed API calls to backend
 ```
 
 # Tech Stack
@@ -67,7 +78,8 @@ finance_agent/
 python manage.py runserver           # Start dev server
 python manage.py test                # Run tests
 python manage.py verify_ledger_integrity   # Validate accounting integrity
-python manage.py rebuild_accounting_master # Rebuild chart of accounts
+python manage.py seed_chart_of_accounts    # Seed global chart of accounts (idempotent)
+python manage.py rebuild_accounting_master # Rebuild chart of accounts + clone for all families
 python manage.py populate_statcan_vectors  # Map expense accounts → StatCan CPI vector IDs
 ```
 

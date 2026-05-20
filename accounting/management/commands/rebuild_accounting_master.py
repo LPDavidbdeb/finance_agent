@@ -4,7 +4,7 @@ from django.db import transaction
 from accounting.models import Account, TransactionLine
 from users.models import Family
 from banking.models import FinancialProduct
-from chart_of_account_exemple import CPI_categories
+from accounting.chart_of_accounts_data import CPI_categories
 
 class Command(BaseCommand):
     help = 'Rebuilds the global accounting tree with correct root nodes and clones it for families.'

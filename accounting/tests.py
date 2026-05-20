@@ -4,7 +4,7 @@ from users.models import Family
 from accounting.models import Account, JournalEntry, TransactionLine
 from decimal import Decimal
 from ninja_jwt.tokens import AccessToken
-from test_client_factory import get_test_client
+from finance_backend.test_client_factory import get_test_client
 
 User = get_user_model()
 
