@@ -1,32 +1,35 @@
 """
 YahooDAO
 
-Simple data access object for fetching adjusted-close price series from Yahoo
-Finance using yfinance. Provides a single function `fetch_adjusted_close` that
-returns a pandas DataFrame indexed by business-day dates and columns for each
-requested ticker.
+Data access object for fetching adjusted-close price series from Yahoo
+Finance using RapidAPI (APIDojo). Provides a single function `fetch_adjusted_close` 
+that returns a pandas DataFrame indexed by business-day dates.
 
 Usage:
     from market_data.yahoo_dao import YahooDAO
     df = YahooDAO.fetch_adjusted_close(['XIU.TO','XWD.TO'], period='10y')
 
 Notes:
-- No API key required (yfinance uses Yahoo public endpoints). The function will
-  raise a RuntimeError on network or rate-limit failures.
-- Optional local caching via `cache_path` parameter.
+- Requires RAPIDAPI_KEY and RAPIDAPI_HOST in environment.
+- Uses local caching via `cache_path` to minimize API costs.
+- Uses stock/v2/get-chart for reliable high-resolution daily data.
 """
 
 from __future__ import annotations
 
-from typing import Iterable, Optional
 import logging
 import os
 import time
+from typing import Iterable, Optional
 
 import pandas as pd
-import yfinance as yf
 import requests
+from datetime import datetime
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
+load_dotenv(".env.local")
 
 logger = logging.getLogger(__name__)
 
@@ -41,173 +44,144 @@ class YahooDAO:
         interval: str = "1d",
         threads: bool = True,
         retry: int = 3,
-        backoff_sec: float = 1.0,
+        backoff_sec: float = 2.0,
         cache_path: Optional[str] = None,
         session: Optional[requests.Session] = None,
     ) -> pd.DataFrame:
-        """Fetch adjusted close prices for `tickers`.
-
-        Parameters
-        - tickers: Iterable of ticker symbols (e.g. ['XIU.TO','XWD.TO']).
-        - period: yfinance `period` string (e.g. '1y','5y','max'). If provided,
-          `start`/`end` are ignored.
-        - start/end: ISO date strings (YYYY-MM-DD).
-        - interval: data interval (default '1d').
-        - threads: whether to use multithreaded download.
-        - retry: number of retry attempts on failure.
-        - backoff_sec: initial backoff between retries (exponential).
-        - cache_path: optional filepath to save/read cached DataFrame (pickle).
-        - session: optional requests.Session to be used by yfinance download.
-
-        Returns
-        - pandas.DataFrame of adjusted close prices, forward-filled and with
-          missing rows dropped.
-        """
+        """Fetch adjusted close prices for `tickers` using RapidAPI (stock/v2/get-chart)."""
+        
         tickers_list = list(tickers)
+        api_key = os.getenv("RAPIDAPI_KEY")
+        api_host = os.getenv("RAPIDAPI_HOST", "apidojo-yahoo-finance-v1.p.rapidapi.com")
 
-        # If a cache_path is provided and exists, try an incremental update.
-        df_cached = None
-        is_incremental = False
+        if not api_key:
+            raise RuntimeError("RAPIDAPI_KEY not found in environment")
+
+        # Configuration for time windows
+        p1, p2 = None, None
+        range_val = None
+
+        if period:
+            # Map standard periods or handle custom logic
+            if period in ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd"]:
+                range_val = period
+            elif period == 'max':
+                # For 'max', we want daily data. Yahoo's 'max' range often downsamples.
+                # We'll use a 30-year window to force daily granularity if possible.
+                end_dt = datetime.now()
+                start_dt = end_dt.replace(year=end_dt.year - 30)
+                p1 = int(start_dt.timestamp())
+                p2 = int(end_dt.timestamp())
+            else:
+                # Custom period (e.g. '25y')
+                end_dt = datetime.now()
+                if period.endswith('y'):
+                    years = int(period[:-1])
+                    start_dt = end_dt.replace(year=end_dt.year - years)
+                else:
+                    start_dt = end_dt.replace(year=end_dt.year - 1)
+                p1 = int(start_dt.timestamp())
+                p2 = int(end_dt.timestamp())
+        elif start:
+            p1 = int(datetime.strptime(start, '%Y-%m-%d').timestamp())
+            p2 = int(datetime.strptime(end, '%Y-%m-%d').timestamp()) if end else int(datetime.now().timestamp())
+        else:
+            range_val = "1y"
+
+        # Cache check
         if cache_path and os.path.exists(cache_path):
             try:
                 df_cached = pd.read_pickle(cache_path)
-            except Exception as exc:
-                logger.warning("Failed to read cache at %s: %s", cache_path, exc)
-                df_cached = None
+                if all(t in df_cached.columns for t in tickers_list):
+                    last_date = df_cached.index.max()
+                    # Return cache if it's less than 3 days old
+                    if (datetime.now() - last_date).days < 3:
+                        logger.info(f"Returning cached data from {cache_path}")
+                        return df_cached[tickers_list].copy()
+            except Exception as e:
+                logger.warning(f"Cache read failed: {e}")
 
-        if df_cached is not None:
-            # Only do incremental when the caller did not explicitly request a range.
-            if all(t in df_cached.columns for t in tickers_list) and period is None and start is None and end is None:
+        final_df = pd.DataFrame()
+        headers = {
+            "X-RapidAPI-Key": api_key,
+            "X-RapidAPI-Host": api_host
+        }
+
+        for ticker in tickers_list:
+            attempt = 0
+            success = False
+            
+            while attempt < retry:
                 try:
-                    last_saved = pd.to_datetime(df_cached.index.max()).tz_localize(None).normalize()
-                except Exception:
-                    last_saved = pd.Timestamp.min
-
-                # Anchor to New York date to avoid timezone rollover issues on non-US hosts.
-                today = pd.Timestamp.now(tz='America/New_York').tz_localize(None).normalize()
-
-                if last_saved >= today:
-                    return df_cached[tickers_list].copy()
-
-                # Start from the next calendar day; let yfinance stream up to the present.
-                start = (last_saved + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-                end = None
-                is_incremental = True
-            else:
-                df_cached = None
-
-        attempt = 0
-        last_exc: Optional[Exception] = None
-        while attempt < retry:
-            try:
-                # yfinance.download supports a `session` kw in newer versions; if
-                # not supported it will be ignored by passing via kwargs.
-                download_kwargs = dict(
-                    tickers=tickers_list,
-                    interval=interval,
-                    threads=threads,
-                    group_by='column',
-                    auto_adjust=False,
-                    progress=False,
-                )
-                if period:
-                    download_kwargs['period'] = period
-                else:
-                    if start:
-                        download_kwargs['start'] = start
-                    if end:
-                        download_kwargs['end'] = end
-
-                # Provide a requests.Session to yfinance if available
-                if session is not None:
-                    download_kwargs['session'] = session
-
-                raw = yf.download(**download_kwargs)
-
-                if raw is None or raw.empty:
-                    # Weekend / holiday fetch on an incremental path should not crash.
-                    if is_incremental and df_cached is not None:
-                        return df_cached[tickers_list].copy()
-                    raise RuntimeError('yfinance returned empty DataFrame')
-
-                # Extract Adjusted Close
-                if isinstance(raw.columns, pd.MultiIndex):
-                    if 'Adj Close' in raw.columns.get_level_values(0):
-                        adj = raw['Adj Close']
+                    # stock/v2/get-chart is the most reliable for non-downsampled data
+                    url = f"https://{api_host}/stock/v2/get-chart"
+                    params = {"symbol": ticker, "interval": interval}
+                    if range_val:
+                        params["range"] = range_val
                     else:
-                        adj = raw.iloc[:, -len(tickers_list) :]
-                else:
-                    # single-level: may already be Adj Close
-                    if 'Adj Close' in raw.columns:
-                        adj = raw['Adj Close']
+                        params["period1"] = str(p1)
+                        params["period2"] = str(p2)
+                    
+                    response = requests.get(url, headers=headers, params=params, timeout=20)
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    # Parse Chart structure
+                    chart_data = data.get("chart", {}).get("result", [])
+                    if not chart_data:
+                        raise ValueError(f"No chart result for {ticker}")
+                    
+                    result = chart_data[0]
+                    timestamps = result.get("timestamp", [])
+                    adjclose_list = result.get("indicators", {}).get("adjclose", [{}])[0].get("adjclose", [])
+                    
+                    if not timestamps:
+                        raise ValueError(f"No timestamps returned for {ticker}")
+                    
+                    # Some responses might have slightly different lengths for adjclose due to nulls
+                    # but typically they match.
+                    df_ticker = pd.DataFrame({
+                        "date": pd.to_datetime(timestamps, unit='s'),
+                        ticker: adjclose_list
+                    })
+                    df_ticker.set_index("date", inplace=True)
+                    
+                    if final_df.empty:
+                        final_df = df_ticker
                     else:
-                        # If download was called with single ticker, raw may be Series
-                        adj = raw
-
-                # Ensure DataFrame
-                adj_df = pd.DataFrame(adj)
-
-                # Align columns to requested tickers order
-                missing_cols = [t for t in tickers_list if t not in adj_df.columns]
-                if missing_cols:
-                    # It's possible Yahoo returned different symbols; raise for clarity
-                    raise RuntimeError(f'Missing tickers in response: {missing_cols}')
-
-                # Fill forward, drop null rows
-                adj_df = adj_df.sort_index()
-                adj_df = adj_df.ffill().dropna(how='all')
-
-                # Merge incremental results back into the cache when applicable.
-                if is_incremental and df_cached is not None:
-                    # If no new rows were returned, return cached
-                    if adj_df.empty:
-                        return df_cached[tickers_list].copy()
-
-                    # Merge cached + new incremental data, preferring newly fetched rows
-                    combined = pd.concat([df_cached, adj_df]).sort_index()
-                    combined = combined[~combined.index.duplicated(keep='last')]
-                    combined = combined.ffill().dropna(how='all')
-
-                    # Cache merged DataFrame.
-                    if cache_path:
-                        try:
-                            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-                            combined.to_pickle(cache_path)
-                        except Exception as exc:
-                            logger.warning("Failed to write cache to %s: %s", cache_path, exc)
-
-                    return combined[tickers_list].copy()
-
-                # Otherwise cache the freshly fetched full series.
-                if cache_path:
-                    try:
-                        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-                        adj_df.to_pickle(cache_path)
-                    except Exception as exc:
-                        logger.warning("Failed to write cache to %s: %s", cache_path, exc)
-
-                return adj_df[tickers_list].copy()
-
-            except Exception as exc:
-                last_exc = exc
-                attempt += 1
-                if attempt >= retry:
+                        # Join on index to align dates
+                        final_df = final_df.join(df_ticker, how='outer')
+                    
+                    success = True
                     break
-                time.sleep(backoff_sec * (2 ** (attempt - 1)))
+                except Exception as e:
+                    attempt += 1
+                    logger.error(f"Attempt {attempt} failed for {ticker}: {e}")
+                    if attempt < retry:
+                        time.sleep(backoff_sec * (2 ** (attempt - 1)))
+            
+            if not success:
+                raise RuntimeError(f"Failed to fetch {ticker} after {retry} attempts")
 
-        raise RuntimeError(f'Failed to fetch prices from Yahoo after {retry} attempts') from last_exc
+        # Post-processing: sort, fill missing (holidays/different markets), drop all-NaN rows
+        final_df = final_df.sort_index().ffill().dropna(how='all')
 
+        # Cache the result
+        if cache_path:
+            try:
+                os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+                final_df.to_pickle(cache_path)
+            except Exception as e:
+                logger.warning(f"Cache write failed: {e}")
+
+        return final_df[tickers_list]
 
 if __name__ == '__main__':
-    # Quick CLI for manual testing
-    import argparse
-
-    parser = argparse.ArgumentParser(description='Fetch adjusted close prices via yfinance')
-    parser.add_argument('tickers', nargs='+', help='Tickers to fetch')
-    parser.add_argument('--period', default='10y')
-    parser.add_argument('--cache', default=None, help='Optional pickle cache path')
-    args = parser.parse_args()
-
-    df = YahooDAO.fetch_adjusted_close(args.tickers, period=args.period, cache_path=args.cache)
-    print(df.info())
-    print(df.tail())
+    logging.basicConfig(level=logging.INFO)
+    try:
+        # Quick test for a long period to verify daily resolution
+        df = YahooDAO.fetch_adjusted_close(['XIU.TO'], period='10y')
+        print(f"Fetched {len(df)} rows. Frequency check: {df.index[1] - df.index[0]}")
+        print(df.tail())
+    except Exception as e:
+        print(f"Error: {e}")

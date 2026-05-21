@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ArrowLeft, Plus, Trash2, Pencil, Check, X, TrendingUp, Calendar, Loader2 } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Pencil, Check, X, TrendingUp, Calendar, Loader2, Target } from 'lucide-react'
 import {
   fetchProject, updateProject, addLineItem, updateLineItem, deleteLineItem, fetchCpiRate,
   SinkingFundProject, SinkingFundLineItem, LineItemIn,

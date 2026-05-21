@@ -32,6 +32,7 @@ export const Navbar: React.FC = () => {
               <Link to="/projects" className="hover:text-slate-300 transition-colors">Projects</Link>
               <Link to="/house/editor" className="hover:text-slate-300 transition-colors">House Editor</Link>
               <Link to="/analysis" className="hover:text-slate-300 transition-colors">Analysis</Link>
+              <Link to="/strategy-presentation" className="hover:text-slate-300 transition-colors">Strategy</Link>
               <Link to="/maintenance" className="hover:text-slate-300 transition-colors">System</Link>
               <Link to="/ledger" className="hover:text-slate-300 transition-colors">Ledger</Link>
               <Link to="/settings/banks" className="hover:text-slate-300 transition-colors">Manage Banks</Link>

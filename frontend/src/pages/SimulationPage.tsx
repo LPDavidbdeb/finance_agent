@@ -425,7 +425,7 @@ const CommittedSchedules: React.FC<{ schedules: AnnuityScheduleListOut[]; onDele
                 {s.schedule_type === 'LOAN_AMORTIZATION' && (
                   <Link
                     to={`/dashboard/loans/${s.id}`}
-                    onClick={e => e.stopPropagation()}
+                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
                     className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 transition-colors"
                   >
                     <ExternalLink className="h-3 w-3" />

@@ -47,12 +47,13 @@ import pandas as pd
 from datetime import datetime
 from planning.optimization import PortfolioOptimizer
 from planning.returns import PortfolioReturnsCalculator
+from market_data.yahoo_dao import YahooDAO
 
 BASE = '/Users/Louis-Philippe/Documents/finance_agent'
 OUT_JSON = os.path.join(BASE, 'notebooks', 'sim_results.json')
 OUT_PICKLE = os.path.join(BASE, 'notebooks', 'price_series.pkl')
 
-TICKERS = ['XIU.TO', 'XWD.TO', 'XEU.TO']
+TICKERS = ['^GSPC', '^GSPTSE', 'VEURX', 'EMF']
 HORIZONS = [2,5,10,15,25]
 MONTHLY_DCA_AMOUNT = 1000
 REBALANCE_FREQ_MONTHS = 1
@@ -60,13 +61,14 @@ THRESHOLDS = [0.00, 0.05, 0.07]
 
 np.set_printoptions(suppress=True)
 
-optimizer = PortfolioOptimizer(lookback_years=5)
+optimizer = PortfolioOptimizer(lookback_years=10)
 use_synthetic=False
 prices=None
-source='yfinance'
+source='rapidapi'
 
 try:
-    prices = optimizer.fetch_prices(TICKERS)
+    # Explicitly fetch from 1990 to capture the full legacy proxy window
+    prices = YahooDAO.fetch_adjusted_close(TICKERS, start='1990-06-18')
 except Exception as e:
     print(f"Failed to fetch prices: {e}. Falling back to synthetic data.")
     use_synthetic=True

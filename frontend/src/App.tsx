@@ -23,6 +23,7 @@ const SimulationPage = lazy(() => import('./pages/SimulationPage').then(module =
 const StatementCoverage = lazy(() => import('./pages/StatementCoverage').then(module => ({ default: module.StatementCoverage })));
 const QualityReportsPage = lazy(() => import('./pages/QualityReportsPage').then(module => ({ default: module.QualityReportsPage })));
 const AnalysisPage = lazy(() => import('./pages/AnalysisPage'));
+const StrategyPresentationPage = lazy(() => import('./pages/StrategyPresentationPage'));
 const MonthlyExpenseReportPage = lazy(() => import('./pages/MonthlyExpenseReportPage'));
 const CreateAssetPage = lazy(() => import('./pages/CreateAssetPage'))
 const HouseEditorPage = lazy(() => import('./pages/HouseEditorPage'))
@@ -68,6 +69,7 @@ function App() {
                 <Route path="/dashboard/quality" element={<QualityReportsPage />} />
                 <Route path="/dashboard/monthly-expenses" element={<MonthlyExpenseReportPage />} />
                 <Route path="/analysis" element={<AnalysisPage />} />
+                <Route path="/strategy-presentation" element={<StrategyPresentationPage />} />
                 <Route path="/maintenance" element={<MaintenancePage />} />
                 <Route path="/settings/banks" element={<InstitutionManager />} />
                 <Route path="/ledger" element={<AccountTree />} />

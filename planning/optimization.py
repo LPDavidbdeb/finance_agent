@@ -3,7 +3,6 @@ Portfolio optimization using Markowitz model and Sharpe ratio maximization.
 Fetches historical prices, computes efficient frontier, and suggests allocations.
 """
 
-import yfinance as yf
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
@@ -11,6 +10,8 @@ from typing import Dict, List, Tuple, Optional
 from datetime import datetime, timedelta
 from decimal import Decimal
 import logging
+
+from market_data.yahoo_dao import YahooDAO
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class PortfolioOptimizer:
 
     def fetch_prices(self, tickers: List[str]) -> pd.DataFrame:
         """
-        Fetch adjusted close prices for tickers.
+        Fetch adjusted close prices for tickers using YahooDAO.
 
         Args:
             tickers: List of ticker symbols (e.g., ['XIU.TO', 'XWD.TO']).
@@ -44,23 +45,13 @@ class PortfolioOptimizer:
             ValueError: If unable to fetch data for any ticker.
         """
         try:
-            data = yf.download(
-                tickers,
-                start=self.start_date,
-                end=self.end_date,
-                progress=False,
-                interval="1d"
+            prices = YahooDAO.fetch_adjusted_close(
+                tickers=tickers,
+                start=self.start_date.strftime('%Y-%m-%d'),
+                end=self.end_date.strftime('%Y-%m-%d'),
+                retry=5,
+                backoff_sec=2.0
             )
-            if isinstance(data, pd.DataFrame) and 'Adj Close' in data.columns:
-                prices = data['Adj Close']
-            elif isinstance(data, pd.Series):
-                # Single ticker case
-                prices = data.to_frame(name=tickers[0])
-            else:
-                raise ValueError("Unexpected data format from yfinance")
-
-            # Forward-fill any gaps (e.g., weekends, holidays)
-            prices = prices.fillna(method='ffill').dropna()
 
             if prices.empty:
                 raise ValueError("No price data retrieved")
