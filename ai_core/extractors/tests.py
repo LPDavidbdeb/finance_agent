@@ -3,7 +3,13 @@ import pandas as pd
 from unittest.mock import patch, MagicMock
 from datetime import date
 
-from ai_core.extractors.strategies import VisaDesjardinsExtractor, TangerineExtractor
+from ai_core.extractors.factory import PDFExtractorFactory
+from ai_core.extractors.strategies import (
+    VisaDesjardinsExtractor,
+    TangerineExtractor,
+    CIBCSavingsExtractor,
+    CIBCSavingsAdapterExtractor,
+)
 from banking.extraction import get_statement_date_from_pdf
 
 
@@ -312,6 +318,18 @@ class StatementDateParsingTests(TestCase):
         self.assertEqual(month, 3)
 
     @patch("pdfplumber.open")
+    def test_parse_cibc_statement_date(self, mock_pdf_open):
+        mock_page = MagicMock()
+        mock_page.extract_text.return_value = "Monthly Statement\nStatement Date March 31, 2026"
+        mock_pdf = MagicMock()
+        mock_pdf.pages = [mock_page]
+        mock_pdf_open.return_value.__enter__.return_value = mock_pdf
+
+        year, month = get_statement_date_from_pdf("mock_path.pdf")
+        self.assertEqual(year, 2026)
+        self.assertEqual(month, 3)
+
+    @patch("pdfplumber.open")
     def test_parse_date_failure(self, mock_pdf_open):
         mock_page = MagicMock()
         mock_page.extract_text.return_value = "No date information here"
@@ -322,3 +340,74 @@ class StatementDateParsingTests(TestCase):
         year, month = get_statement_date_from_pdf("mock_path.pdf")
         self.assertIsNone(year)
         self.assertIsNone(month)
+
+
+class CIBCSavingsExtractorTests(TestCase):
+    def test_deposit_positive_withdrawal_negative(self):
+        extractor = CIBCSavingsExtractor()
+        df = pd.DataFrame(
+            {
+                "Transaction Date": ["2026-03-01", "2026-03-02"],
+                "Description": ["Payroll", "ATM Withdrawal"],
+                "Deposits ($)": ["1500.00", ""],
+                "Withdrawals ($)": ["", "25.50"],
+                "Balance ($)": ["2500.00", "2474.50"],
+            }
+        )
+
+        out, mismatch = extractor.process_dataframe(df, statement_year=2026, statement_month=3)
+
+        self.assertFalse(mismatch)
+        self.assertEqual(len(out), 2)
+        self.assertAlmostEqual(float(out.iloc[0]["amount"]), 1500.00, places=2)
+        self.assertAlmostEqual(float(out.iloc[1]["amount"]), -25.50, places=2)
+        self.assertTrue((out["account_identifier"] == "SAVINGS").all())
+
+    def test_factory_routes_cibc_savings_to_cibc_extractor(self):
+        extractor = PDFExtractorFactory.get_extractor(
+            "Canadian Imperial Bank of Commerce (CIBC)",
+            "SAVINGS",
+        )
+        # Factory now returns the runtime-compatible adapter for CIBC
+        self.assertIsInstance(extractor, CIBCSavingsAdapterExtractor)
+
+
+class CIBCSavingsAdapterTests(TestCase):
+    @patch('tabula.read_pdf')
+    def test_adapter_parses_rows_and_builds_contract_log(self, mock_tabula):
+        # Create a single-page tabula output with two rows. Columns are arbitrary.
+        df_page = pd.DataFrame([
+            ['2026-03-01', 'PAYROLL', '1500.00', '2500.00'],
+            ['2026-03-02', 'ATM Withdrawal', '25.50', '2474.50'],
+        ])
+        mock_tabula.return_value = [df_page]
+
+        extractor = CIBCSavingsAdapterExtractor()
+        out_df, mismatch = extractor.extract('dummy.pdf', 2026, 3)
+
+        self.assertFalse(mismatch)
+        self.assertEqual(len(out_df), 2)
+        # Check required columns exist
+        for col in ['date', 'description', 'amount', 'unique_bank_id', 'running_balance', 'raw_row_ref']:
+            self.assertIn(col, out_df.columns)
+
+        # Contract log was set and reports the transaction count
+        self.assertTrue(hasattr(extractor, 'last_contract_log'))
+        self.assertEqual(extractor.last_contract_log.get('transactions_count'), 2)
+
+        # Unique IDs are deterministic hex (16 chars)
+        for uid in out_df['unique_bank_id']:
+            self.assertIsInstance(uid, str)
+            self.assertEqual(len(uid), 16)
+
+    @patch('tabula.read_pdf')
+    def test_adapter_handles_tabula_error(self, mock_tabula):
+        mock_tabula.side_effect = RuntimeError('tabula failure')
+
+        extractor = CIBCSavingsAdapterExtractor()
+        out_df, mismatch = extractor.extract('dummy.pdf', 2026, 3)
+
+        # On tabula error adapter should return empty DataFrame and False mismatch
+        self.assertFalse(mismatch)
+        self.assertTrue(out_df.empty)
+        self.assertIn('fatal_errors', extractor.last_contract_log.get('quality', {}))

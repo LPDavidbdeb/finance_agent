@@ -24,11 +24,14 @@ class OriginationService:
         cash_account: Account,
         liability_account: Account,
         owner=None,
-        payment_frequency: PaymentFrequencyIn = PaymentFrequencyIn.MONTHLY
+        payment_frequency: PaymentFrequencyIn = PaymentFrequencyIn.MONTHLY,
+        existing_asset_account: Account = None,
+        sales_contract_file=None,
+        financing_contract_file=None
     ) -> TangibleAsset:
         """
         Orchestrates the acquisition of a physical asset through debt financing.
-        1. Creates a dedicated ASSET account for the physical object.
+        1. Uses existing or creates a dedicated ASSET account for the physical object.
         2. Generates a balanced, 3-line JournalEntry (Asset / Cash / Liability).
         3. Creates the TangibleAsset record linked to the account.
         4. Initializes the AnnuitySchedule for the debt.
@@ -41,15 +44,15 @@ class OriginationService:
                 f"down payment ({down_payment}) + financed amount ({financed_amount})."
             )
 
-        # 2. Create the dedicated Asset Account
-        # Usually, a tangible asset like a house or car has its own sub-account in the ledger.
-        # We'll try to find a suitable parent (e.g. "Tangible Assets" or "Fixed Assets") 
-        # but for now we'll just create it as a top-level Asset for this family.
-        asset_account = Account.objects.create(
-            name=f"Asset: {name}",
-            account_type=Account.AccountType.ASSET,
-            family=family
-        )
+        # 2. Use existing or create the dedicated Asset Account
+        if existing_asset_account:
+            asset_account = existing_asset_account
+        else:
+            asset_account = Account.objects.create(
+                name=f"Asset: {name}",
+                account_type=Account.AccountType.ASSET,
+                family=family
+            )
 
         # 3. Construct the perfectly balanced JournalEntry
         journal_entry = JournalEntry.objects.create(
@@ -90,7 +93,8 @@ class OriginationService:
             name=name,
             purchase_value=total_cost,
             current_market_value=total_cost,
-            purchase_date=origination_date
+            purchase_date=origination_date,
+            sales_contract=sales_contract_file
         )
 
         # 5. Initialize the AnnuitySchedule if financing exists
@@ -113,6 +117,12 @@ class OriginationService:
             
             # Link the schedule back to the tangible asset
             asset.annuity_schedule = schedule
+            
+            # Link the specific financing contract if provided
+            if financing_contract_file:
+                schedule.financing_contract = financing_contract_file
+                schedule.save(update_fields=['financing_contract'])
+
             asset.save(update_fields=['annuity_schedule'])
 
         return asset

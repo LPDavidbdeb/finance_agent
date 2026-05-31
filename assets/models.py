@@ -69,6 +69,12 @@ class TangibleAsset(PhysicalAsset):
         related_name='tangible_asset',
         help_text="The dedicated ledger account representing this asset's book value."
     )
+    sales_contract = models.FileField(
+        upload_to='contracts/sales/',
+        null=True,
+        blank=True,
+        help_text="Optional PDF or image of the bill of sale / purchase contract."
+    )
 
     def clean(self):
         super().clean()

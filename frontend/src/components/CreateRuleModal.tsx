@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { createAndApplyRule, fetchMerchants } from '../api/client';
+import { createAndApplyRule, fetchMerchants, fetchSchedules, type AnnuityScheduleListOut } from '../api/client';
 import { AccountTree } from './AccountTree';
 import { Loader2 } from 'lucide-react';
 import { TRANSACTION_ROUTING_RULE_LABEL } from '../utils/transactionVocabulary';
@@ -56,6 +56,9 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
   const [showMerchantSuggestions, setShowMerchantSuggestions] = useState(false);
   const [selectedMerchant, setSelectedMerchant] = useState<Merchant | null>(null);
 
+  const [loanSchedules, setLoanSchedules] = useState<AnnuityScheduleListOut[]>([]);
+  const [selectedLoanId, setSelectedLoanId] = useState<number | null>(null);
+
   const [selectedAccountName, setSelectedAccountName] = useState<string | null>(null);
   const [isTreeOpen, setIsTreeOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -76,13 +79,16 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
       if (preselectedMerchant) {
         setSelectedMerchant(preselectedMerchant);
         setSelectedAccountName(preselectedMerchant.default_account_name || null);
+        setSelectedLoanId(null); 
       } else {
         setSelectedAccountName(null);
         setSelectedMerchant(null);
+        setSelectedLoanId(null);
       }
 
       setIsTreeOpen(false);
       loadMerchants();
+      loadSchedules();
     }
     setError(null);
   }, [isOpen, rawDescription, institutionId, preselectedMerchant]);
@@ -93,6 +99,15 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
       setMerchants(data);
     } catch (err) {
       console.error("Failed to load merchants", err);
+    }
+  };
+
+  const loadSchedules = async () => {
+    try {
+      const data = await fetchSchedules();
+      setLoanSchedules(data);
+    } catch (err) {
+      console.error("Failed to load schedules", err);
     }
   };
 
@@ -159,6 +174,7 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
         target_account_id: formData.is_unique_provider ? formData.target_account_id : undefined,
         min_amount: formData.min_amount ? parseFloat(formData.min_amount) : undefined,
         max_amount: formData.max_amount ? parseFloat(formData.max_amount) : undefined,
+        linked_schedule_id: selectedLoanId || undefined,
       };
       const result = await createAndApplyRule(payload);
       onSuccess(result.updated_count);
@@ -273,6 +289,32 @@ export const CreateRuleModal: React.FC<CreateRuleModalProps> = ({
                   </div>
                   <p className="text-[11px] text-slate-500 mt-2">
                     Use these to distinguish recurring transactions with similar descriptions (e.g., home vs. auto insurance)
+                  </p>
+                </div>
+
+                {/* Loan Linking Section */}
+                <div className="bg-amber-50/50 p-4 rounded-md border border-amber-100">
+                  <Label className="text-xs font-bold uppercase text-amber-700 block mb-3">
+                    Smart Loan Linking
+                  </Label>
+                  <div className="space-y-2">
+                    <Label htmlFor="linked_loan" className="text-xs text-slate-600">
+                      Link to financing schedule
+                    </Label>
+                    <select
+                      id="linked_loan"
+                      className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+                      value={selectedLoanId || ''}
+                      onChange={e => setSelectedLoanId(e.target.value ? parseInt(e.target.value) : null)}
+                    >
+                      <option value="">— No loan linked —</option>
+                      {loanSchedules.map(s => (
+                        <option key={s.id} value={s.id}>{s.name} ({new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(s.computed_payment)} / {s.payment_frequency.toLowerCase()})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-2 italic">
+                    If linked, payments will be automatically split into Principal & Interest portions.
                   </p>
                 </div>
 

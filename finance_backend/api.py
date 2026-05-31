@@ -25,6 +25,9 @@ except Exception:
     # Router may already be attached during autoreload or repeated imports.
     pass
 
+import logging as _logging
+_api_logger = _logging.getLogger(__name__)
+
 for path, router in [
     ("/users/", "users.api.router"),
     ("/banking/", "banking.api.router"),
@@ -39,9 +42,10 @@ for path, router in [
 ]:
     try:
         api.add_router(path, router)
-    except Exception:
-        # Ignore duplicate router registration (common during dev autoreload)
-        pass
+    except Exception as _e:
+        if "already been attached" not in str(_e):
+            _api_logger.error("Failed to register router %s: %s: %s", path, type(_e).__name__, _e)
+            raise
 
 @api.get("/accounts/tree", response=List[AccountSchema])
 def get_account_tree(request):

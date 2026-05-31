@@ -41,6 +41,12 @@ class AnnuitySchedule(models.Model):
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
+    financing_contract = models.FileField(
+        upload_to='contracts/financing/',
+        null=True,
+        blank=True,
+        help_text="Optional PDF or image of the loan / mortgage agreement."
+    )
 
     class Meta:
         ordering = ['-created_at']

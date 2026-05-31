@@ -626,7 +626,8 @@ def get_account_transactions(request, account_id: int, year: Optional[int] = Non
             'journal_entry_id': entry.id,
             'date': entry.date,
             'description': entry.description or '—',
-            'amount': abs(float(category_line.amount)),
+            'amount': float(category_line.amount),
+            'status': entry.status,
             'source_account': source_line.account.name if source_line else '—',
             'routed_to': category_line.account.name,
             'routed_to_id': category_line.account_id,
@@ -692,12 +693,11 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
         descendant_rows = TransactionLine.objects.filter(
             journal_entry__family=family,
             account_id__in=descendant_ids,
-            journal_entry__date__year__gte=history_start,
-            journal_entry__date__year__lte=history_end,
         ).values('account_id', 'journal_entry__date__year', 'journal_entry__date__month').annotate(total=Sum('amount'))
 
         overall_year_totals = defaultdict(Decimal)
         overall_month_totals = defaultdict(Decimal)
+        parent_month_totals_direct = defaultdict(Decimal)
         child_year_totals = {child.id: defaultdict(Decimal) for child in direct_children}
         child_month_totals = {child.id: defaultdict(Decimal) for child in direct_children}
 
@@ -709,6 +709,9 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
 
             overall_year_totals[row_year] += total
             overall_month_totals[(row_year, row_month)] += total
+
+            if account_id == account.id:
+                parent_month_totals_direct[(row_year, row_month)] += total
 
             child_id = account_to_child_id.get(account_id)
             if child_id is not None:
@@ -759,6 +762,16 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
         parent_amt = parent_year_totals.get(year, amt_current)
 
         children_list = []
+        # Add transactions posted directly to this account if any
+        direct_year_bal = sum(parent_month_totals_direct[(year, m)] for m in range(1, 13))
+        if abs(direct_year_bal) > 0.01:
+            children_list.append({
+                "id": account.id,
+                "name": f"Directly under {account.name}",
+                "account_type": account.account_type,
+                "balance": abs(float(direct_year_bal)),
+            })
+
         for child in direct_children:
             children_list.append({
                 "id": child.id,
@@ -783,7 +796,14 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
         monthly_breakdown = []
         for month_idx in range(1, 13):
             by_child = []
-            month_total = 0.0
+
+            direct_amt = abs(float(parent_month_totals_direct.get((year, month_idx), Decimal('0.00'))))
+            if direct_amt > 0.01:
+                by_child.append({
+                    "child_id": account.id,
+                    "child_name": f"Directly under {account.name}",
+                    "amount": direct_amt
+                })
 
             for child in direct_children:
                 child_amt = abs(float(child_month_totals[child.id].get((year, month_idx), Decimal('0.00'))))
@@ -792,16 +812,57 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
                     "child_name": child.name,
                     "amount": child_amt
                 })
-                month_total += child_amt
 
-            if not direct_children:
-                month_total = abs(float(overall_month_totals.get((year, month_idx), Decimal('0.00'))))
+            month_total = abs(float(overall_month_totals.get((year, month_idx), Decimal('0.00'))))
 
             monthly_breakdown.append({
                 "month": f"{year}-{month_idx:02d}",
                 "total": month_total,
                 "by_child": by_child
             })
+
+        all_historical_months = []
+        if overall_month_totals:
+            min_ym = min(overall_month_totals.keys())
+            max_ym = max(overall_month_totals.keys())
+            
+            cur_y, cur_m = min_ym
+            end_y, end_m = max_ym
+            
+            while (cur_y, cur_m) <= (end_y, end_m):
+                by_child = []
+
+                direct_amt = abs(float(parent_month_totals_direct.get((cur_y, cur_m), Decimal('0.00'))))
+                if direct_amt > 0.01:
+                    by_child.append({
+                        "child_id": account.id,
+                        "child_name": f"Directly under {account.name}",
+                        "amount": direct_amt
+                    })
+
+                for child in direct_children:
+                    child_amt = abs(float(child_month_totals[child.id].get((cur_y, cur_m), Decimal('0.00'))))
+                    by_child.append({
+                        "child_id": child.id,
+                        "child_name": child.name,
+                        "amount": child_amt
+                    })
+
+                # If there are direct children, month_total currently only sums their amounts.
+                # However, transactions might be posted directly to the parent account itself.
+                # In all cases, overall_month_totals contains the true total for the entire branch.
+                month_total = abs(float(overall_month_totals.get((cur_y, cur_m), Decimal('0.00'))))
+
+                all_historical_months.append({
+                    "month": f"{cur_y}-{cur_m:02d}",
+                    "total": month_total,
+                    "by_child": by_child
+                })
+                
+                cur_m += 1
+                if cur_m > 12:
+                    cur_m = 1
+                    cur_y += 1
 
         jan_1_today = date(today_year, 1, 1)
         days_elapsed = max((today - jan_1_today).days + 1, 1)
@@ -871,6 +932,7 @@ def get_account_detail(request, account_id: int, year: Optional[int] = None):
             "children": children_list,
             "direct_merchants": direct_merchants,
             "monthly_breakdown": monthly_breakdown,
+            "all_historical_months": all_historical_months,
             "insights": {
                 "amount_current": amt_current,
                 "amount_previous": amt_previous,

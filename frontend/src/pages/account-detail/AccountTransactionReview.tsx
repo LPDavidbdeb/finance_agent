@@ -166,7 +166,16 @@ const BannerTable: React.FC<BannerTableProps> = ({ transactions, flatAccounts, m
                                   </Badge>
                                 </td>
                                 <td className="px-4 py-2.5 text-right font-mono font-black text-slate-900">
-                                  ${transaction.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                  <div className="flex flex-col items-end">
+                                    <span>${transaction.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                    {transaction.status !== 'PRIMARY' && (
+                                      <span className={`text-[8px] font-bold px-1 rounded ${
+                                        transaction.status === 'VOID' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'
+                                      }`}>
+                                        {transaction.status === 'ADJUSTMENT' ? 'ADJ' : transaction.status}
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="px-4 py-2.5 text-center">
                                   {transaction.statement_id && (

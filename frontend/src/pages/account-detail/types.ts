@@ -59,6 +59,7 @@ export interface AccountDetailRecord {
   direct_merchants: AccountMerchantSummary[];
   insights: CFAInsights;
   monthly_breakdown: MonthlyBreakdown[];
+  all_historical_months?: MonthlyBreakdown[];
   historical_trends: YearlyTrend[];
   avg_yearly_total: number;
   avg_monthly_avg: number;
@@ -69,6 +70,7 @@ export interface AccountTransactionRecord {
   date: string;
   description: string;
   amount: number;
+  status: string;
   source_account: string;
   routed_to: string;
   routed_to_id: number;

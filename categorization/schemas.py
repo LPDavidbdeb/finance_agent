@@ -9,6 +9,7 @@ class RuleCreateAndApplyIn(Schema):
     institution_id: Optional[int] = None
     min_amount: Optional[float] = None
     max_amount: Optional[float] = None
+    linked_schedule_id: Optional[int] = None
 
 
 class MerchantOut(Schema):

@@ -124,8 +124,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
 ]
 CORS_ALLOWED_ORIGIN_REGEXES = [
-    r"^http://192\.168\.\d+\.\d+:5173$",  # any LAN device on 192.168.x.x
-    r"^http://10\.\d+\.\d+\.\d+:5173$",   # any LAN device on 10.x.x.x
+    r"^http://192\.168\.\d+\.\d+:517\d+$",  # any LAN device on 192.168.x.x
+    r"^http://10\.\d+\.\d+\.\d+:517\d+$",   # any LAN device on 10.x.x.x
 ]
 CORS_ALLOW_HEADERS = [
     "accept",
@@ -153,3 +153,7 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
+
+# Gemini API configuration
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+DEFAULT_GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3.1-flash-lite')

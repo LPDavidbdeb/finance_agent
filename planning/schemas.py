@@ -89,6 +89,7 @@ class AnnuityScheduleOut(Schema):
     computed_payment: Decimal
     linked_journal_entry_id: Optional[int] = None
     linked_rule: Optional[LinkedRuleOut] = None
+    financing_contract: Optional[str] = None
     created_at: datetime
     periods: List[AnnuityPeriodOut] = []
 

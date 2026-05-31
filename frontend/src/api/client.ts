@@ -808,6 +808,7 @@ export interface AnnuityScheduleOut {
   computed_payment: number;
   linked_journal_entry_id: number | null;
   linked_rule: LinkedRule | null;
+  financing_contract: string | null;
   created_at: string;
   periods: AnnuityPeriodOut[];
 }
@@ -1347,7 +1348,8 @@ export interface LoanSetupIn {
   loan_amount: number
   asset_account_id: number
   cash_account_id: number
-  loan_account_id: number
+  loan_account_id?: number | null
+  new_loan_account_name?: string | null
   schedule_name: string
   annual_rate: number
   amortization_years: number
@@ -1369,11 +1371,34 @@ export interface BulkPayIn {
   interest_account_id: number
 }
 
-export async function loanSetup(data: LoanSetupIn): Promise<AnnuityScheduleOut> {
+export async function loanSetup(
+  data: LoanSetupIn, 
+  salesContract?: File | null,
+  financingContract?: File | null
+): Promise<AnnuityScheduleOut> {
+  const formData = new FormData()
+  
+  // Flatten the data into the form data
+  Object.entries(data).forEach(([key, value]) => {
+    if (value !== null && value !== undefined) {
+      formData.append(key, String(value))
+    }
+  })
+
+  if (salesContract) {
+    formData.append('sales_contract', salesContract)
+  }
+  if (financingContract) {
+    formData.append('financing_contract', financingContract)
+  }
+
+  const token = localStorage.getItem('access_token')
   const res = await fetch(`${API_URL}/planning/loan-setup`, {
     method: 'POST',
-    headers: getAuthHeader(),
-    body: JSON.stringify(data),
+    headers: {
+      "Authorization": token ? `Bearer ${token}` : ""
+    },
+    body: formData,
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))

@@ -1,4 +1,5 @@
-from ninja import Router, Schema
+from ninja import Router, Schema, File, Form
+from ninja.files import UploadedFile
 from ninja.errors import HttpError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
@@ -148,7 +149,8 @@ class LoanSetupIn(Schema):
     loan_amount: Decimal               # actual financed amount
     asset_account_id: int              # ASSET account to DR
     cash_account_id: int               # ASSET account to CR (down payment)
-    loan_account_id: int               # LIABILITY account to CR
+    loan_account_id: Optional[int] = None      # LIABILITY account to CR. Optional if creating new.
+    new_loan_account_name: Optional[str] = None # Name of a new liability account to create.
 
     # Schedule terms
     schedule_name: str                 # e.g. "Honda Civic — Auto Loan"
@@ -214,16 +216,18 @@ def _create_payment_je(family, period: AnnuityPeriod, cash_account_id: int,
 
 @router.post("/loan-setup", response=AnnuityScheduleOut)
 @transaction.atomic
-def loan_setup(request, payload: LoanSetupIn):
+def loan_setup(
+    request, 
+    payload: LoanSetupIn = Form(...), 
+    sales_contract: Optional[UploadedFile] = File(None),
+    financing_contract: Optional[UploadedFile] = File(None)
+):
     """
-    Atomic: create the asset-purchase JE and commit the amortization schedule.
-
-    JE lines:
-      DR  Asset account        = purchase_price
-      CR  Cash/Bank account    = down_payment   (omitted when down_payment == 0)
-      CR  Loan Payable account = loan_amount
+    Atomic: create the asset-purchase JE, create TangibleAsset, and commit the amortization schedule.
+    Uses assets.services.OriginationService for orchestration.
     """
-    from accounting.models import JournalEntry, TransactionLine, Account
+    from accounting.models import Account
+    from assets.services import OriginationService
 
     family = request.auth.family
 
@@ -239,46 +243,62 @@ def loan_setup(request, payload: LoanSetupIn):
 
     asset_acct = _get_family_account(payload.asset_account_id)
     cash_acct = _get_family_account(payload.cash_account_id)
-    loan_acct = _get_family_account(payload.loan_account_id)
-
-    if loan_acct.account_type != Account.AccountType.LIABILITY:
-        raise HttpError(400, "loan_account_id must be a LIABILITY account.")
-
-    # --- Build purchase JE ---
-    purchase_je = JournalEntry.objects.create(
-        family=family,
-        date=payload.purchase_date,
-        description=payload.purchase_description,
-        is_reconciled=True,
-    )
-
-    # DR Asset — full purchase price
-    TransactionLine.objects.create(
-        journal_entry=purchase_je, account=asset_acct, amount=payload.purchase_price
-    )
-
-    if payload.down_payment and payload.down_payment > 0:
-        # CR Cash — down payment leaves the bank
-        TransactionLine.objects.create(
-            journal_entry=purchase_je, account=cash_acct, amount=-payload.down_payment
+    
+    # Resolve or create the loan liability account
+    if payload.loan_account_id:
+        loan_acct = _get_family_account(payload.loan_account_id)
+        if loan_acct.account_type != Account.AccountType.LIABILITY:
+            raise HttpError(400, "loan_account_id must be a LIABILITY account.")
+    elif payload.new_loan_account_name:
+        # Create a new liability account under the "Liabilities" root
+        liabilities_root = Account.objects.filter(family=family, name='Liabilities', parent=None).first()
+        if not liabilities_root:
+             # Fallback: find any LIABILITY account and use its root
+             any_lib = Account.objects.filter(family=family, account_type=Account.AccountType.LIABILITY).first()
+             if any_lib:
+                 liabilities_root = any_lib.get_root()
+             else:
+                 raise HttpError(400, "No Liabilities root found. Please create one in the Ledger first.")
+        
+        loan_acct = Account.objects.create(
+            name=payload.new_loan_account_name.strip().upper(),
+            parent=liabilities_root,
+            account_type=Account.AccountType.LIABILITY,
+            family=family
         )
+    else:
+        raise HttpError(400, "Must provide either loan_account_id or new_loan_account_name.")
 
-    # CR Loan Payable — financed amount creates the liability
-    TransactionLine.objects.create(
-        journal_entry=purchase_je, account=loan_acct, amount=-payload.loan_amount
-    )
-
-    # --- Commit amortization schedule linked to the purchase JE ---
-    spec = ScenarioSpec(
-        name=payload.schedule_name,
-        type=ScenarioType.LOAN_AMORTIZATION,
-        principal=payload.loan_amount,
+    # Delegate core orchestration to OriginationService
+    # This creates: JournalEntry, TangibleAsset, and AnnuitySchedule
+    asset = OriginationService.acquire_financed_asset(
+        name=payload.purchase_description,
+        family=family,
+        total_cost=payload.purchase_price,
+        down_payment=payload.down_payment,
+        financed_amount=payload.loan_amount,
+        origination_date=payload.purchase_date,
+        loan_term_years=payload.amortization_years,
         annual_rate=payload.annual_rate,
-        amortization_years=payload.amortization_years,
+        cash_account=cash_acct,
+        liability_account=loan_acct,
         payment_frequency=payload.payment_frequency,
-        start_date=payload.schedule_start_date,
+        existing_asset_account=asset_acct,
+        sales_contract_file=sales_contract,
+        financing_contract_file=financing_contract
     )
-    schedule = AnnuityService.commit_schedule(family, spec, linked_je=purchase_je)
+
+    # Note: OriginationService uses a default schedule name. 
+    # If the payload specified a different schedule name, we update it.
+    schedule = asset.annuity_schedule
+    if schedule and payload.schedule_name and schedule.name != payload.schedule_name:
+        schedule.name = payload.schedule_name
+        schedule.save(update_fields=['name'])
+        # Also update the auto-generated merchant if it was based on the old name
+        rule = schedule.mapping_rules.first()
+        if rule and rule.merchant:
+            rule.merchant.name = f"[LOAN] {payload.schedule_name}"
+            rule.merchant.save(update_fields=['name'])
 
     return _schedule_to_out(schedule, include_periods=True)
 
@@ -368,6 +388,7 @@ def _schedule_to_out(schedule: AnnuitySchedule, include_periods: bool = False) -
         computed_payment=schedule.computed_payment,
         linked_journal_entry_id=schedule.linked_journal_entry_id,
         linked_rule=linked_rule,
+        financing_contract=schedule.financing_contract.url if schedule.financing_contract else None,
         created_at=schedule.created_at,
         periods=periods,
     )

@@ -170,6 +170,11 @@ class AmortizationReconciliationService:
         schedule = schedule_override or rule.linked_schedule
         if not schedule:
             return None
+        
+        merchant = rule.merchant if rule else (staged_tx.merchant or schedule_override.linked_merchants.first())
+        if not merchant:
+             # Last resort: if we have a schedule, we might be able to find the merchant linked to it
+             pass
 
         # 1. Find the oldest unpaid AnnuityPeriod within ± 5-day window
         window_start = staged_tx.bank_date - timedelta(days=5)
@@ -271,7 +276,82 @@ class AmortizationReconciliationService:
 
         staged_tx.status = staged_tx.Status.RECONCILED
         staged_tx.journal_entry = journal_entry
-        staged_tx.merchant = rule.merchant
+        staged_tx.merchant = merchant
         staged_tx.save(update_fields=['status', 'journal_entry', 'merchant'])
 
         return journal_entry
+
+    @staticmethod
+    @transaction.atomic
+    def retrofit_historical_payments(merchant, schedule, user):
+        """
+        Phase 6: Retroactive Retrofitting (Time Machine).
+        Identifies past reconciled transactions for a merchant and replaces simple 
+        expense entries with compound loan payment entries.
+        """
+        from banking.models import StagedTransaction
+
+        # 1. Identify "Upgrade Candidates"
+        # Find already-RECONCILED transactions for this merchant
+        candidates = StagedTransaction.objects.filter(
+            merchant=merchant,
+            status=StagedTransaction.Status.RECONCILED,
+            journal_entry__isnull=False
+        ).order_by('bank_date')
+
+        updated_count = 0
+        
+        for tx in candidates:
+            # Skip if already linked to a period (don't double-retrofit)
+            if hasattr(tx.journal_entry, 'annuity_period'):
+                continue
+                
+            # Verify amount matches (within $1 tolerance)
+            if abs(abs(tx.amount) - schedule.computed_payment) > Decimal("1.00"):
+                continue
+
+            # 2. Sequential Matching: Find oldest unpaid period within a 15-day window
+            window_start = tx.bank_date - timedelta(days=7)
+            window_end = tx.bank_date + timedelta(days=7)
+            
+            period = schedule.periods.filter(
+                is_paid=False,
+                payment_date__range=(window_start, window_end)
+            ).order_by('period_number').first()
+            
+            if not period:
+                continue
+
+            # 3. Atomic Swap
+            old_je = tx.journal_entry
+            
+            # Temporarily "un-reconcile" to satisfy the service's checks
+            tx.status = StagedTransaction.Status.UNPROCESSED
+            tx.journal_entry = None
+            tx.save()
+            
+            try:
+                new_je = AmortizationReconciliationService.reconcile_amortization_payment(
+                    tx, 
+                    rule=None, 
+                    user=user, 
+                    schedule_override=schedule
+                )
+                
+                if new_je:
+                    # Cleanup the old simple JE
+                    old_je.delete()
+                    updated_count += 1
+                else:
+                    # Restore state if reconciliation failed
+                    tx.status = StagedTransaction.Status.RECONCILED
+                    tx.journal_entry = old_je
+                    tx.save()
+            except Exception:
+                # Restore state on error
+                tx.status = StagedTransaction.Status.RECONCILED
+                tx.journal_entry = old_je
+                tx.save()
+                raise
+                
+        return updated_count

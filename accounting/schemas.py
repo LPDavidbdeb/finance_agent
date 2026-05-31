@@ -90,6 +90,7 @@ class AccountDetailOut(Schema):
     insights: CFAInsightsOut
     historical_trends: List[YearlyTrendOut] = []
     monthly_breakdown: List[MonthlyBreakdownOut] = []
+    all_historical_months: List[MonthlyBreakdownOut] = []
     avg_yearly_total: float = 0.0
     avg_monthly_avg: float = 0.0
 
@@ -129,6 +130,7 @@ class AccountTransactionOut(Schema):
     date: date
     description: str
     amount: float
+    status: str
     source_account: str
     routed_to: str
     routed_to_id: int

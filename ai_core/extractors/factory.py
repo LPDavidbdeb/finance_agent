@@ -1,4 +1,11 @@
-from .strategies import VisaDesjardinsExtractor, MasterCardWealthSimpleExtractor, CompteDesjardinsExtractor, TangerineExtractor
+from .strategies import (
+    VisaDesjardinsExtractor,
+    MasterCardWealthSimpleExtractor,
+    CompteDesjardinsExtractor,
+    TangerineExtractor,
+    CIBCSavingsExtractor,
+    CIBCSavingsAdapterExtractor,
+)
 
 
 class PDFExtractorFactory:
@@ -21,6 +28,8 @@ class PDFExtractorFactory:
             return CompteDesjardinsExtractor()
         elif "Wealthsimple" in institution_name:
             return MasterCardWealthSimpleExtractor()
+        elif "CIBC" in institution_name and product_type in {"SAVINGS", "CHECKING"}:
+            return CIBCSavingsAdapterExtractor()
         elif "Tangerine" in institution_name and product_type is None:
             # Multi-product consolidated extractor — no product_type required.
             return TangerineExtractor()

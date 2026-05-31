@@ -53,15 +53,26 @@ class Account(MPTTModel):
         return f"{self.name} ({self.get_account_type_display()})"
 
 class JournalEntry(models.Model):
+    class EntryStatus(models.TextChoices):
+        PRIMARY = 'PRIMARY', 'Primary'
+        ADJUSTMENT = 'ADJUSTMENT', 'Adjustment'
+        VOID = 'VOID', 'Void'
+
     family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='journal_entries')
     date = models.DateField()
     description = models.CharField(max_length=512)
+    status = models.CharField(
+        max_length=20,
+        choices=EntryStatus.choices,
+        default=EntryStatus.PRIMARY,
+        help_text="Status of the entry: PRIMARY (actual spend), ADJUSTMENT (ledger correction), or VOID (cancelled)."
+    )
     is_reconciled = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.date} - {self.description}"
+        return f"{self.date} - {self.description} ({self.status})"
 
 class TransactionLine(models.Model):
     journal_entry = models.ForeignKey(JournalEntry, on_delete=models.CASCADE, related_name='lines')

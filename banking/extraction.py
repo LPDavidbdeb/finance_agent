@@ -83,6 +83,28 @@ def get_statement_date_from_pdf(pdf_path: str) -> tuple[int, int]:
                     year = int(match5.group(2))
                     if month:
                         return year, month
+
+                # Pattern 6: CIBC / generic English statement date
+                # Example: "Statement Date March 31, 2026"
+                pattern6 = r'Statement\s+Date[:\s]+([a-zA-Z]+)\s+\d{1,2},\s*(\d{4})'
+                match6 = re.search(pattern6, text, re.IGNORECASE)
+                if match6:
+                    month_name = match6.group(1).lower()
+                    month = MONTH_MAP.get(month_name)
+                    year = int(match6.group(2))
+                    if month:
+                        return year, month
+
+                # Pattern 7: CIBC / generic statement period
+                # Example: "March 1, 2026 to March 31, 2026"
+                pattern7 = r'([a-zA-Z]+)\s+\d{1,2},\s*(\d{4})\s+(?:to|-)\s+[a-zA-Z]+\s+\d{1,2},\s*\d{4}'
+                match7 = re.search(pattern7, text, re.IGNORECASE)
+                if match7:
+                    month_name = match7.group(1).lower()
+                    month = MONTH_MAP.get(month_name)
+                    year = int(match7.group(2))
+                    if month:
+                        return year, month
     except Exception as e:
         logger.warning(f"Failed to extract date from PDF {pdf_path}: {e}")
     
@@ -158,6 +180,20 @@ def extract_transactions_from_statement(import_id: int, user):
 
         transactions_data = df.to_dict('records')
         print(f"[EXTRACT] Parsed {len(transactions_data)} rows. Shadow mismatch: {shadow_mismatch}")
+
+        # Persist extractor rich log into the statement processing_log (append-only)
+        try:
+            if hasattr(extractor, 'last_contract_log') and extractor.last_contract_log:
+                pl = list(statement_import.processing_log or [])
+                pl.append({
+                    'timestamp': datetime.now().isoformat(),
+                    'extractor': type(extractor).__name__,
+                    'log': extractor.last_contract_log,
+                })
+                statement_import.processing_log = pl
+                statement_import.save(update_fields=['processing_log'])
+        except Exception as e:
+            logger.warning(f"Failed to append extractor log to processing_log: {e}")
 
         # Build a lookup cache: account_number → FinancialProduct for this institution.
         # Used for per-row routing when the extractor emits an account_number column.

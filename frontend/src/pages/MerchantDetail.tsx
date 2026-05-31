@@ -21,6 +21,9 @@ import { AccountTree } from '../components/AccountTree';
 import { CreateRuleModal } from '../components/CreateRuleModal';
 import { useToast } from '../components/ui/use-toast';
 import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+} from 'recharts';
+import {
   Loader2, Edit2, Check, X, ArrowLeft, Merge, Trash2, Tag,
   History, DollarSign, TrendingUp, Calendar, ChevronRight, Search, Wand2, Link2, Link2Off
 } from 'lucide-react';
@@ -280,40 +283,75 @@ export const MerchantDetail: React.FC = () => {
     !selectedSourceIds.includes(m.id)
   ).slice(0, 5);
 
-  const renderActivityCalendar = () => {
-    if (!stats?.daily_activity) return null;
-
-    const days = [];
-    const today = new Date();
-    const activityMap = new Map<string, number>(
-      stats.daily_activity.map((a: any) => [a.date, a.amount])
-    );
-
-    for (let i = 364; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(today.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-      const amount = activityMap.get(dateStr) || 0;
-      
-      let color = "bg-slate-100";
-      if (amount > 0) {
-        if (amount < 50) color = "bg-blue-200";
-        else if (amount < 200) color = "bg-blue-400";
-        else color = "bg-blue-600";
-      }
-
-      days.push(
-        <div 
-          key={dateStr}
-          className={`w-3 h-3 rounded-sm ${color} cursor-help transition-transform hover:scale-150`}
-          title={`${dateStr}: $${amount.toLocaleString()}`}
-        />
+  const renderMonthlyBarChart = () => {
+    if (!stats?.daily_activity || stats.daily_activity.length === 0) {
+      return (
+        <div className="flex items-center justify-center h-48 text-sm text-slate-400 italic">
+          No activity found.
+        </div>
       );
     }
 
+    // Aggregate daily activity into months
+    const monthlyData: Record<string, number> = {};
+    let minDateStr = '';
+    let maxDateStr = '';
+
+    stats.daily_activity.forEach((a: any) => {
+      // a.date is YYYY-MM-DD
+      const monthKey = a.date.substring(0, 7); // YYYY-MM
+      monthlyData[monthKey] = (monthlyData[monthKey] || 0) + a.amount;
+      if (!minDateStr || a.date < minDateStr) minDateStr = a.date;
+      if (!maxDateStr || a.date > maxDateStr) maxDateStr = a.date;
+    });
+
+    // Create an array from the earliest month to the latest month for a continuous timeline
+    const chartData = [];
+    if (minDateStr) {
+      const minDate = new Date(minDateStr + 'T00:00:00Z');
+      const maxDate = new Date(maxDateStr + 'T00:00:00Z');
+      const today = new Date();
+      const endDate = maxDate > today ? maxDate : today;
+
+      let currentDate = new Date(Date.UTC(minDate.getUTCFullYear(), minDate.getUTCMonth(), 1));
+      const endMonthDate = new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), 1));
+      
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+      while (currentDate <= endMonthDate) {
+        const year = currentDate.getUTCFullYear();
+        const month = String(currentDate.getUTCMonth() + 1).padStart(2, '0');
+        const monthKey = `${year}-${month}`;
+        
+        chartData.push({
+          name: `${monthNames[currentDate.getUTCMonth()]} '${String(year).slice(2)}`,
+          amount: monthlyData[monthKey] || 0,
+        });
+        
+        currentDate.setUTCMonth(currentDate.getUTCMonth() + 1);
+      }
+    }
+
     return (
-      <div className="flex flex-wrap gap-1 max-w-full overflow-hidden">
-        {days}
+      <div className="h-64 w-full mt-4">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+            <XAxis dataKey="name" tick={{fill: '#64748b', fontSize: 12}} tickLine={false} axisLine={false} />
+            <YAxis 
+              tickFormatter={(val) => `$${val}`} 
+              tick={{fill: '#64748b', fontSize: 12}} 
+              tickLine={false} 
+              axisLine={false} 
+            />
+            <Tooltip 
+              formatter={(value: any) => [`$${(Number(value) || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`, 'Total']}
+              cursor={{fill: '#f1f5f9'}}
+              contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+            />
+            <Bar dataKey="amount" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={50} />
+          </BarChart>
+        </ResponsiveContainer>
       </div>
     );
   };
@@ -419,31 +457,17 @@ export const MerchantDetail: React.FC = () => {
         </div>
       )}
 
-      {/* Activity Calendar */}
+      {/* Monthly Bar Chart */}
       <Card className="shadow-sm">
         <CardHeader className="border-b border-slate-50 bg-slate-50/30">
           <CardTitle className="text-lg flex items-center gap-2">
             <Calendar className="h-5 w-5 text-blue-600" />
-            Activity Calendar
+            Monthly Transaction History
           </CardTitle>
-          <CardDescription>Frequency and volume of transactions over the last 365 days.</CardDescription>
+          <CardDescription>Aggregate volume of all historical transactions.</CardDescription>
         </CardHeader>
-        <CardContent className="p-6 overflow-x-auto">
-          {renderActivityCalendar()}
-          <div className="mt-4 flex items-center gap-4 text-[10px] text-slate-400">
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 bg-slate-100 rounded-sm" /> No activity
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 bg-blue-200 rounded-sm" /> Low
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 bg-blue-400 rounded-sm" /> Medium
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 bg-blue-600 rounded-sm" /> High
-            </div>
-          </div>
+        <CardContent className="p-6">
+          {renderMonthlyBarChart()}
         </CardContent>
       </Card>
 

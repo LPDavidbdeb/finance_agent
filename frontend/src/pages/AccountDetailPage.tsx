@@ -47,6 +47,19 @@ export const AccountDetailPage: React.FC = () => {
   } = useAccountDetailData(accountId, year);
 
   const chartData = useMemo(() => {
+    if (account?.all_historical_months && account.all_historical_months.length > 0) {
+      return account.all_historical_months.map((month) => {
+        const [y, m] = month.month.split('-');
+        const shortYear = y.substring(2);
+        const name = `${MONTH_NAMES[parseInt(m, 10) - 1]} '${shortYear}`;
+        const row: Record<string, number | string> = { name, total: month.total, rawMonth: month.month };
+        month.by_child.forEach(child => {
+          row[child.child_name] = child.amount;
+        });
+        return row;
+      });
+    }
+
     if (!account?.monthly_breakdown) return [];
 
     return account.monthly_breakdown.map((month, index) => {

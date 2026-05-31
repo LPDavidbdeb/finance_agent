@@ -601,3 +601,359 @@ class TangerineExtractor(BasePDFExtractor):
 
     def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> tuple[pd.DataFrame, bool]:
         raise NotImplementedError("TangerineExtractor overrides extract() directly.")
+
+
+class CIBCSavingsExtractor(BasePDFExtractor):
+    """
+    First-pass parser for CIBC deposit-account statements (savings/checking style).
+
+    This extractor is intentionally permissive and relies on column-name heuristics
+    because CIBC PDF table headers vary between statement templates.
+    """
+
+    def tabula_parameters(self) -> dict:
+        return {'pages': 'all', 'stream': True}
+
+    def _clean_amount(self, value) -> float:
+        if pd.isna(value):
+            return 0.0
+
+        s = str(value).strip()
+        if not s or s.lower() == 'nan':
+            return 0.0
+
+        negative = False
+        if s.startswith('(') and s.endswith(')'):
+            negative = True
+            s = s[1:-1]
+
+        s_upper = s.upper()
+        if s_upper.endswith('DR'):
+            negative = True
+            s = s[:-2]
+        elif s_upper.endswith('CR'):
+            s = s[:-2]
+
+        s = (
+            s.replace('$', '')
+            .replace(',', '')
+            .replace(' ', '')
+            .replace('\u00a0', '')
+            .replace('\u202f', '')
+            .strip()
+        )
+
+        if not s:
+            return 0.0
+
+        try:
+            amount = float(s)
+        except ValueError:
+            return 0.0
+
+        if negative:
+            amount = -abs(amount)
+        return amount
+
+    def _parse_date(self, value, statement_year: int):
+        if pd.isna(value):
+            return pd.NaT
+
+        raw = str(value).strip()
+        if not raw or raw.lower() == 'nan':
+            return pd.NaT
+
+        parsed = pd.to_datetime(raw, errors='coerce', infer_datetime_format=True)
+        if pd.isna(parsed):
+            m = re.match(r'^(\d{1,2})[\-/](\d{1,2})$', raw)
+            if m:
+                month = int(m.group(1))
+                day = int(m.group(2))
+                try:
+                    parsed = pd.Timestamp(year=statement_year, month=month, day=day)
+                except ValueError:
+                    parsed = pd.NaT
+
+        return parsed
+
+    def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> tuple[pd.DataFrame, bool]:
+        if df.empty:
+            return pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier']), False
+
+        df_work = df.copy()
+        df_work.columns = [str(c).upper().replace('\n', ' ').strip() for c in df_work.columns]
+
+        date_col = next((c for c in df_work.columns if 'DATE' in c), None)
+        desc_col = next(
+            (c for c in df_work.columns if any(k in c for k in ['DESCRIPTION', 'DETAIL', 'PARTICULAR', 'TRANSACTION'])),
+            None,
+        )
+        debit_col = next((c for c in df_work.columns if any(k in c for k in ['WITHDRAW', 'DEBIT', 'PAYMENT'])), None)
+        credit_col = next((c for c in df_work.columns if any(k in c for k in ['DEPOSIT', 'CREDIT'])), None)
+        amount_col = next((c for c in df_work.columns if 'AMOUNT' in c), None)
+
+        if not date_col or not desc_col:
+            return pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier']), False
+
+        rows = []
+        for _, row in df_work.iterrows():
+            tx_date = self._parse_date(row.get(date_col), statement_year)
+            if pd.isna(tx_date):
+                continue
+
+            description = str(row.get(desc_col, '')).strip()
+            if not description or description.lower() == 'nan':
+                continue
+
+            debit = self._clean_amount(row.get(debit_col)) if debit_col else 0.0
+            credit = self._clean_amount(row.get(credit_col)) if credit_col else 0.0
+
+            if debit_col or credit_col:
+                # ASSET convention: inflow (+), outflow (-)
+                amount = credit - abs(debit)
+            else:
+                amount = self._clean_amount(row.get(amount_col)) if amount_col else 0.0
+
+            if amount == 0.0:
+                continue
+
+            rows.append(
+                {
+                    'date': tx_date,
+                    'description': description,
+                    'amount': amount,
+                    'account_identifier': 'SAVINGS',
+                }
+            )
+
+        result = pd.DataFrame(rows)
+        if result.empty:
+            return pd.DataFrame(columns=['date', 'description', 'amount', 'account_identifier']), False
+        return result[['date', 'description', 'amount', 'account_identifier']], False
+
+
+class CIBCSavingsAdapterExtractor(BasePDFExtractor):
+    """
+    Runtime-compatible adapter for CIBC single-product statements.
+    Builds an internal rich log (accessible as `last_contract_log`) and
+    returns the tuple expected by `banking/extraction.py`: (DataFrame, shadow_mismatch).
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.last_contract_log = {}
+
+    def tabula_parameters(self) -> dict:
+        return {'pages': 'all', 'stream': True, 'guess': False}
+
+    @staticmethod
+    def _parse_amount(val):
+        import re
+        from decimal import Decimal, InvalidOperation
+        if val is None:
+            return None
+        s = str(val).strip()
+        if s == '' or s.lower() == 'nan':
+            return None
+        # Remove currency symbols and non-breaking spaces
+        s = s.replace('$', '').replace('\xa0', '').replace('\u202f', '')
+        # Remove spaces used as thousands separator
+        s = re.sub(r'\s+', '', s)
+        # If both comma and dot are present, assume comma is thousands separator
+        if ',' in s and '.' in s:
+            s = s.replace(',', '')
+        else:
+            # Normalize comma decimal to dot
+            s = s.replace(',', '.')
+        # Remove trailing CR/DR markers
+        s = re.sub(r'(?i)\bCR\b', '', s)
+        s = re.sub(r'(?i)\bDR\b', '-', s)
+        s = s.replace('(', '-').replace(')', '')
+        try:
+            return Decimal(s)
+        except (InvalidOperation, ValueError):
+            return None
+
+    @staticmethod
+    def _parse_date(token: str, year: int):
+        import re
+        from datetime import date
+        import pandas as _pd
+        if token is None:
+            return None
+        s = str(token).strip()
+        if s == '' or s.lower() == 'nan':
+            return None
+        # Try robust pandas parsing first
+        try:
+            parsed = _pd.to_datetime(s, errors='coerce')
+            if not parsed is _pd.NaT and not _pd.isna(parsed):
+                return parsed.date()
+        except Exception:
+            pass
+
+        m = re.match(r'^(\d{1,2})[\s/\-](\d{1,2})$', s)
+        if m:
+            d = int(m.group(1)); mth = int(m.group(2))
+            try:
+                return date(year, mth, d)
+            except Exception:
+                return None
+
+        # French short month names
+        MONTH_MAP = {
+            'janv':1,'jan':1,'févr':2,'fevr':2,'fev':2,'mars':3,'avr':4,'avril':4,'mai':5,
+            'juin':6,'juil':7,'juil.':7,'juillet':7,'août':8,'aout':8,'sept':9,'oct':10,'nov':11,'déc':12,'dec':12
+        }
+        parts = re.split(r'\s+', s.lower())
+        if len(parts) >= 2 and parts[0].isdigit():
+            day = int(parts[0]); mon = parts[1].rstrip('.')
+            mval = MONTH_MAP.get(mon)
+            if mval:
+                try:
+                    return date(year, mval, day)
+                except Exception:
+                    return None
+        return None
+
+    def extract(self, pdf_path: str, statement_year: int, statement_month: int) -> tuple[pd.DataFrame, bool]:
+        from decimal import Decimal
+        import tabula
+        import hashlib
+        import pandas as pd_local
+
+        quality = {'rows_read': 0, 'rows_parsed': 0, 'rows_rejected': 0, 'warnings': [], 'fatal_errors': []}
+        balances = {'opening_balance': None, 'closing_balance': None, 'balance_lines_detected': False, 'balance_consistency_delta': None}
+        metadata = {
+            'institution_name': 'CIBC',
+            'parser_name': 'cibc_adapter',
+            'parser_version': '1.0',
+            'currency': 'CAD',
+            'statement_year': statement_year,
+            'statement_month': statement_month
+        }
+
+        transactions = []
+
+        try:
+            dfs = tabula.read_pdf(pdf_path, **self.tabula_parameters())
+        except Exception as e:
+            quality['fatal_errors'].append(f"tabula.read_pdf error: {e}")
+            self.last_contract_log = {'metadata': metadata, 'balances': balances, 'quality': quality, 'transactions_count': 0}
+            return pd_local.DataFrame(), False
+
+        current_date = None
+        for page_idx, df in enumerate(dfs):
+            df = df.reset_index(drop=True)
+            df.columns = [str(c) for c in df.columns]
+            for row_idx, row in df.iterrows():
+                quality['rows_read'] += 1
+                tokens = [str(x).strip() for x in row.tolist()]
+                if all(t == '' or t.lower() == 'nan' for t in tokens):
+                    continue
+
+                raw_line = ' '.join([t for t in tokens if t and t.lower() != 'nan'])
+                lower = raw_line.lower()
+
+                # Balance markers French/English
+                if ('solde' in lower and ('ouvert' in lower or 'opening' in lower)) or ('opening balance' in lower):
+                    val = self._parse_amount(tokens[-1])
+                    balances['opening_balance'] = val
+                    balances['balance_lines_detected'] = True
+                    quality['rows_rejected'] += 1
+                    continue
+                if ('solde' in lower and ('clôture' in lower or 'cloture' in lower or 'closing' in lower)) or ('closing balance' in lower):
+                    val = self._parse_amount(tokens[-1])
+                    balances['closing_balance'] = val
+                    balances['balance_lines_detected'] = True
+                    quality['rows_rejected'] += 1
+                    continue
+
+                possible_date = self._parse_date(tokens[0], statement_year)
+                if possible_date:
+                    current_date = possible_date
+                    desc_start = 1
+                else:
+                    desc_start = 0
+
+                if not current_date:
+                    quality['rows_rejected'] += 1
+                    quality['warnings'].append(f"Missing date for line on page {page_idx+1} row {row_idx}")
+                    continue
+
+                running_balance = self._parse_amount(tokens[-1])
+                amount_candidate = None
+                for cand in tokens[-3:]:
+                    amt = self._parse_amount(cand)
+                    if amt is not None:
+                        amount_candidate = amt
+                        break
+
+                if amount_candidate is None:
+                    quality['rows_rejected'] += 1
+                    continue
+
+                desc_tokens = tokens[desc_start:len(tokens)-3] if len(tokens) > 3 else tokens[desc_start:-1]
+                description = ' '.join([t for t in desc_tokens if t and t.lower() != 'nan']).strip()
+                if not description:
+                    description = raw_line
+
+                amount = amount_candidate
+
+                raw_id = f"{current_date.isoformat()}|{description}|{amount}|{running_balance}|{page_idx+1}|{row_idx}"
+                uid = hashlib.sha256(raw_id.encode('utf-8')).hexdigest()[:16]
+
+                transactions.append({
+                    'date': current_date,
+                    'description': description,
+                    'amount': float(amount),
+                    'unique_bank_id': uid,
+                    'raw_row_ref': {'page': page_idx + 1, 'row_index': int(row_idx)},
+                    'running_balance': float(running_balance) if running_balance is not None else None
+                })
+                quality['rows_parsed'] += 1
+
+        try:
+            if balances['opening_balance'] is not None and balances['closing_balance'] is not None and transactions:
+                sum_txns = sum(Decimal(str(t['amount'])) for t in transactions)
+                delta = balances['closing_balance'] - (balances['opening_balance'] + sum_txns)
+                balances['balance_consistency_delta'] = delta
+                if abs(delta) > Decimal('0.01'):
+                    quality['warnings'].append(f"Reconciliation delta: {delta}")
+        except Exception:
+            pass
+
+        status = 'failed'
+        if quality['rows_parsed'] > 0 and len(quality['fatal_errors']) == 0:
+            if quality['rows_rejected'] > (quality['rows_parsed'] * 0.1) or len(quality['warnings']) > 0:
+                status = 'partial_success'
+            else:
+                status = 'success'
+
+        self.last_contract_log = {
+            'metadata': metadata,
+            'balances': balances,
+            'quality': quality,
+            'status': status,
+            'transactions_count': len(transactions)
+        }
+
+        df_out = pd_local.DataFrame(transactions)
+        for col in ['date', 'description', 'amount', 'unique_bank_id']:
+            if col not in df_out.columns:
+                df_out[col] = None
+        # Ensure optional columns exist to keep downstream code stable
+        for col in ['running_balance', 'raw_row_ref']:
+            if col not in df_out.columns:
+                df_out[col] = None
+
+        shadow_mode_mismatch = False
+        return df_out[['date', 'description', 'amount', 'unique_bank_id', 'running_balance', 'raw_row_ref']], shadow_mode_mismatch
+
+    def process_dataframe(self, df: pd.DataFrame, statement_year: int, statement_month: int) -> tuple[pd.DataFrame, bool]:
+        """
+        Adapter does not support the DataFrame-based processing entrypoint; keep
+        a deliberate NotImplementedError so the class is instantiable while
+        signalling intended usage via `extract()`.
+        """
+        raise NotImplementedError("CIBCSavingsAdapterExtractor only supports extract(pdf_path, year, month)")

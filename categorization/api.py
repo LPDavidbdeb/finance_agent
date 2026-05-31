@@ -24,13 +24,19 @@ def create_and_apply_mapping_rule(request, payload: RuleCreateAndApplyIn):
     transactions matching the search criteria.
     """
     user = request.auth
+    from planning.models import AnnuitySchedule
     
     # 1. Normalize merchant name for lookup
     merchant_name = payload.merchant_name.strip().upper()
     
-    # 2. Get or create the Merchant (using case-insensitive logic or just matching the normalized name)
+    # 2. Get or create the Merchant
     merchant = Merchant.objects.filter(family=user.family, name=merchant_name).first()
     
+    # Resolve linked schedule if provided
+    linked_schedule = None
+    if payload.linked_schedule_id:
+        linked_schedule = get_object_or_404(AnnuitySchedule, id=payload.linked_schedule_id, family=user.family)
+
     if not merchant:
         # Determine target account if provided
         target_account = None
@@ -41,8 +47,14 @@ def create_and_apply_mapping_rule(request, payload: RuleCreateAndApplyIn):
             family=user.family,
             name=merchant_name,
             default_account=target_account,
-            is_unique_provider=payload.is_unique_provider
+            is_unique_provider=payload.is_unique_provider,
+            linked_schedule=linked_schedule
         )
+    else:
+        # If merchant exists, update linked_schedule if provided
+        if linked_schedule:
+            merchant.linked_schedule = linked_schedule
+            merchant.save(update_fields=['linked_schedule'])
     
     # 3. Create the TransactionMappingRule
     clean_search_text = payload.search_text.strip()
@@ -51,7 +63,8 @@ def create_and_apply_mapping_rule(request, payload: RuleCreateAndApplyIn):
         search_text=clean_search_text,
         institution_id=payload.institution_id,
         min_amount=payload.min_amount,
-        max_amount=payload.max_amount
+        max_amount=payload.max_amount,
+        linked_schedule=linked_schedule
     )
     
     # 4. Query UNPROCESSED transactions for the current family
@@ -122,7 +135,16 @@ def create_and_apply_mapping_rule(request, payload: RuleCreateAndApplyIn):
             updated_count += 1 # We still "updated" it with metadata
         
     # 8. Retrofit already-RECONCILED transactions matching the search text
-    if can_auto_approve:
+    if merchant.linked_schedule:
+        from planning.services import AmortizationReconciliationService
+        # Specialized loan retrofitting for the whole merchant history
+        retro_count = AmortizationReconciliationService.retrofit_historical_payments(
+            merchant=merchant,
+            schedule=merchant.linked_schedule,
+            user=user
+        )
+        updated_count += retro_count
+    elif can_auto_approve:
         reconciled_qs = StagedTransaction.objects.filter(
             statement_import__financial_product__family=user.family,
             status=StagedTransaction.Status.RECONCILED,
@@ -394,7 +416,8 @@ def update_merchant(request, merchant_id: int, payload: MerchantUpdateIn):
         update_merchant_category(
             merchant_id=merchant.id,
             new_account_id=payload.default_account_id,
-            update_history=payload.update_history
+            update_history=payload.update_history,
+            user=user
         )
 
     if payload.clear_linked_schedule:
@@ -407,6 +430,14 @@ def update_merchant(request, merchant_id: int, payload: MerchantUpdateIn):
         )
         merchant.linked_schedule = schedule
         merchant.save(update_fields=['linked_schedule'])
+        # Trigger retrofitting if update_history is requested
+        if payload.update_history:
+            from planning.services import AmortizationReconciliationService
+            AmortizationReconciliationService.retrofit_historical_payments(
+                merchant=merchant,
+                schedule=schedule,
+                user=user
+            )
 
     return {"success": True}
 

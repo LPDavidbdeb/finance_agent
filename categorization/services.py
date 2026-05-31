@@ -97,11 +97,20 @@ def find_matching_rule(
 class SyncMerchantHistoryService:
     @staticmethod
     @transaction.atomic
-    def sync(merchant: Merchant, update_reconciled: bool = False):
+    def sync(merchant: Merchant, update_reconciled: bool = False, user=None):
         """
         Synchronizes historical transactions to match the merchant's current default category.
         Durable Anchoring: Joins via merchant_id Foreign Key.
         """
+        # specialized loan retrofitting (Compound Splitting)
+        if merchant.linked_schedule and update_reconciled and user:
+            from planning.services import AmortizationReconciliationService
+            return AmortizationReconciliationService.retrofit_historical_payments(
+                merchant=merchant,
+                schedule=merchant.linked_schedule,
+                user=user
+            )
+
         if not merchant.default_account:
             return 0
             
@@ -137,7 +146,7 @@ class SyncMerchantHistoryService:
         
         return updated_count
 
-def update_merchant_category(merchant_id: int, new_account_id: int, update_history: bool = False):
+def update_merchant_category(merchant_id: int, new_account_id: int, update_history: bool = False, user=None):
     """
     Updates a merchant's default account and optionally retrofits historical transactions.
     """
@@ -148,6 +157,6 @@ def update_merchant_category(merchant_id: int, new_account_id: int, update_histo
     merchant.save()
     
     if update_history:
-        SyncMerchantHistoryService.sync(merchant, update_reconciled=True)
+        SyncMerchantHistoryService.sync(merchant, update_reconciled=True, user=user)
     
     return True
